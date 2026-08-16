@@ -1,5 +1,5 @@
--- Combined Script: Spain Upgrade + Steal + Burst Place/Open + Instant Pick/Place
--- Place All sorted by real earning value (DB MPS × level × mutation) HIGH → LOW
+-- Combined Script: Spain Upgrade + Steal + Burst Place/Open + Manual Place / Open
+-- + Pick Floor 1 / ALL / by Rarity|Mutation + Place slimes (value desc) + Invis
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -82,8 +82,9 @@ MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(80, 80, 100)
-MainFrame:FindFirstChildOfClass("UIStroke").Thickness = 2
+local mainStroke = Instance.new("UIStroke", MainFrame)
+mainStroke.Color = Color3.fromRGB(80, 80, 100)
+mainStroke.Thickness = 2
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 28)
@@ -139,6 +140,7 @@ local PickupAllBtn = createButton("PickupAllBtn", 310, "Pick Up ALL Floors")
 local PlaceBtn     = createButton("PlaceBtn", 344, "Place All (highest value first)")
 local BoxesBtn     = createButton("BoxesBtn", 378, "Place + Open Spain Boxes (Once)")
 
+-- Side-by-side: Place Boxes | Open Boxes
 local PlaceBoxesBtn = Instance.new("TextButton")
 PlaceBoxesBtn.Name = "PlaceBoxesBtn"
 PlaceBoxesBtn.Size = UDim2.new(0, 106, 0, 30)
@@ -215,6 +217,7 @@ DropList.CanvasSize = UDim2.new(0, 0, 0, #PICK_OPTIONS * 26)
 DropList.ZIndex = 20
 DropList.Parent = MainFrame
 Instance.new("UICorner", DropList).CornerRadius = UDim.new(0, 6)
+
 local listLayout = Instance.new("UIListLayout")
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 listLayout.Parent = DropList
@@ -238,6 +241,7 @@ for i, opt in ipairs(PICK_OPTIONS) do
         DropList.Visible = false
     end)
 end
+
 DropBtn.MouseButton1Click:Connect(function()
     DropList.Visible = not DropList.Visible
 end)
@@ -251,7 +255,7 @@ PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
-print("[AutoFarm] GUI ready — Spain | Instant pick/place | Value sort")
+print("[AutoFarm] GUI — SPAIN ONLY + Place/Open burst buttons")
 
 -- ============================================
 -- STATE
@@ -459,7 +463,7 @@ local function getFloor1OccupiedSlots()
     if not stands then return list end
     for _, stand in ipairs(stands:GetChildren()) do
         if isFloor1(stand.Name) and isOccupied(stand.Name, plotSlimes, liveFolder, stand) then
-            table.insert(list, { name = stand.Name, num = tonumber(stand.Name) or 0 })
+            table.insert(list, { name = stand.Name, num = tonumber(stand.Name) or 0, stand = stand })
         end
     end
     table.sort(list, function(a, b) return a.num < b.num end)
@@ -478,7 +482,7 @@ local function getAllOccupiedSlots()
     for _, stand in ipairs(stands:GetChildren()) do
         local name = stand.Name
         if isOccupied(name, plotSlimes, liveFolder, stand) then
-            table.insert(list, { name = name, num = tonumber(name) or 9999 })
+            table.insert(list, { name = name, num = tonumber(name) or 9999, stand = stand })
         end
     end
     table.sort(list, function(a, b) return a.num < b.num end)
@@ -503,10 +507,15 @@ local function getSlotRarityAndMutation(slotName, stand, plotSlimes, liveFolder)
         if not rarity then rarity = model:GetAttribute("Rarity") or model:GetAttribute("rarity") end
         if not mutation then mutation = model:GetAttribute("mutation") or model:GetAttribute("Mutation") end
         for _, d in ipairs(model:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Name == "Rarity" and d.Text ~= "" and not rarity then
-                local t = d.Text
-                if t == "Player God" then t = "Slime God" end
-                rarity = t
+            if d:IsA("TextLabel") then
+                if d.Name == "Rarity" and d.Text ~= "" and not rarity then
+                    local t = d.Text
+                    if t == "Player God" then t = "Slime God" end
+                    rarity = t
+                end
+                if (d.Name == "Mutation" or d.Name == "mutation") and d.Text ~= "" and not mutation then
+                    mutation = d.Text
+                end
             end
         end
     end
@@ -547,7 +556,7 @@ local function getOccupiedSlotsByFilter(filterName)
                 end
             end
             if match then
-                table.insert(list, { name = name, num = tonumber(name) or 9999 })
+                table.insert(list, { name = name, num = tonumber(name) or 9999, stand = stand })
             end
         end
     end
@@ -576,29 +585,40 @@ local function getAvailableSlots()
     return free
 end
 
+-- Slots that currently hold an unopened Lucky Block
 local function getUnopenedLuckyBlockSlots()
     local data = getData()
     local plotSlimes = (data and data.PlotSlimes) or {}
     local list, seen = {}, {}
+
     local function add(name)
         name = tostring(name)
-        if not seen[name] then seen[name] = true table.insert(list, name) end
+        if not seen[name] then
+            seen[name] = true
+            table.insert(list, name)
+        end
     end
+
     if type(plotSlimes) == "table" then
         for k, entry in pairs(plotSlimes) do
             if type(entry) == "table" then
                 local typ = tostring(entry.Type or entry.type or "")
-                if typ:lower():find("lucky") then add(k) end
+                if typ:lower():find("lucky") then
+                    add(k)
+                end
             end
         end
     end
+
+    -- Fallback: stands with OPEN prompt
     local plot = getMyPlot()
     local stands = plot and plot:FindFirstChild("Stands")
     if stands then
         for _, stand in ipairs(stands:GetChildren()) do
             for _, d in ipairs(stand:GetDescendants()) do
                 if d:IsA("ProximityPrompt") and d.Enabled then
-                    if tostring(d.ActionText or ""):lower():find("open") then
+                    local at = tostring(d.ActionText or ""):lower()
+                    if at:find("open") then
                         add(stand.Name)
                         break
                     end
@@ -606,79 +626,18 @@ local function getUnopenedLuckyBlockSlots()
             end
         end
     end
+
     return list
-end
-
--- ===== REAL EARNING VALUE (from game formula) =====
--- baseMPS from Database.Slimes[id].MoneyPerSecond
--- × level scale ≈ (rebirth + (level^1.05-1)*sqrt(rebirth))  — use rebirth=1 for inventory sort
--- × mutation multi
-local MUTATION_MULTI = {
-    Golden = 2, Diamond = 2.5, Rainbow = 3, Cursed = 4,
-    Volcanic = 2, Toxic = 2, Taco = 3, Cosmic = 3, Slimey = 3,
-}
-
-local function getMutationMulti(mutation, eventMutations)
-    if _Lib and _Lib.Shared and typeof(_Lib.Shared.getMutationMulti) == "function" then
-        local ok, m = pcall(_Lib.Shared.getMutationMulti, mutation, eventMutations)
-        if ok and type(m) == "number" and m > 0 then return m end
-    end
-    local multi = 1
-    if mutation and mutation ~= "None" and mutation ~= "" then
-        multi = MUTATION_MULTI[tostring(mutation)] or multi
-    end
-    if type(eventMutations) == "table" then
-        for _, em in pairs(eventMutations) do
-            local add = MUTATION_MULTI[tostring(em)]
-            if add then multi = multi + (add - 1) end
-        end
-    end
-    return multi
-end
-
-local function getRebirthScaledEarnings(baseMps, level, rebirthMulti)
-    if _Lib and _Lib.Shared and typeof(_Lib.Shared.getRebirthScaledEarnings) == "function" then
-        local ok, v = pcall(_Lib.Shared.getRebirthScaledEarnings, baseMps, level, rebirthMulti)
-        if ok and type(v) == "number" then return v end
-    end
-    level = math.max(1, level or 1)
-    rebirthMulti = math.max(1, rebirthMulti or 1)
-    return math.round(baseMps * (rebirthMulti + (level ^ 1.05 - 1) * math.sqrt(rebirthMulti)))
 end
 
 local function getToolValue(tool)
     if not tool then return 0 end
-
-    local slimeId = tool:GetAttribute("slimeID") or tool:GetAttribute("slimeId")
-        or tool:GetAttribute("id") or tool:GetAttribute("SlimeId")
-    local level = tonumber(tool:GetAttribute("level") or tool:GetAttribute("Level")) or 1
-    local mutation = tool:GetAttribute("mutation") or tool:GetAttribute("Mutation")
-    local eventMut = tool:GetAttribute("event_mutations")
-
-    local baseMps = nil
-    if slimeId and _Lib and _Lib.Database and _Lib.Database.Slimes then
-        local def = _Lib.Database.Slimes[slimeId]
-            or _Lib.Database.Slimes[tostring(slimeId)]
-            or _Lib.Database.Slimes[tonumber(slimeId)]
-        if def then
-            baseMps = tonumber(def.MoneyPerSecond)
-            -- unopened lucky block = 0
-            if def.Type == "Lucky Block" then return 0 end
-        end
-    end
-
-    if not baseMps then
-        baseMps = tonumber(tool:GetAttribute("MoneyPerSecond") or tool:GetAttribute("moneyPerSecond")
-            or tool:GetAttribute("Value") or tool:GetAttribute("value")
-            or tool:GetAttribute("SellPrice") or tool:GetAttribute("sellPrice")) or 0
-    end
-
-    if baseMps <= 0 then return 0 end
-
-    -- Inventory tools: use rebirth multi 1 for relative sort (same for all tools)
-    local scaled = getRebirthScaledEarnings(baseMps, level, 1)
-    local mutMulti = getMutationMulti(mutation, eventMut)
-    return math.round(scaled * mutMulti)
+    local mps = tool:GetAttribute("MoneyPerSecond") or tool:GetAttribute("moneyPerSecond")
+    if mps and tonumber(mps) then return tonumber(mps) end
+    local val = tool:GetAttribute("Value") or tool:GetAttribute("value")
+        or tool:GetAttribute("CashValue") or tool:GetAttribute("SellPrice") or tool:GetAttribute("sellPrice")
+    if val and tonumber(val) then return tonumber(val) end
+    return 0
 end
 
 local function getSlimeTools()
@@ -689,21 +648,15 @@ local function getSlimeTools()
             if item:IsA("Tool") then
                 local uid = item:GetAttribute("slimeUID")
                 if uid ~= nil and not seen[tostring(uid)] then
-                    -- skip pure unopened lucky blocks for slime place-all (optional: still include)
                     seen[tostring(uid)] = true
-                    local val = getToolValue(item)
-                    table.insert(list, { tool = item, uid = uid, value = val })
+                    table.insert(list, { tool = item, uid = uid, value = getToolValue(item) })
                 end
             end
         end
     end
     scan(LocalPlayer:FindFirstChild("Backpack"))
     scan(LocalPlayer.Character)
-
-    -- HIGHEST value first
-    table.sort(list, function(a, b)
-        return (a.value or 0) > (b.value or 0)
-    end)
+    table.sort(list, function(a, b) return (a.value or 0) > (b.value or 0) end)
     return list
 end
 
@@ -747,6 +700,19 @@ local function getSpainLuckyBlockTools()
     return list
 end
 
+local function equipTool(tool)
+    local hum = getHumanoid()
+    local char = LocalPlayer.Character
+    if not hum or not char or not tool then return false end
+    if tool.Parent == char then return true end
+    pcall(function() hum:UnequipTools() end)
+    task.wait(0.05)
+    pcall(function() hum:EquipTool(tool) end)
+    if tool.Parent ~= char then pcall(function() tool.Parent = char end) end
+    task.wait(DELAY_EQUIP)
+    return tool.Parent == char
+end
+
 local function findCloakTool()
     local function scan(bag)
         if not bag then return nil end
@@ -765,6 +731,14 @@ local function setLocalInvisible(on)
     if not char then return end
     for _, part in ipairs(char:GetDescendants()) do
         if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            if on then
+                if part:GetAttribute("_OrigTrans") == nil then part:SetAttribute("_OrigTrans", part.Transparency) end
+                part.Transparency = 1
+            else
+                local orig = part:GetAttribute("_OrigTrans")
+                if orig ~= nil then part.Transparency = orig part:SetAttribute("_OrigTrans", nil) end
+            end
+        elseif part:IsA("Decal") or part:IsA("Texture") then
             if on then
                 if part:GetAttribute("_OrigTrans") == nil then part:SetAttribute("_OrigTrans", part.Transparency) end
                 part.Transparency = 1
@@ -871,6 +845,7 @@ local function getStandInfo(stand)
         sellPrice = stand:GetAttribute("SellPrice") or stand:GetAttribute("sellPrice")
             or (stand:GetAttribute("MoneyPerSecond") and math.round(stand:GetAttribute("MoneyPerSecond") * 4))
     end
+    -- ONLY SPAIN
     if not rarity or rarity ~= "Spain" then return nil end
     if not sellPrice or sellPrice <= 0 then return nil end
     return {
@@ -1020,45 +995,7 @@ local function attemptSteal(prompt)
     return false
 end
 
--- INSTANT pick: fire all at once
-local function doPickBurst(slots)
-    if not PickupRemote or not slots then return 0 end
-    local n = 0
-    for _, slot in ipairs(slots) do
-        if pcall(function() PickupRemote:FireServer(slot.name) end) then
-            n += 1
-        end
-    end
-    return n
-end
-
--- INSTANT place: highest value first, fire all at once (no equip)
-local function doPlaceBurst()
-    if not PlaceRemote then return 0 end
-    local tools = getSlimeTools() -- already sorted high → low
-    local slots = getAvailableSlots() -- low slot num first
-    if #tools == 0 or #slots == 0 then return 0 end
-
-    local total = math.min(#tools, #slots)
-    local placed = 0
-
-    -- Debug order
-    for i = 1, math.min(5, total) do
-        print(string.format("[PlaceOrder] #%d value=%s uid=%s → slot %s",
-            i, tostring(tools[i].value), tostring(tools[i].uid), slots[i].name))
-    end
-
-    for i = 1, total do
-        local entry, slot = tools[i], slots[i]
-        if entry and entry.uid and slot then
-            if pcall(function() PlaceRemote:FireServer(slot.name, entry.uid) end) then
-                placed += 1
-            end
-        end
-    end
-    return placed
-end
-
+-- BURST place all Spain boxes (no open)
 local function doPlaceBoxesOnly()
     if not PlaceRemote then return 0 end
     local boxes = getSpainLuckyBlockTools()
@@ -1077,6 +1014,7 @@ local function doPlaceBoxesOnly()
     return placed
 end
 
+-- BURST open all unopened lucky blocks on plot
 local function doOpenBoxesOnly()
     if not OpenRemote then return 0 end
     local slots = getUnopenedLuckyBlockSlots()
@@ -1089,6 +1027,7 @@ local function doOpenBoxesOnly()
     return opened
 end
 
+-- BURST place + open Spain boxes
 local function doPlaceAndOpenBoxes()
     if not PlaceRemote or not OpenRemote then return 0, 0 end
     local boxes = getSpainLuckyBlockTools()
@@ -1116,9 +1055,14 @@ end
 PickupBtn.MouseButton1Click:Connect(function()
     if actionBusy or not PickupRemote then return end
     actionBusy = true
-    PickupBtn.Text = "..."
-    local n = doPickBurst(getFloor1OccupiedSlots())
-    StatusLabel.Text = string.format("Picked %d Floor 1 (instant)", n)
+    PickupBtn.Text = "Picking..."
+    local slots = getFloor1OccupiedSlots()
+    local n = 0
+    for _, slot in ipairs(slots) do
+        if pcall(function() PickupRemote:FireServer(slot.name) end) then n += 1 end
+        task.wait(DELAY_PICK)
+    end
+    StatusLabel.Text = string.format("Picked %d from Floor 1", n)
     PickupBtn.Text = "Pick Up Floor 1 (1-10)"
     actionBusy = false
 end)
@@ -1126,9 +1070,14 @@ end)
 PickupAllBtn.MouseButton1Click:Connect(function()
     if actionBusy or not PickupRemote then return end
     actionBusy = true
-    PickupAllBtn.Text = "..."
-    local n = doPickBurst(getAllOccupiedSlots())
-    StatusLabel.Text = string.format("Picked %d ALL floors (instant)", n)
+    PickupAllBtn.Text = "Picking ALL..."
+    local slots = getAllOccupiedSlots()
+    local n = 0
+    for _, slot in ipairs(slots) do
+        if pcall(function() PickupRemote:FireServer(slot.name) end) then n += 1 end
+        task.wait(DELAY_PICK)
+    end
+    StatusLabel.Text = string.format("Picked %d from ALL floors", n)
     PickupAllBtn.Text = "Pick Up ALL Floors"
     actionBusy = false
 end)
@@ -1140,8 +1089,18 @@ PickRarityBtn.MouseButton1Click:Connect(function()
     PickRarityBtn.Text = "..."
     local filter = selectedPickOption
     local slots = getOccupiedSlotsByFilter(filter)
-    local n = doPickBurst(slots)
-    StatusLabel.Text = string.format("Picked %d × %s (instant)", n, filter)
+    if #slots == 0 then
+        StatusLabel.Text = string.format("No %s slimes on any floor", filter)
+        PickRarityBtn.Text = "Pick"
+        actionBusy = false
+        return
+    end
+    local n = 0
+    for _, slot in ipairs(slots) do
+        if pcall(function() PickupRemote:FireServer(slot.name) end) then n += 1 end
+        task.wait(DELAY_PICK)
+    end
+    StatusLabel.Text = string.format("Picked %d × %s (all floors)", n, filter)
     PickRarityBtn.Text = "Pick"
     actionBusy = false
 end)
@@ -1149,9 +1108,37 @@ end)
 PlaceBtn.MouseButton1Click:Connect(function()
     if actionBusy or not PlaceRemote then return end
     actionBusy = true
-    PlaceBtn.Text = "..."
-    local n = doPlaceBurst()
-    StatusLabel.Text = string.format("Placed %d (highest value first, instant)", n)
+    PlaceBtn.Text = "Placing..."
+    local tools = getSlimeTools()
+    local slots = getAvailableSlots()
+    if #tools == 0 or #slots == 0 then
+        StatusLabel.Text = #tools == 0 and "No slime tools" or "No free slots"
+        PlaceBtn.Text = "Place All (highest value first)"
+        actionBusy = false
+        return
+    end
+    local total = math.min(#tools, #slots)
+    local placed = 0
+    for i = 1, total do
+        local entry, slot = tools[i], slots[i]
+        if not entry.tool or not entry.tool.Parent then
+            for _, t in ipairs(getSlimeTools()) do
+                if tostring(t.uid) == tostring(entry.uid) then entry = t break end
+            end
+        end
+        local data = getData()
+        local plotSlimes = (data and data.PlotSlimes) or {}
+        if not isOccupied(slot.name, plotSlimes, getPlayerSlimesFolder(), slot.stand) then
+            if entry.tool and equipTool(entry.tool) then
+                if pcall(function() PlaceRemote:FireServer(slot.name, entry.uid) end) then placed += 1 end
+                task.wait(DELAY_PLACE)
+            end
+        end
+        task.wait(DELAY_NEXT)
+    end
+    local hum = getHumanoid()
+    if hum then pcall(function() hum:UnequipTools() end) end
+    StatusLabel.Text = string.format("Placed %d (highest value first)", placed)
     PlaceBtn.Text = "Place All (highest value first)"
     actionBusy = false
 end)
@@ -1159,7 +1146,7 @@ end)
 BoxesBtn.MouseButton1Click:Connect(function()
     if actionBusy then return end
     actionBusy = true
-    BoxesBtn.Text = "..."
+    BoxesBtn.Text = "Burst..."
     local p, o = doPlaceAndOpenBoxes()
     StatusLabel.Text = string.format("Burst — Placed %d | Opened %d Spain", p, o)
     BoxesBtn.Text = "Place + Open Spain Boxes (Once)"
@@ -1323,7 +1310,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] Spain | Instant pick/place burst | Value = DB MPS × level × mutation")
-print("Place order: highest earning first → lowest slot numbers")
+print("[AutoFarm] SPAIN ONLY upgrade + steal + place/open")
+print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
