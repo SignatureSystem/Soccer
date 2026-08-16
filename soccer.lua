@@ -1,5 +1,5 @@
--- Combined Script: Spain Upgrade + Steal + Burst Place/Open + Manual Place / Open
--- + Pick Floor 1 / ALL / by Rarity|Mutation + Place slimes (value desc) + Invis
+-- Combined Script: CHEAPEST-FIRST Spain Upgrade + FILTERED Lucky Block Collector + Burst Place/Open + Manual Place / Open
+-- + Pick Floor 1 / ALL + dedicated Place-by-Mutation dropdown + FIXED Place button + CURRENT INDIVIDUAL earnings desc + Invis
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -53,6 +53,69 @@ local PICK_OPTIONS = {}
 for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
 for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
 
+-- Auto Upgrade mutation filter.
+-- "All" = every mutation / no-mutation slime that is otherwise eligible.
+-- "Common" = no base mutation AND no event mutation.
+local UPGRADE_MUTATION_OPTIONS = { "All", "Common" }
+for _, m in ipairs(ALL_MUTATIONS) do
+    table.insert(UPGRADE_MUTATION_OPTIONS, m)
+end
+
+local selectedUpgradeMutation = "All"
+
+-- Exact Lucky Block types found in this game's slime database.
+-- The dropdown uses display labels; matching uses exact live model names.
+local LUCKY_BLOCK_OPTIONS = {
+    "All",
+    "Common",
+    "Water",
+    "Rare",
+    "Volcanic",
+    "Epic",
+    "Ghost",
+    "Legendary",
+    "67",
+    "Mythic",
+    "Poison",
+    "Secret",
+    "Cosmic",
+    "Soccer God",
+    "Rainbow",
+    "Exclusive",
+    "Limited",
+    "OG",
+    "Champions",
+    "Spain",
+}
+
+local LUCKY_BLOCK_MODEL_NAMES = {
+    ["Common"] = { ["Common Lucky Block"] = true },
+    ["Water"] = { ["Water Lucky Block"] = true },
+    ["Rare"] = { ["Rare Lucky Block"] = true },
+    ["Volcanic"] = { ["Volcanic Lucky Block"] = true },
+    ["Epic"] = { ["Epic Lucky Block"] = true },
+    ["Ghost"] = { ["Ghost Lucky Block"] = true },
+    ["Legendary"] = { ["Legendary Lucky Block"] = true },
+    ["67"] = { ["67 Lucky Block"] = true },
+    ["Mythic"] = { ["Mythic Lucky Block"] = true },
+    ["Poison"] = { ["Poison Lucky Block"] = true },
+    ["Secret"] = { ["Secret Lucky Block"] = true },
+    ["Cosmic"] = { ["Cosmic Lucky Block"] = true },
+    -- Internal database name is Slime God Lucky Block; the game displays Soccer God.
+    ["Soccer God"] = {
+        ["Slime God Lucky Block"] = true,
+        ["Soccer God Lucky Block"] = true,
+    },
+    ["Rainbow"] = { ["Rainbow Lucky Block"] = true },
+    ["Exclusive"] = { ["Exclusive Lucky Block"] = true },
+    ["Limited"] = { ["Limited Lucky Block"] = true },
+    ["OG"] = { ["OG Lucky Block"] = true },
+    ["Champions"] = { ["Champions Lucky Block"] = true },
+    ["Spain"] = { ["Spain Lucky Block"] = true },
+}
+
+local selectedLuckyBlockType = "Spain"
+
 -- ============================================
 -- GUI
 -- ============================================
@@ -73,8 +136,8 @@ pcall(function() ScreenGui.Parent = PlayerGui or CoreGui end)
 if not ScreenGui.Parent then ScreenGui.Parent = CoreGui end
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 250, 0, 760)
-MainFrame.Position = UDim2.new(0, 20, 0.5, -380)
+MainFrame.Size = UDim2.new(0, 250, 0, 794)
+MainFrame.Position = UDim2.new(0, 20, 0.5, -397)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BackgroundTransparency = 0.05
 MainFrame.BorderSizePixel = 0
@@ -116,7 +179,7 @@ end
 
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0, 230, 0, 44)
-StatusLabel.Position = UDim2.new(0, 10, 0, 708)
+StatusLabel.Position = UDim2.new(0, 10, 0, 742)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Text = "Loading..."
 StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
@@ -129,22 +192,168 @@ StatusLabel.Parent = MainFrame
 
 local CollectBtn   = createButton("CollectToggle", 30, "Auto Collect: OFF")
 local UpgradeBtn   = createButton("UpgradeToggle", 64, "Auto Upgrade: OFF")
-local LuckyBtn     = createButton("LuckyToggle", 98, "Lucky Block: OFF")
-local RebirthBtn   = createButton("RebirthToggle", 132, "Auto Rebirth: OFF")
-local JumpBtn      = createButton("JumpToggle", 166, "Auto +10 Jump: OFF")
-local BoxesAutoBtn = createButton("BoxesAutoToggle", 200, "Auto Place+Open Boxes: OFF")
-local InvisBtn     = createButton("InvisToggle", 234, "Invis Cloak: OFF")
 
-local PickupBtn    = createButton("PickupBtn", 276, "Pick Up Floor 1 (1-10)")
-local PickupAllBtn = createButton("PickupAllBtn", 310, "Pick Up ALL Floors")
-local PlaceBtn     = createButton("PlaceBtn", 344, "Place All (highest value first)")
-local BoxesBtn     = createButton("BoxesBtn", 378, "Place + Open Spain Boxes (Once)")
+-- ============================================
+-- AUTO UPGRADE MUTATION FILTER
+-- This selection is read live by the running Auto Upgrade loop.
+-- You can change it before OR after enabling Auto Upgrade.
+-- ============================================
+
+local UpgradeMutationDropBtn = Instance.new("TextButton")
+UpgradeMutationDropBtn.Name = "UpgradeMutationDrop"
+UpgradeMutationDropBtn.Size = UDim2.new(0, 220, 0, 30)
+UpgradeMutationDropBtn.Position = UDim2.new(0, 15, 0, 98)
+UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
+UpgradeMutationDropBtn.BorderSizePixel = 0
+UpgradeMutationDropBtn.Text = "Upgrade Mutation: ▼  All"
+UpgradeMutationDropBtn.TextColor3 = Color3.fromRGB(150, 205, 255)
+UpgradeMutationDropBtn.TextSize = 11
+UpgradeMutationDropBtn.Font = Enum.Font.GothamBold
+UpgradeMutationDropBtn.ZIndex = 50
+UpgradeMutationDropBtn.Parent = MainFrame
+Instance.new("UICorner", UpgradeMutationDropBtn).CornerRadius = UDim.new(0, 8)
+
+local UpgradeMutationDropList = Instance.new("ScrollingFrame")
+UpgradeMutationDropList.Name = "UpgradeMutationDropList"
+UpgradeMutationDropList.Size = UDim2.new(0, 220, 0, 180)
+UpgradeMutationDropList.Position = UDim2.new(0, 15, 0, 130)
+UpgradeMutationDropList.BackgroundColor3 = Color3.fromRGB(20, 28, 40)
+UpgradeMutationDropList.BorderSizePixel = 0
+UpgradeMutationDropList.Visible = false
+UpgradeMutationDropList.ScrollBarThickness = 4
+UpgradeMutationDropList.CanvasSize =
+    UDim2.new(0, 0, 0, #UPGRADE_MUTATION_OPTIONS * 26)
+UpgradeMutationDropList.ZIndex = 60
+UpgradeMutationDropList.Parent = MainFrame
+Instance.new("UICorner", UpgradeMutationDropList).CornerRadius = UDim.new(0, 7)
+
+local upgradeMutationListLayout = Instance.new("UIListLayout")
+upgradeMutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+upgradeMutationListLayout.Parent = UpgradeMutationDropList
+
+local function upgradeMutationDisplayName(value)
+    if value == "Common" then
+        return "Common (No Mutation)"
+    end
+    return tostring(value)
+end
+
+for i, mutationName in ipairs(UPGRADE_MUTATION_OPTIONS) do
+    local item = Instance.new("TextButton")
+    item.Size = UDim2.new(1, -4, 0, 24)
+    item.BackgroundColor3 = Color3.fromRGB(30, 42, 58)
+    item.BorderSizePixel = 0
+    item.Text = "  " .. upgradeMutationDisplayName(mutationName)
+    item.TextColor3 = Color3.fromRGB(220, 232, 245)
+    item.TextSize = 11
+    item.Font = Enum.Font.Gotham
+    item.TextXAlignment = Enum.TextXAlignment.Left
+    item.LayoutOrder = i
+    item.ZIndex = 61
+    item.Parent = UpgradeMutationDropList
+
+    item.MouseButton1Click:Connect(function()
+        selectedUpgradeMutation = mutationName
+        UpgradeMutationDropBtn.Text =
+            "Upgrade Mutation: ▼  "
+            .. upgradeMutationDisplayName(mutationName)
+
+        UpgradeMutationDropList.Visible = false
+
+        StatusLabel.Text =
+            "Auto Upgrade "
+            .. (upgradeEnabled and "ON" or "OFF")
+            .. " | Mutation: "
+            .. upgradeMutationDisplayName(mutationName)
+    end)
+end
+
+UpgradeMutationDropBtn.MouseButton1Click:Connect(function()
+    UpgradeMutationDropList.Visible =
+        not UpgradeMutationDropList.Visible
+end)
+
+local LuckyBtn     = createButton("LuckyToggle", 132, "Lucky Block: OFF")
+
+-- ============================================
+-- LUCKY BLOCK TYPE FILTER
+-- Change this before or while Lucky Block collector is ON.
+-- ============================================
+local LuckyTypeDropBtn = Instance.new("TextButton")
+LuckyTypeDropBtn.Name = "LuckyTypeDrop"
+LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
+LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
+LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
+LuckyTypeDropBtn.BorderSizePixel = 0
+LuckyTypeDropBtn.Text = "Lucky Type: ▼  Spain"
+LuckyTypeDropBtn.TextColor3 = Color3.fromRGB(255, 214, 125)
+LuckyTypeDropBtn.TextSize = 11
+LuckyTypeDropBtn.Font = Enum.Font.GothamBold
+LuckyTypeDropBtn.ZIndex = 70
+LuckyTypeDropBtn.Parent = MainFrame
+Instance.new("UICorner", LuckyTypeDropBtn).CornerRadius = UDim.new(0, 8)
+
+local LuckyTypeDropList = Instance.new("ScrollingFrame")
+LuckyTypeDropList.Name = "LuckyTypeDropList"
+LuckyTypeDropList.Size = UDim2.new(0, 220, 0, 190)
+LuckyTypeDropList.Position = UDim2.new(0, 15, 0, 198)
+LuckyTypeDropList.BackgroundColor3 = Color3.fromRGB(35, 28, 18)
+LuckyTypeDropList.BorderSizePixel = 0
+LuckyTypeDropList.Visible = false
+LuckyTypeDropList.ScrollBarThickness = 4
+LuckyTypeDropList.CanvasSize = UDim2.new(0, 0, 0, #LUCKY_BLOCK_OPTIONS * 26)
+LuckyTypeDropList.ZIndex = 80
+LuckyTypeDropList.Parent = MainFrame
+Instance.new("UICorner", LuckyTypeDropList).CornerRadius = UDim.new(0, 7)
+
+local luckyTypeListLayout = Instance.new("UIListLayout")
+luckyTypeListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+luckyTypeListLayout.Parent = LuckyTypeDropList
+
+for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
+    local item = Instance.new("TextButton")
+    item.Size = UDim2.new(1, -4, 0, 24)
+    item.BackgroundColor3 = Color3.fromRGB(52, 40, 23)
+    item.BorderSizePixel = 0
+    item.Text = "  " .. boxType
+    item.TextColor3 = Color3.fromRGB(244, 229, 195)
+    item.TextSize = 11
+    item.Font = Enum.Font.Gotham
+    item.TextXAlignment = Enum.TextXAlignment.Left
+    item.LayoutOrder = i
+    item.ZIndex = 81
+    item.Parent = LuckyTypeDropList
+
+    item.MouseButton1Click:Connect(function()
+        selectedLuckyBlockType = boxType
+        LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. boxType
+        LuckyTypeDropList.Visible = false
+
+        StatusLabel.Text =
+            "Lucky Type selected: " .. boxType
+    end)
+end
+
+LuckyTypeDropBtn.MouseButton1Click:Connect(function()
+    UpgradeMutationDropList.Visible = false
+    LuckyTypeDropList.Visible = not LuckyTypeDropList.Visible
+end)
+
+local RebirthBtn   = createButton("RebirthToggle", 200, "Auto Rebirth: OFF")
+local JumpBtn      = createButton("JumpToggle", 234, "Auto +10 Jump: OFF")
+local BoxesAutoBtn = createButton("BoxesAutoToggle", 268, "Auto Place+Open Boxes: OFF")
+local InvisBtn     = createButton("InvisToggle", 302, "Invis Cloak: OFF")
+
+local PickupBtn    = createButton("PickupBtn", 344, "Pick Up Floor 1 (1-10)")
+local PickupAllBtn = createButton("PickupAllBtn", 378, "Pick Up ALL Floors")
+local PlaceBtn     = createButton("PlaceBtn", 412, "Place Slimes (CURRENT CASH first)")
+local BoxesBtn     = createButton("BoxesBtn", 446, "Place + Open Spain Boxes (Once)")
 
 -- Side-by-side: Place Boxes | Open Boxes
 local PlaceBoxesBtn = Instance.new("TextButton")
 PlaceBoxesBtn.Name = "PlaceBoxesBtn"
 PlaceBoxesBtn.Size = UDim2.new(0, 106, 0, 30)
-PlaceBoxesBtn.Position = UDim2.new(0, 15, 0, 412)
+PlaceBoxesBtn.Position = UDim2.new(0, 15, 0, 480)
 PlaceBoxesBtn.BackgroundColor3 = Color3.fromRGB(40, 55, 40)
 PlaceBoxesBtn.BorderSizePixel = 0
 PlaceBoxesBtn.Text = "Place Boxes"
@@ -157,7 +366,7 @@ Instance.new("UICorner", PlaceBoxesBtn).CornerRadius = UDim.new(0, 8)
 local OpenBoxesBtn = Instance.new("TextButton")
 OpenBoxesBtn.Name = "OpenBoxesBtn"
 OpenBoxesBtn.Size = UDim2.new(0, 106, 0, 30)
-OpenBoxesBtn.Position = UDim2.new(0, 129, 0, 412)
+OpenBoxesBtn.Position = UDim2.new(0, 129, 0, 480)
 OpenBoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 45, 25)
 OpenBoxesBtn.BorderSizePixel = 0
 OpenBoxesBtn.Text = "Open Boxes"
@@ -169,9 +378,9 @@ Instance.new("UICorner", OpenBoxesBtn).CornerRadius = UDim.new(0, 8)
 
 local RarityLabel = Instance.new("TextLabel")
 RarityLabel.Size = UDim2.new(0, 220, 0, 16)
-RarityLabel.Position = UDim2.new(0, 15, 0, 450)
+RarityLabel.Position = UDim2.new(0, 15, 0, 518)
 RarityLabel.BackgroundTransparency = 1
-RarityLabel.Text = "Pick by Rarity / Mutation:"
+RarityLabel.Text = "Pick by Rarity / Mutation (Common = None):"
 RarityLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
 RarityLabel.TextSize = 11
 RarityLabel.Font = Enum.Font.Gotham
@@ -182,7 +391,7 @@ local selectedPickOption = "Spain"
 local DropBtn = Instance.new("TextButton")
 DropBtn.Name = "RarityDrop"
 DropBtn.Size = UDim2.new(0, 140, 0, 28)
-DropBtn.Position = UDim2.new(0, 15, 0, 468)
+DropBtn.Position = UDim2.new(0, 15, 0, 536)
 DropBtn.BackgroundColor3 = Color3.fromRGB(35, 40, 55)
 DropBtn.BorderSizePixel = 0
 DropBtn.Text = "▼  " .. selectedPickOption
@@ -195,7 +404,7 @@ Instance.new("UICorner", DropBtn).CornerRadius = UDim.new(0, 6)
 local PickRarityBtn = Instance.new("TextButton")
 PickRarityBtn.Name = "PickRarityBtn"
 PickRarityBtn.Size = UDim2.new(0, 72, 0, 28)
-PickRarityBtn.Position = UDim2.new(0, 163, 0, 468)
+PickRarityBtn.Position = UDim2.new(0, 163, 0, 536)
 PickRarityBtn.BackgroundColor3 = Color3.fromRGB(50, 40, 80)
 PickRarityBtn.BorderSizePixel = 0
 PickRarityBtn.Text = "Pick"
@@ -208,7 +417,7 @@ Instance.new("UICorner", PickRarityBtn).CornerRadius = UDim.new(0, 6)
 local DropList = Instance.new("ScrollingFrame")
 DropList.Name = "DropList"
 DropList.Size = UDim2.new(0, 220, 0, 140)
-DropList.Position = UDim2.new(0, 15, 0, 500)
+DropList.Position = UDim2.new(0, 15, 0, 568)
 DropList.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
 DropList.BorderSizePixel = 0
 DropList.Visible = false
@@ -227,7 +436,7 @@ for i, opt in ipairs(PICK_OPTIONS) do
     item.Size = UDim2.new(1, -4, 0, 24)
     item.BackgroundColor3 = Color3.fromRGB(35, 38, 50)
     item.BorderSizePixel = 0
-    item.Text = "  " .. opt
+    item.Text = (opt == "Common") and "  Common (No Mutation)" or ("  " .. opt)
     item.TextColor3 = Color3.fromRGB(220, 220, 230)
     item.TextSize = 12
     item.Font = Enum.Font.Gotham
@@ -242,8 +451,107 @@ for i, opt in ipairs(PICK_OPTIONS) do
     end)
 end
 
+local MutationDropList
+
 DropBtn.MouseButton1Click:Connect(function()
+    if MutationDropList then
+        MutationDropList.Visible = false
+    end
+    if UpgradeMutationDropList then
+        UpgradeMutationDropList.Visible = false
+    end
+    LuckyTypeDropList.Visible = false
     DropList.Visible = not DropList.Visible
+end)
+
+-- ============================================
+-- DEDICATED PICK BY MUTATION
+-- Example: select Cursed -> Pick Up
+--          picks every currently placed Cursed slime on all floors.
+-- ============================================
+
+local MutationLabel = Instance.new("TextLabel")
+MutationLabel.Size = UDim2.new(0, 220, 0, 16)
+MutationLabel.Position = UDim2.new(0, 15, 0, 574)
+MutationLabel.BackgroundTransparency = 1
+MutationLabel.Text = "Place by Mutation:"
+MutationLabel.TextColor3 = Color3.fromRGB(210, 180, 255)
+MutationLabel.TextSize = 11
+MutationLabel.Font = Enum.Font.Gotham
+MutationLabel.TextXAlignment = Enum.TextXAlignment.Left
+MutationLabel.Parent = MainFrame
+
+local selectedMutation = "Cursed"
+
+local MutationDropBtn = Instance.new("TextButton")
+MutationDropBtn.Name = "MutationDrop"
+MutationDropBtn.Size = UDim2.new(0, 140, 0, 28)
+MutationDropBtn.Position = UDim2.new(0, 15, 0, 592)
+MutationDropBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 65)
+MutationDropBtn.BorderSizePixel = 0
+MutationDropBtn.Text = "▼  " .. selectedMutation
+MutationDropBtn.TextColor3 = Color3.fromRGB(225, 205, 255)
+MutationDropBtn.TextSize = 12
+MutationDropBtn.Font = Enum.Font.GothamBold
+MutationDropBtn.Parent = MainFrame
+Instance.new("UICorner", MutationDropBtn).CornerRadius = UDim.new(0, 6)
+
+local MutationPickBtn = Instance.new("TextButton")
+MutationPickBtn.Name = "MutationPlaceBtn"
+MutationPickBtn.Size = UDim2.new(0, 72, 0, 28)
+MutationPickBtn.Position = UDim2.new(0, 163, 0, 592)
+MutationPickBtn.BackgroundColor3 = Color3.fromRGB(65, 35, 85)
+MutationPickBtn.BorderSizePixel = 0
+MutationPickBtn.Text = "Place"
+MutationPickBtn.TextColor3 = Color3.fromRGB(225, 180, 255)
+MutationPickBtn.TextSize = 12
+MutationPickBtn.Font = Enum.Font.GothamBold
+MutationPickBtn.Parent = MainFrame
+Instance.new("UICorner", MutationPickBtn).CornerRadius = UDim.new(0, 6)
+
+MutationDropList = Instance.new("ScrollingFrame")
+MutationDropList.Name = "MutationDropList"
+MutationDropList.Size = UDim2.new(0, 220, 0, 140)
+MutationDropList.Position = UDim2.new(0, 15, 0, 624)
+MutationDropList.BackgroundColor3 = Color3.fromRGB(25, 20, 35)
+MutationDropList.BorderSizePixel = 0
+MutationDropList.Visible = false
+MutationDropList.ScrollBarThickness = 4
+MutationDropList.CanvasSize = UDim2.new(0, 0, 0, #ALL_MUTATIONS * 26)
+MutationDropList.ZIndex = 40
+MutationDropList.Parent = MainFrame
+Instance.new("UICorner", MutationDropList).CornerRadius = UDim.new(0, 6)
+
+local mutationListLayout = Instance.new("UIListLayout")
+mutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+mutationListLayout.Parent = MutationDropList
+
+for i, mutationName in ipairs(ALL_MUTATIONS) do
+    local item = Instance.new("TextButton")
+    item.Size = UDim2.new(1, -4, 0, 24)
+    item.BackgroundColor3 = Color3.fromRGB(42, 32, 55)
+    item.BorderSizePixel = 0
+    item.Text = "  " .. mutationName
+    item.TextColor3 = Color3.fromRGB(230, 220, 240)
+    item.TextSize = 12
+    item.Font = Enum.Font.Gotham
+    item.TextXAlignment = Enum.TextXAlignment.Left
+    item.LayoutOrder = i
+    item.ZIndex = 41
+    item.Parent = MutationDropList
+
+    item.MouseButton1Click:Connect(function()
+        selectedMutation = mutationName
+        MutationDropBtn.Text = "▼  " .. mutationName
+        MutationDropList.Visible = false
+    end)
+end
+
+MutationDropBtn.MouseButton1Click:Connect(function()
+    DropList.Visible = false
+    UpgradeMutationDropList.Visible = false
+    LuckyTypeDropList.Visible = false
+    MutationDropList.Visible = not MutationDropList.Visible
 end)
 
 PickupBtn.TextColor3 = Color3.fromRGB(180, 180, 255)
@@ -270,6 +578,61 @@ local _Lib = nil
 local CollectRemote, UpgradeRemote, RebirthRemote, JumpUpgradeRemote
 local PlaceRemote, PickupRemote, OpenRemote
 
+-- Robust exact RemoteEvent resolver.
+-- The old Place button silently returned when PlaceRemote had not been cached yet.
+local function ResolveRemoteEventExact(name)
+    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteEvent") and v.Name == name then
+            return v
+        end
+    end
+
+    return nil
+end
+
+local function ResolvePlaceRemote()
+    if PlaceRemote
+        and PlaceRemote.Parent
+        and PlaceRemote:IsA("RemoteEvent")
+    then
+        return PlaceRemote
+    end
+
+    PlaceRemote = ResolveRemoteEventExact("Place Slime")
+    return PlaceRemote
+end
+
+local function ResolveUpgradeRemote()
+    if UpgradeRemote
+        and UpgradeRemote.Parent
+        and UpgradeRemote:IsA("RemoteEvent")
+    then
+        return UpgradeRemote
+    end
+
+    -- Prefer exact name first.
+    UpgradeRemote = ResolveRemoteEventExact("Upgrade Slime")
+
+    -- Fallback for builds where the name contains extra text.
+    if not UpgradeRemote then
+        for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+            if v:IsA("RemoteEvent")
+                and string.find(
+                    string.lower(v.Name),
+                    "upgrade slime",
+                    1,
+                    true
+                )
+            then
+                UpgradeRemote = v
+                break
+            end
+        end
+    end
+
+    return UpgradeRemote
+end
+
 local function setCollectState(on)
     collectEnabled = on
     CollectBtn.Text = on and "Auto Collect: ON" or "Auto Collect: OFF"
@@ -281,6 +644,12 @@ local function setUpgradeState(on)
     UpgradeBtn.Text = on and "Auto Upgrade: ON" or "Auto Upgrade: OFF"
     UpgradeBtn.TextColor3 = on and Color3.fromRGB(80, 180, 255) or Color3.fromRGB(255, 90, 90)
     UpgradeBtn.BackgroundColor3 = on and Color3.fromRGB(25, 45, 70) or Color3.fromRGB(40, 40, 50)
+
+    StatusLabel.Text =
+        "Auto Upgrade "
+        .. (on and "ON" or "OFF")
+        .. " | Mutation: "
+        .. upgradeMutationDisplayName(selectedUpgradeMutation)
 end
 local function setLuckyState(on)
     luckyEnabled = on
@@ -289,7 +658,8 @@ local function setLuckyState(on)
         LuckyBtn.Text = "Lucky Block: ON"
         LuckyBtn.TextColor3 = Color3.fromRGB(255, 200, 80)
         LuckyBtn.BackgroundColor3 = Color3.fromRGB(60, 45, 20)
-        StatusLabel.Text = "Lucky Block: Spain only..."
+        StatusLabel.Text =
+            "Lucky Block: ON | Type: " .. selectedLuckyBlockType
     else
         LuckyBtn.Text = "Lucky Block: OFF"
         LuckyBtn.TextColor3 = Color3.fromRGB(255, 90, 90)
@@ -323,7 +693,24 @@ local function setInvisState(on)
 end
 
 CollectBtn.MouseButton1Click:Connect(function() setCollectState(not collectEnabled) end)
-UpgradeBtn.MouseButton1Click:Connect(function() setUpgradeState(not upgradeEnabled) end)
+UpgradeBtn.MouseButton1Click:Connect(function()
+    setUpgradeState(not upgradeEnabled)
+
+    if upgradeEnabled then
+        local remote = ResolveUpgradeRemote()
+
+        if remote then
+            print(
+                "[AutoUpgrade] ON | Filter:",
+                upgradeMutationDisplayName(selectedUpgradeMutation),
+                "| Remote:",
+                remote:GetFullName()
+            )
+        else
+            warn('[AutoUpgrade] "Upgrade Slime" RemoteEvent not found')
+        end
+    end
+end)
 LuckyBtn.MouseButton1Click:Connect(function() setLuckyState(not luckyEnabled) end)
 RebirthBtn.MouseButton1Click:Connect(function() setRebirthState(not rebirthEnabled) end)
 JumpBtn.MouseButton1Click:Connect(function() setJumpUpgradeState(not jumpUpgradeEnabled) end)
@@ -354,10 +741,10 @@ task.spawn(function()
     end
 
     CollectRemote     = findRemote("Collect Earnings")
-    UpgradeRemote     = findRemote("Upgrade Slime")
+    UpgradeRemote     = ResolveUpgradeRemote()
     RebirthRemote     = findRemote("Rebirth")
     JumpUpgradeRemote = findRemote("Buy Speed Upgrade")
-    PlaceRemote       = findExact("Place Slime")
+    PlaceRemote       = ResolvePlaceRemote()
     PickupRemote      = findExact("Pickup Slime")
     OpenRemote        = findExact("Open Lucky Block")
 end)
@@ -392,9 +779,47 @@ local function getJumpData()
 end
 
 local function getData()
-    if not _Lib or not _Lib.Data then return nil end
-    local ok, data = pcall(function() return _Lib.Data:Get() end)
-    return ok and data or nil
+    -- Preferred source: game's local data library.
+    if _Lib and _Lib.Data then
+        local ok, data = pcall(function()
+            return _Lib.Data:Get()
+        end)
+
+        if ok and data then
+            return data
+        end
+    end
+
+    -- Same fallback used by the game's own inventory / Equip Best code.
+    local sharedModules = ReplicatedStorage:FindFirstChild("SharedModules")
+    local network = sharedModules and sharedModules:FindFirstChild("Network")
+    local remotes = network and network:FindFirstChild("Remotes")
+    local dataGet = remotes and remotes:FindFirstChild("Data: Get")
+
+    if dataGet and dataGet:IsA("RemoteFunction") then
+        local ok, data = pcall(function()
+            return dataGet:InvokeServer()
+        end)
+
+        if ok and data then
+            return data
+        end
+    end
+
+    -- Broad fallback in case folder names differ in this saved build.
+    local candidate = ReplicatedStorage:FindFirstChild("Data: Get", true)
+
+    if candidate and candidate:IsA("RemoteFunction") then
+        local ok, data = pcall(function()
+            return candidate:InvokeServer()
+        end)
+
+        if ok and data then
+            return data
+        end
+    end
+
+    return nil
 end
 
 local function getBaseLevel(data)
@@ -491,21 +916,64 @@ end
 
 local function getSlotRarityAndMutation(slotName, stand, plotSlimes, liveFolder)
     local rarity, mutation = nil, nil
+    local hasEventMutation = false
+    local eventMutationNames = {}
+
+    local function addEventMutationName(value)
+        if value == nil then return end
+
+        local s = tostring(value)
+        local lower = string.lower(s)
+
+        if s ~= ""
+            and lower ~= "none"
+            and s ~= "{}"
+        then
+            eventMutationNames[lower] = true
+            hasEventMutation = true
+        end
+    end
+
     if type(plotSlimes) == "table" then
         local entry = plotSlimes[slotName] or plotSlimes[tostring(slotName)] or plotSlimes[tonumber(slotName)]
+
         if entry then
             rarity = entry.Rarity or entry.rarity
             mutation = entry.mutation or entry.Mutation
+
+            -- A slime is only considered truly "Common / No Mutation" when
+            -- it also has NO event mutations attached to it.
+            local eventMutations = entry.event_mutations or entry.EventMutations
+
+            if type(eventMutations) == "table" then
+                for k, v in pairs(eventMutations) do
+                    -- Support arrays like {"Cosmic"} and maps like {Cosmic=true}.
+                    if type(k) == "string" and v == true then
+                        addEventMutationName(k)
+                    elseif type(v) == "string" then
+                        addEventMutationName(v)
+                    elseif type(k) == "string" then
+                        addEventMutationName(k)
+                    end
+                end
+            elseif eventMutations ~= nil then
+                addEventMutationName(eventMutations)
+            end
+
             if not rarity and entry.id and _Lib and _Lib.Database and _Lib.Database.Slimes then
                 local def = _Lib.Database.Slimes[entry.id] or _Lib.Database.Slimes[tostring(entry.id)]
                 if def then rarity = def.Rarity or def.rarity end
             end
         end
     end
+
     local model = liveFolder and (liveFolder:FindFirstChild(tostring(slotName)) or liveFolder:FindFirstChild(slotName))
+
     if model then
         if not rarity then rarity = model:GetAttribute("Rarity") or model:GetAttribute("rarity") end
         if not mutation then mutation = model:GetAttribute("mutation") or model:GetAttribute("Mutation") end
+
+        -- Fallback detection for builds that expose event mutations only in the GUI.
         for _, d in ipairs(model:GetDescendants()) do
             if d:IsA("TextLabel") then
                 if d.Name == "Rarity" and d.Text ~= "" and not rarity then
@@ -513,18 +981,38 @@ local function getSlotRarityAndMutation(slotName, stand, plotSlimes, liveFolder)
                     if t == "Player God" then t = "Slime God" end
                     rarity = t
                 end
+
                 if (d.Name == "Mutation" or d.Name == "mutation") and d.Text ~= "" and not mutation then
                     mutation = d.Text
+                end
+
+                -- Event mutation labels are separate from the main Mutation label.
+                local parent = d.Parent
+                if parent
+                    and tostring(parent.Name) == "EventMutations"
+                    and d.Visible
+                    and d.Text ~= ""
+                then
+                    addEventMutationName(d.Text)
                 end
             end
         end
     end
+
     if stand then
         if not rarity then rarity = stand:GetAttribute("Rarity") or stand:GetAttribute("rarity") end
         if not mutation then mutation = stand:GetAttribute("mutation") or stand:GetAttribute("Mutation") end
     end
-    if mutation == "None" or mutation == "" then mutation = nil end
-    return rarity, mutation
+
+    if mutation ~= nil then
+        local mutationText = string.lower(tostring(mutation))
+
+        if mutationText == "none" or mutationText == "" or mutationText == "normal" then
+            mutation = nil
+        end
+    end
+
+    return rarity, mutation, hasEventMutation, eventMutationNames
 end
 
 local function getOccupiedSlotsByFilter(filterName)
@@ -533,34 +1021,78 @@ local function getOccupiedSlotsByFilter(filterName)
     local plot = getMyPlot()
     local liveFolder = getPlayerSlimesFolder()
     local list = {}
+
     if not plot then return list end
+
     local stands = plot:FindFirstChild("Stands")
     if not stands then return list end
-    local filterLower = string.lower(filterName)
-    local isMutation = false
-    for _, m in ipairs(ALL_MUTATIONS) do
-        if string.lower(m) == filterLower then isMutation = true break end
-    end
-    for _, stand in ipairs(stands:GetChildren()) do
-        local name = stand.Name
-        if isOccupied(name, plotSlimes, liveFolder, stand) then
-            local rarity, mutation = getSlotRarityAndMutation(name, stand, plotSlimes, liveFolder)
-            local match = false
-            if isMutation then
-                if mutation and string.lower(tostring(mutation)) == filterLower then match = true end
-            else
-                if rarity then
-                    local r = tostring(rarity)
-                    if r == "Player God" then r = "Slime God" end
-                    if string.lower(r) == filterLower then match = true end
-                end
-            end
-            if match then
-                table.insert(list, { name = name, num = tonumber(name) or 9999, stand = stand })
+
+    local filterLower = string.lower(tostring(filterName or ""))
+
+    -- IMPORTANT FOR THIS GUI:
+    -- "Common" means a NORMAL slime with NO mutation.
+    -- It does NOT mean the database rarity named Common.
+    local wantsNoMutation =
+        filterLower == "common"
+        or filterLower == "none"
+        or filterLower == "normal"
+        or filterLower == "no mutation"
+
+    local isMutation = wantsNoMutation
+
+    if not isMutation then
+        for _, m in ipairs(ALL_MUTATIONS) do
+            if string.lower(m) == filterLower then
+                isMutation = true
+                break
             end
         end
     end
-    table.sort(list, function(a, b) return a.num < b.num end)
+
+    for _, stand in ipairs(stands:GetChildren()) do
+        local name = stand.Name
+
+        if isOccupied(name, plotSlimes, liveFolder, stand) then
+            local rarity, mutation, hasEventMutation =
+                getSlotRarityAndMutation(name, stand, plotSlimes, liveFolder)
+
+            local match = false
+
+            if wantsNoMutation then
+                -- Common / Normal = no base mutation AND no event mutation.
+                match = mutation == nil and not hasEventMutation
+
+            elseif isMutation then
+                if mutation and string.lower(tostring(mutation)) == filterLower then
+                    match = true
+                end
+
+            else
+                -- Other dropdown entries continue to work as rarities.
+                if rarity then
+                    local r = tostring(rarity)
+                    if r == "Player God" then r = "Slime God" end
+
+                    if string.lower(r) == filterLower then
+                        match = true
+                    end
+                end
+            end
+
+            if match then
+                table.insert(list, {
+                    name = name,
+                    num = tonumber(name) or 9999,
+                    stand = stand,
+                })
+            end
+        end
+    end
+
+    table.sort(list, function(a, b)
+        return a.num < b.num
+    end)
+
     return list
 end
 
@@ -630,34 +1162,376 @@ local function getUnopenedLuckyBlockSlots()
     return list
 end
 
-local function getToolValue(tool)
-    if not tool then return 0 end
-    local mps = tool:GetAttribute("MoneyPerSecond") or tool:GetAttribute("moneyPerSecond")
-    if mps and tonumber(mps) then return tonumber(mps) end
-    local val = tool:GetAttribute("Value") or tool:GetAttribute("value")
-        or tool:GetAttribute("CashValue") or tool:GetAttribute("SellPrice") or tool:GetAttribute("sellPrice")
-    if val and tonumber(val) then return tonumber(val) end
-    return 0
+-- ============================================================
+-- CURRENT OWNED SLIME EARNINGS / PLACEMENT PRIORITY
+--
+-- IMPORTANT:
+-- The source of truth is Data.Inventory, NOT Tool attributes.
+--
+-- This mirrors the game's own "Equip Best" logic:
+--   1) Match each current inventory record to its Tool by slimeUID
+--   2) Resolve that exact slime definition by inventoryEntry.id
+--   3) Use THAT individual slime's inventoryEntry.level
+--   4) Apply THAT individual slime's mutation + event_mutations
+--   5) Apply current rebirth CashMulti
+--   6) Sort the final calculated earnings DESCENDING
+--
+-- Therefore:
+--   A highly-upgraded NORMAL slime can rank above a low-level CURSED slime.
+--   Mutation rarity/name does NOT determine placement order.
+--   Only the final calculated money generation determines order.
+-- ============================================================
+
+local function getInventoryTable(playerData)
+    if not playerData then
+        return nil
+    end
+
+    if type(playerData.Inventory) == "table" then
+        return playerData.Inventory
+    end
+
+    return nil
 end
 
-local function getSlimeTools()
-    local list, seen = {}, {}
-    local function scan(bag)
-        if not bag then return end
-        for _, item in ipairs(bag:GetChildren()) do
-            if item:IsA("Tool") then
-                local uid = item:GetAttribute("slimeUID")
-                if uid ~= nil and not seen[tostring(uid)] then
-                    seen[tostring(uid)] = true
-                    table.insert(list, { tool = item, uid = uid, value = getToolValue(item) })
+local function getRebirthCashMultiplier(playerData)
+    if not playerData then
+        return 1
+    end
+
+    local rebirth = playerData.Rebirth
+    local rebirths =
+        _Lib
+        and _Lib.Database
+        and _Lib.Database.Rebirths
+
+    if rebirths then
+        local def = rebirths[rebirth] or rebirths[tostring(rebirth)]
+
+        if def and tonumber(def.CashMulti) then
+            return tonumber(def.CashMulti)
+        end
+    end
+
+    return 1
+end
+
+local function resolveSlimeDefinition(inventoryEntry)
+    if type(inventoryEntry) ~= "table" then
+        return nil
+    end
+
+    local slimeId = inventoryEntry.id or inventoryEntry.Id
+
+    if slimeId == nil
+        or not _Lib
+        or not _Lib.Database
+        or not _Lib.Database.Slimes
+    then
+        return nil
+    end
+
+    local db = _Lib.Database.Slimes
+
+    return db[slimeId]
+        or db[tostring(slimeId)]
+        or db[tonumber(slimeId)]
+end
+
+local function isLuckyInventoryEntry(tool, inventoryEntry, def)
+    local function containsBoxWord(value)
+        value = string.lower(tostring(value or ""))
+
+        return value:find("lucky block", 1, true) ~= nil
+            or value:find("lucky", 1, true) ~= nil
+            or value:find("box", 1, true) ~= nil
+            or value:find("crate", 1, true) ~= nil
+    end
+
+    -- The strongest check is the game's database Type.
+    if def then
+        if tostring(def.Type or "") == "Lucky Block" then
+            return true
+        end
+
+        if containsBoxWord(def.Type)
+            or containsBoxWord(def.Category)
+        then
+            return true
+        end
+    end
+
+    if inventoryEntry then
+        if inventoryEntry.production_is_lucky_block == true then
+            return true
+        end
+
+        if containsBoxWord(inventoryEntry.Type)
+            or containsBoxWord(inventoryEntry.type)
+            or containsBoxWord(inventoryEntry.Category)
+            or containsBoxWord(inventoryEntry.category)
+        then
+            return true
+        end
+    end
+
+    if tool then
+        if containsBoxWord(tool.Name)
+            or containsBoxWord(tool:GetAttribute("Type"))
+            or containsBoxWord(tool:GetAttribute("ItemType"))
+            or containsBoxWord(tool:GetAttribute("Category"))
+        then
+            return true
+        end
+
+        if tool:GetAttribute("LuckyBlock") == true
+            or tool:GetAttribute("IsLuckyBlock") == true
+            or tool:GetAttribute("isLuckyBlock") == true
+        then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function getBaseProductionMPS(inventoryEntry, def)
+    -- This is exactly the priority used by the game's own Equip Best:
+    -- database MoneyPerSecond first, persisted production fallback second.
+    local baseMps = def and tonumber(def.MoneyPerSecond) or nil
+
+    if baseMps == nil and inventoryEntry then
+        baseMps =
+            tonumber(inventoryEntry.production_mps)
+            or tonumber(inventoryEntry.money_per_second)
+            or tonumber(inventoryEntry.MoneyPerSecond)
+            or tonumber(inventoryEntry.mps)
+            or tonumber(inventoryEntry.base_mps)
+    end
+
+    return math.max(0, tonumber(baseMps) or 0)
+end
+
+local function calculateOwnedSlimeEarnings(inventoryEntry, def, playerData)
+    if type(inventoryEntry) ~= "table" then
+        return 0
+    end
+
+    local baseMps = getBaseProductionMPS(inventoryEntry, def)
+    local level = math.max(1, tonumber(inventoryEntry.level) or 1)
+    local rebirthMulti = getRebirthCashMultiplier(playerData)
+
+    local earnings = baseMps
+
+    -- Game's own level + rebirth earnings formula.
+    if _Lib
+        and _Lib.Shared
+        and typeof(_Lib.Shared.getRebirthScaledEarnings) == "function"
+    then
+        local ok, result = pcall(function()
+            return _Lib.Shared.getRebirthScaledEarnings(
+                baseMps,
+                level,
+                rebirthMulti
+            )
+        end)
+
+        if ok and tonumber(result) then
+            earnings = tonumber(result)
+        end
+    end
+
+    -- Game's own mutation calculation.
+    local mutation = inventoryEntry.mutation or "None"
+    local eventMutations = inventoryEntry.event_mutations or {}
+    local mutationMulti = 1
+
+    if _Lib
+        and _Lib.Shared
+        and typeof(_Lib.Shared.getMutationMulti) == "function"
+    then
+        local ok, result = pcall(function()
+            return _Lib.Shared.getMutationMulti(
+                mutation,
+                eventMutations
+            )
+        end)
+
+        if ok and tonumber(result) then
+            mutationMulti = tonumber(result)
+        end
+    end
+
+    earnings = earnings * mutationMulti
+
+    -- These are current global/player production multipliers.
+    -- They do not change the relative order because they apply equally
+    -- to every owned slime, but applying them makes the debug Cash/s
+    -- closer to the game's current production display.
+    local inviteBonus = tonumber(playerData and playerData.InviteBonusMult) or 0
+    local friendBonus = tonumber(LocalPlayer:GetAttribute("FriendPresenceBonus")) or 0
+    local productionBonus = 1 + inviteBonus + friendBonus
+    local adminProductionMult =
+        tonumber(workspace:GetAttribute("AdminProductionMult")) or 1
+
+    earnings = earnings * productionBonus * adminProductionMult
+
+    earnings = tonumber(earnings) or 0
+
+    if earnings ~= earnings then
+        earnings = 0
+    end
+
+    return math.max(0, earnings)
+end
+
+local function collectCurrentSlimeToolsByUID()
+    local toolsByUID = {}
+
+    local function scan(container)
+        if not container then
+            return
+        end
+
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") then
+                local uid = tool:GetAttribute("slimeUID")
+
+                if uid ~= nil then
+                    toolsByUID[tostring(uid)] = tool
                 end
             end
         end
     end
+
     scan(LocalPlayer:FindFirstChild("Backpack"))
     scan(LocalPlayer.Character)
-    table.sort(list, function(a, b) return (a.value or 0) > (b.value or 0) end)
+
+    return toolsByUID
+end
+
+local function getSlimeTools()
+    local playerData = getData()
+    local inventory = getInventoryTable(playerData)
+    local toolsByUID = collectCurrentSlimeToolsByUID()
+    local list = {}
+
+    if type(inventory) ~= "table" then
+        warn("[PlaceAll] Data.Inventory unavailable. Current-cash ranking cannot run.")
+        return list
+    end
+
+    -- CRITICAL CHANGE:
+    -- Iterate Data.Inventory FIRST, exactly like the game's own Equip Best.
+    -- This guarantees level/mutation belong to the exact slime UID.
+    for _, inventoryEntry in ipairs(inventory) do
+        if type(inventoryEntry) == "table"
+            and inventoryEntry.uid ~= nil
+        then
+            local uidKey = tostring(inventoryEntry.uid)
+            local tool = toolsByUID[uidKey]
+
+            -- Only rank slime records that the player is CURRENTLY holding.
+            if tool and tool.Parent then
+                local def = resolveSlimeDefinition(inventoryEntry)
+
+                if not isLuckyInventoryEntry(tool, inventoryEntry, def) then
+                    local earnings =
+                        calculateOwnedSlimeEarnings(
+                            inventoryEntry,
+                            def,
+                            playerData
+                        )
+
+                    table.insert(list, {
+                        tool = tool,
+                        uid = inventoryEntry.uid,
+                        id = inventoryEntry.id or inventoryEntry.Id,
+
+                        -- FINAL CURRENT earnings used for sorting.
+                        value = earnings,
+
+                        baseMps = getBaseProductionMPS(inventoryEntry, def),
+                        level = math.max(
+                            1,
+                            tonumber(inventoryEntry.level) or 1
+                        ),
+                        mutation = inventoryEntry.mutation or "None",
+                        eventMutations = inventoryEntry.event_mutations or {},
+                        displayName =
+                            (def and def.Name)
+                            or tool.Name
+                            or tostring(inventoryEntry.id),
+                    })
+                else
+                    print(
+                        "[PlaceAll] SKIP Lucky Box:",
+                        tostring(tool.Name),
+                        "UID=" .. uidKey
+                    )
+                end
+            end
+        end
+    end
+
+    -- ABSOLUTE DESCENDING ORDER BY EACH INDIVIDUAL SLIME'S
+    -- CURRENT CALCULATED MONEY GENERATION.
+    table.sort(list, function(a, b)
+        local aCash = tonumber(a.value) or 0
+        local bCash = tonumber(b.value) or 0
+
+        if aCash ~= bCash then
+            return aCash > bCash
+        end
+
+        -- Stable deterministic tie breakers only.
+        if (a.level or 1) ~= (b.level or 1) then
+            return (a.level or 1) > (b.level or 1)
+        end
+
+        return tostring(a.uid) < tostring(b.uid)
+    end)
+
     return list
+end
+
+local function normalizeMutationName(mutation)
+    mutation = tostring(mutation or "None")
+    if mutation == "" then
+        mutation = "None"
+    end
+    return mutation
+end
+
+local function getHeldSlimeToolsByMutation(filterMutation)
+    local allTools = getSlimeTools()
+    local filtered = {}
+    local wanted = string.lower(normalizeMutationName(filterMutation))
+
+    for _, entry in ipairs(allTools) do
+        local mutation = string.lower(
+            normalizeMutationName(entry.mutation)
+        )
+
+        if mutation == wanted then
+            table.insert(filtered, entry)
+        end
+    end
+
+    -- STRICT: within the selected mutation, place the slime
+    -- with the highest CURRENT calculated cash/s first.
+    table.sort(filtered, function(a, b)
+        local aCash = tonumber(a.value) or 0
+        local bCash = tonumber(b.value) or 0
+
+        if aCash ~= bCash then
+            return aCash > bCash
+        end
+
+        return tostring(a.uid) < tostring(b.uid)
+    end)
+
+    return filtered
 end
 
 local function isLuckyBlock(tool)
@@ -811,76 +1685,276 @@ local function readRarityFromBillboard(model)
     end
 end
 
+local function upgradeMutationMatches(
+    selected,
+    mutation,
+    hasEventMutation,
+    eventMutationNames
+)
+    selected = tostring(selected or "All")
+    local selectedLower = string.lower(selected)
+
+    if selectedLower == "all" then
+        return true
+    end
+
+    -- Common in this dropdown means NO mutation at all.
+    if selectedLower == "common"
+        or selectedLower == "none"
+        or selectedLower == "normal"
+        or selectedLower == "no mutation"
+    then
+        return mutation == nil and not hasEventMutation
+    end
+
+    if mutation
+        and string.lower(tostring(mutation)) == selectedLower
+    then
+        return true
+    end
+
+    if type(eventMutationNames) == "table"
+        and eventMutationNames[selectedLower] == true
+    then
+        return true
+    end
+
+    return false
+end
+
 local function getStandInfo(stand)
-    local level = stand:GetAttribute("level") or stand:GetAttribute("Level") or 1
-    if level >= MAX_LEVEL then return nil end
+    -- ORIGINAL WORKING AUTO-UPGRADE SCANNER.
+    local level =
+        stand:GetAttribute("level")
+        or stand:GetAttribute("Level")
+        or 1
+
+    if level >= MAX_LEVEL then
+        return nil
+    end
+
     local slimeId, sellPrice, rarity, model = nil, nil, nil, nil
+
     if _Lib and _Lib.Data then
-        local ok, data = pcall(function() return _Lib.Data:Get() end)
+        local ok, data = pcall(function()
+            return _Lib.Data:Get()
+        end)
+
         if ok and data and data.PlotSlimes then
-            local entry = data.PlotSlimes[stand.Name] or data.PlotSlimes[tostring(stand.Name)] or data.PlotSlimes[tonumber(stand.Name)]
-            if entry then slimeId = entry.id or entry.Id or entry.slimeId or entry.slimeID end
+            local entry =
+                data.PlotSlimes[stand.Name]
+                or data.PlotSlimes[tostring(stand.Name)]
+                or data.PlotSlimes[tonumber(stand.Name)]
+
+            if entry then
+                slimeId =
+                    entry.id
+                    or entry.Id
+                    or entry.slimeId
+                    or entry.slimeID
+            end
         end
     end
+
     local live = workspace:FindFirstChild("Live")
     local playerSlimes = live and live:FindFirstChild("PlayerSlimes")
-    local myFolder = playerSlimes and playerSlimes:FindFirstChild(LocalPlayer.Name)
-    model = myFolder and (myFolder:FindFirstChild(tostring(stand.Name)) or myFolder:FindFirstChild(stand.Name))
+    local myFolder =
+        playerSlimes
+        and playerSlimes:FindFirstChild(LocalPlayer.Name)
+
+    model =
+        myFolder
+        and (
+            myFolder:FindFirstChild(tostring(stand.Name))
+            or myFolder:FindFirstChild(stand.Name)
+        )
+
     if model and not slimeId then
-        slimeId = model:GetAttribute("slimeID") or model:GetAttribute("slimeId") or model:GetAttribute("id") or model:GetAttribute("SlimeId")
+        slimeId =
+            model:GetAttribute("slimeID")
+            or model:GetAttribute("slimeId")
+            or model:GetAttribute("id")
+            or model:GetAttribute("SlimeId")
     end
+
     local def = getSlimeDef(slimeId)
+
     if def then
         rarity = def.Rarity or def.rarity
-        sellPrice = def.SellPrice or (def.MoneyPerSecond and math.round(def.MoneyPerSecond * 4))
+        sellPrice =
+            def.SellPrice
+            or (
+                def.MoneyPerSecond
+                and math.round(def.MoneyPerSecond * 4)
+            )
     end
-    if not rarity and model then rarity = readRarityFromBillboard(model) end
-    if not rarity and model then rarity = model:GetAttribute("Rarity") or model:GetAttribute("rarity") end
-    if not rarity then rarity = stand:GetAttribute("Rarity") or stand:GetAttribute("rarity") end
+
+    if not rarity and model then
+        rarity = readRarityFromBillboard(model)
+    end
+
+    if not rarity and model then
+        rarity =
+            model:GetAttribute("Rarity")
+            or model:GetAttribute("rarity")
+    end
+
+    if not rarity then
+        rarity =
+            stand:GetAttribute("Rarity")
+            or stand:GetAttribute("rarity")
+    end
+
     if not sellPrice and model then
-        sellPrice = model:GetAttribute("SellPrice") or model:GetAttribute("sellPrice")
-            or (model:GetAttribute("MoneyPerSecond") and math.round(model:GetAttribute("MoneyPerSecond") * 4))
+        sellPrice =
+            model:GetAttribute("SellPrice")
+            or model:GetAttribute("sellPrice")
+            or (
+                model:GetAttribute("MoneyPerSecond")
+                and math.round(
+                    model:GetAttribute("MoneyPerSecond") * 4
+                )
+            )
     end
+
     if not sellPrice then
-        sellPrice = stand:GetAttribute("SellPrice") or stand:GetAttribute("sellPrice")
-            or (stand:GetAttribute("MoneyPerSecond") and math.round(stand:GetAttribute("MoneyPerSecond") * 4))
+        sellPrice =
+            stand:GetAttribute("SellPrice")
+            or stand:GetAttribute("sellPrice")
+            or (
+                stand:GetAttribute("MoneyPerSecond")
+                and math.round(
+                    stand:GetAttribute("MoneyPerSecond") * 4
+                )
+            )
     end
-    -- ONLY SPAIN
-    if not rarity or rarity ~= "Spain" then return nil end
-    if not sellPrice or sellPrice <= 0 then return nil end
+
+    -- Keep the original script's Spain-only Auto Upgrade scope.
+    if not rarity or rarity ~= "Spain" then
+        return nil
+    end
+
+    if not sellPrice or sellPrice <= 0 then
+        return nil
+    end
+
     return {
-        stand = stand, id = stand.Name, level = level,
-        cost = getUpgradeCost(sellPrice, level), rarity = rarity,
-        priority = UPGRADE_PRIORITY[rarity], slimeId = slimeId,
+        stand = stand,
+        id = stand.Name,
+        level = level,
+        cost = getUpgradeCost(sellPrice, level),
+        rarity = rarity,
+        priority = UPGRADE_PRIORITY[rarity],
+        slimeId = slimeId,
     }
+end
+
+local function candidateMatchesUpgradeMutation(info)
+    -- "All" MUST behave exactly like the old working Auto Upgrade.
+    if tostring(selectedUpgradeMutation) == "All" then
+        return true
+    end
+
+    if not info or not info.stand then
+        return false
+    end
+
+    local data = getData()
+    local plotSlimes = (data and data.PlotSlimes) or {}
+    local liveFolder = getPlayerSlimesFolder()
+
+    local ok, rarity, mutation, hasEventMutation, eventMutationNames =
+        pcall(
+            getSlotRarityAndMutation,
+            info.stand.Name,
+            info.stand,
+            plotSlimes,
+            liveFolder
+        )
+
+    if not ok then
+        warn(
+            "[AutoUpgrade] Mutation read failed for slot",
+            tostring(info.stand.Name),
+            rarity
+        )
+        return false
+    end
+
+    return upgradeMutationMatches(
+        selectedUpgradeMutation,
+        mutation,
+        hasEventMutation,
+        eventMutationNames
+    )
 end
 
 local function getPrioritizedUpgrades()
     local list, seen = {}, {}
+
     local function scanPlot(plot)
-        if not plot then return end
+        if not plot then
+            return
+        end
+
         local stands = plot:FindFirstChild("Stands")
-        if not stands then return end
+        if not stands then
+            return
+        end
+
         for _, stand in ipairs(stands:GetChildren()) do
             if stand:IsA("Model") and not seen[stand.Name] then
                 seen[stand.Name] = true
+
+                -- First run the ORIGINAL working eligibility/cost scanner.
                 local info = getStandInfo(stand)
-                if info then table.insert(list, info) end
+
+                -- Then apply the mutation dropdown as a narrow final filter.
+                if info and candidateMatchesUpgradeMutation(info) then
+                    table.insert(list, info)
+                end
             end
         end
     end
-    if _G.MyPlot then scanPlot(_G.MyPlot) end
+
+    if _G.MyPlot then
+        scanPlot(_G.MyPlot)
+    end
+
     local plots = workspace:FindFirstChild("Plots")
+
     if plots then
         for _, plot in ipairs(plots:GetChildren()) do
             local owner = plot:FindFirstChild("owner")
-            if owner and owner.Value == LocalPlayer.Name then scanPlot(plot) end
+
+            if owner and owner.Value == LocalPlayer.Name then
+                scanPlot(plot)
+            end
         end
     end
+
     table.sort(list, function(a, b)
-        if a.priority ~= b.priority then return a.priority < b.priority end
-        return a.cost < b.cost
+        local aCost = tonumber(a.cost) or math.huge
+        local bCost = tonumber(b.cost) or math.huge
+
+        -- STRICT PRIORITY:
+        -- Always put the slime requiring the LEAST cash for its
+        -- NEXT upgrade at the front of the queue.
+        if aCost ~= bCost then
+            return aCost < bCost
+        end
+
+        -- Deterministic tie-breakers only.
+        local aLevel = tonumber(a.level) or 1
+        local bLevel = tonumber(b.level) or 1
+
+        if aLevel ~= bLevel then
+            return aLevel < bLevel
+        end
+
+        return tostring(a.id) < tostring(b.id)
     end)
+
     return list
 end
 
@@ -953,33 +2027,104 @@ end
 local function getTargetLuckyBlock()
     local live = workspace:FindFirstChild("Live")
     if not live then return nil end
+
     local slimes = live:FindFirstChild("Slimes")
     if not slimes then return nil end
-    local best, bestValue = nil, 0
+
+    local best = nil
+    local bestValue = -math.huge
+    local bestDistance = math.huge
+    local root = getRoot()
+
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model") and not model:GetAttribute("Carrying") then
-            local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-            if not primary then continue end
-            local value, rarity = getRarityValue(model.Name, model)
-            if rarity ~= "Spain" then continue end
-            local attrValue = model:GetAttribute("Value") or model:GetAttribute("MoneyPerSecond")
-            if attrValue and tonumber(attrValue) then value = tonumber(attrValue) end
+            local modelName = tostring(model.Name)
+            local matches = false
+
+            if selectedLuckyBlockType == "All" then
+                -- Only accept the exact Lucky Block models from this game's database.
+                for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
+                    if names[modelName] == true then
+                        matches = true
+                        break
+                    end
+                end
+            else
+                local allowedNames =
+                    LUCKY_BLOCK_MODEL_NAMES[selectedLuckyBlockType]
+
+                matches =
+                    allowedNames ~= nil
+                    and allowedNames[modelName] == true
+            end
+
+            if not matches then
+                continue
+            end
+
+            local primary =
+                model.PrimaryPart
+                or model:FindFirstChildWhichIsA("BasePart")
+
+            if not primary then
+                continue
+            end
+
+            local value =
+                tonumber(model:GetAttribute("Value"))
+                or tonumber(model:GetAttribute("MoneyPerSecond"))
+                or 0
+
+            local distance =
+                root and (root.Position - primary.Position).Magnitude
+                or math.huge
+
             local prompt = nil
+
             for _, d in ipairs(model:GetDescendants()) do
                 if d:IsA("ProximityPrompt") and d.Enabled then
-                    local at = tostring(d.ActionText or ""):lower()
-                    if at:find("steal") or at:find("open") or at:find("pick") or at:find("take") or not prompt then
+                    local at = string.lower(
+                        tostring(d.ActionText or "")
+                    )
+
+                    if at:find("steal", 1, true)
+                        or at:find("open", 1, true)
+                        or at:find("pick", 1, true)
+                        or at:find("take", 1, true)
+                        or not prompt
+                    then
                         prompt = d
-                        if at:find("steal") or at:find("open") or at:find("pick") or at:find("take") then break end
+
+                        if at:find("steal", 1, true)
+                            or at:find("open", 1, true)
+                            or at:find("pick", 1, true)
+                            or at:find("take", 1, true)
+                        then
+                            break
+                        end
                     end
                 end
             end
-            if value > bestValue then
+
+            -- Within the selected type, prefer the highest value.
+            -- For equal values, use the nearest matching block.
+            if value > bestValue
+                or (value == bestValue and distance < bestDistance)
+            then
                 bestValue = value
-                best = { name = model.Name, rarity = rarity, value = value, part = primary, prompt = prompt, model = model }
+                bestDistance = distance
+                best = {
+                    name = modelName,
+                    type = selectedLuckyBlockType,
+                    value = value,
+                    part = primary,
+                    prompt = prompt,
+                    model = model,
+                }
             end
         end
     end
+
     return best
 end
 
@@ -1105,41 +2250,335 @@ PickRarityBtn.MouseButton1Click:Connect(function()
     actionBusy = false
 end)
 
-PlaceBtn.MouseButton1Click:Connect(function()
-    if actionBusy or not PlaceRemote then return end
-    actionBusy = true
-    PlaceBtn.Text = "Placing..."
-    local tools = getSlimeTools()
-    local slots = getAvailableSlots()
-    if #tools == 0 or #slots == 0 then
-        StatusLabel.Text = #tools == 0 and "No slime tools" or "No free slots"
-        PlaceBtn.Text = "Place All (highest value first)"
-        actionBusy = false
+MutationPickBtn.MouseButton1Click:Connect(function()
+    if actionBusy then
+        StatusLabel.Text = "Another action is still running..."
         return
     end
-    local total = math.min(#tools, #slots)
-    local placed = 0
-    for i = 1, total do
-        local entry, slot = tools[i], slots[i]
-        if not entry.tool or not entry.tool.Parent then
-            for _, t in ipairs(getSlimeTools()) do
-                if tostring(t.uid) == tostring(entry.uid) then entry = t break end
-            end
-        end
-        local data = getData()
-        local plotSlimes = (data and data.PlotSlimes) or {}
-        if not isOccupied(slot.name, plotSlimes, getPlayerSlimesFolder(), slot.stand) then
-            if entry.tool and equipTool(entry.tool) then
-                if pcall(function() PlaceRemote:FireServer(slot.name, entry.uid) end) then placed += 1 end
-                task.wait(DELAY_PLACE)
-            end
-        end
-        task.wait(DELAY_NEXT)
+
+    local remote = ResolvePlaceRemote()
+
+    if not remote then
+        StatusLabel.Text = 'Place error: RemoteEvent "Place Slime" not found'
+        return
     end
-    local hum = getHumanoid()
-    if hum then pcall(function() hum:UnequipTools() end) end
-    StatusLabel.Text = string.format("Placed %d (highest value first)", placed)
-    PlaceBtn.Text = "Place All (highest value first)"
+
+    actionBusy = true
+    MutationDropList.Visible = false
+    DropList.Visible = false
+    MutationPickBtn.Text = "Placing..."
+
+    local ok, err = xpcall(function()
+        local mutationName = selectedMutation
+
+        -- Only CURRENTLY HELD normal slime tools with the selected mutation.
+        -- Lucky Boxes are already excluded by getSlimeTools().
+        local tools = getHeldSlimeToolsByMutation(mutationName)
+        local slots = getAvailableSlots()
+
+        if #tools == 0 then
+            error(
+                string.format(
+                    "No held %s mutation slimes found",
+                    mutationName
+                )
+            )
+        end
+
+        if #slots == 0 then
+            error("No free slime slots")
+        end
+
+        local total = math.min(#tools, #slots)
+
+        -- Lock the selected-mutation ranking for this placement cycle.
+        table.sort(tools, function(a, b)
+            local aCash = tonumber(a.value) or 0
+            local bCash = tonumber(b.value) or 0
+
+            if aCash ~= bCash then
+                return aCash > bCash
+            end
+
+            return tostring(a.uid) < tostring(b.uid)
+        end)
+
+        print("====================================================")
+        print(
+            "[PlaceMutation]",
+            mutationName,
+            "- CURRENT CASH DESCENDING"
+        )
+        print("====================================================")
+
+        for i = 1, total do
+            local e = tools[i]
+            print(
+                string.format(
+                    "#%d %s | Cash/s=%.2f | Lv=%d | Mutation=%s | UID=%s -> Slot %s",
+                    i,
+                    tostring(e.displayName or e.id),
+                    tonumber(e.value) or 0,
+                    tonumber(e.level) or 1,
+                    tostring(e.mutation or "None"),
+                    tostring(e.uid),
+                    tostring(slots[i] and slots[i].name or "?")
+                )
+            )
+        end
+
+        local placed = 0
+
+        for i = 1, total do
+            local rankedEntry = tools[i]
+            local slot = slots[i]
+
+            -- Re-find exact physical Tool by slime UID if needed,
+            -- but DO NOT recalculate/reorder the locked ranking.
+            local tool = rankedEntry.tool
+
+            if not tool or not tool.Parent then
+                local currentTools = collectCurrentSlimeToolsByUID()
+                tool = currentTools[tostring(rankedEntry.uid)]
+            end
+
+            if tool and tool.Parent and slot then
+                local latestData = getData()
+                local plotSlimes =
+                    (latestData and latestData.PlotSlimes) or {}
+
+                if not isOccupied(
+                    slot.name,
+                    plotSlimes,
+                    getPlayerSlimesFolder(),
+                    slot.stand
+                ) then
+                    if equipTool(tool) then
+                        local fired, fireErr = pcall(function()
+                            remote:FireServer(
+                                slot.name,
+                                rankedEntry.uid
+                            )
+                        end)
+
+                        if fired then
+                            placed += 1
+
+                            StatusLabel.Text = string.format(
+                                "Placed %s %d/%d | %.2f cash/s",
+                                mutationName,
+                                placed,
+                                total,
+                                tonumber(rankedEntry.value) or 0
+                            )
+                        else
+                            warn(
+                                "[PlaceMutation] Place failed UID",
+                                tostring(rankedEntry.uid),
+                                fireErr
+                            )
+                        end
+
+                        task.wait(DELAY_PLACE)
+                    end
+                end
+            else
+                warn(
+                    "[PlaceMutation] Missing Tool UID",
+                    tostring(rankedEntry.uid)
+                )
+            end
+
+            task.wait(DELAY_NEXT)
+        end
+
+        local hum = getHumanoid()
+        if hum then
+            pcall(function()
+                hum:UnequipTools()
+            end)
+        end
+
+        StatusLabel.Text = string.format(
+            "Placed %d × %s mutation slimes",
+            placed,
+            mutationName
+        )
+    end, debug.traceback)
+
+    if not ok then
+        warn("[PlaceMutation] ERROR:", err)
+        StatusLabel.Text =
+            "Mutation place error: "
+            .. tostring(err):match("^[^\n]+")
+    end
+
+    MutationPickBtn.Text = "Place"
+    actionBusy = false
+end)
+
+PlaceBtn.MouseButton1Click:Connect(function()
+    -- Never silently ignore the click.
+    if actionBusy then
+        StatusLabel.Text = "Another action is still running..."
+        return
+    end
+
+    actionBusy = true
+    PlaceBtn.Text = "Calculating current cash..."
+    StatusLabel.Text = "Reading current slime levels / mutations..."
+
+    local ok, err = xpcall(function()
+        -- Resolve the remote NOW instead of depending on the startup thread.
+        local remote = ResolvePlaceRemote()
+
+        if not remote then
+            error('RemoteEvent "Place Slime" was not found')
+        end
+
+        local playerData = getData()
+
+        if not playerData then
+            error("Player data could not be read")
+        end
+
+        if type(playerData.Inventory) ~= "table" then
+            error("Data.Inventory is missing")
+        end
+
+        local tools = getSlimeTools()
+        local slots = getAvailableSlots()
+
+        if #tools == 0 then
+            error("No normal slime tools matched your current Data.Inventory. Lucky Boxes are excluded.")
+        end
+
+        if #slots == 0 then
+            error("No free slime slots")
+        end
+
+        local total = math.min(#tools, #slots)
+
+        -- IMPORTANT: re-sort immediately before placement.
+        -- This guarantees no earlier code can disturb CURRENT earnings order.
+        table.sort(tools, function(a, b)
+            local aCash = tonumber(a.value) or 0
+            local bCash = tonumber(b.value) or 0
+
+            if aCash ~= bCash then
+                return aCash > bCash
+            end
+
+            return tostring(a.uid) < tostring(b.uid)
+        end)
+
+        print("====================================================")
+        print("[PlaceAll] CURRENT OWNED SLIME EARNINGS - DESCENDING")
+        print("====================================================")
+
+        for i = 1, total do
+            local e = tools[i]
+
+            print(
+                string.format(
+                    "#%d %s | Current Cash/s=%.2f | Base=%.2f | Lv=%d | Mutation=%s | UID=%s -> Slot %s",
+                    i,
+                    tostring(e.displayName or e.id),
+                    tonumber(e.value) or 0,
+                    tonumber(e.baseMps) or 0,
+                    tonumber(e.level) or 1,
+                    tostring(e.mutation or "None"),
+                    tostring(e.uid),
+                    tostring(slots[i] and slots[i].name or "?")
+                )
+            )
+        end
+
+        print("====================================================")
+
+        PlaceBtn.Text = "Placing highest current cash..."
+        local placed = 0
+
+        for i = 1, total do
+            local rankedEntry = tools[i]
+            local slot = slots[i]
+
+            -- Re-find the physical Tool by exact UID just before equipping.
+            -- Do NOT recalculate/reorder here: preserve the locked descending list.
+            local tool = rankedEntry.tool
+
+            if not tool or not tool.Parent then
+                local currentTools = collectCurrentSlimeToolsByUID()
+                tool = currentTools[tostring(rankedEntry.uid)]
+            end
+
+            if tool and tool.Parent and slot then
+                local latestData = getData()
+                local plotSlimes = (latestData and latestData.PlotSlimes) or {}
+
+                if not isOccupied(
+                    slot.name,
+                    plotSlimes,
+                    getPlayerSlimesFolder(),
+                    slot.stand
+                ) then
+                    if equipTool(tool) then
+                        local fired, fireErr = pcall(function()
+                            remote:FireServer(slot.name, rankedEntry.uid)
+                        end)
+
+                        if fired then
+                            placed += 1
+
+                            StatusLabel.Text = string.format(
+                                "Placed #%d/%d | %.2f cash/s -> slot %s",
+                                i,
+                                total,
+                                tonumber(rankedEntry.value) or 0,
+                                tostring(slot.name)
+                            )
+                        else
+                            warn(
+                                "[PlaceAll] Place failed UID",
+                                rankedEntry.uid,
+                                fireErr
+                            )
+                        end
+
+                        task.wait(DELAY_PLACE)
+                    end
+                end
+            else
+                warn(
+                    "[PlaceAll] Missing Tool for UID",
+                    tostring(rankedEntry.uid)
+                )
+            end
+
+            task.wait(DELAY_NEXT)
+        end
+
+        local hum = getHumanoid()
+        if hum then
+            pcall(function()
+                hum:UnequipTools()
+            end)
+        end
+
+        StatusLabel.Text = string.format(
+            "Placed %d/%d — CURRENT cash descending",
+            placed,
+            total
+        )
+    end, debug.traceback)
+
+    if not ok then
+        warn("[PlaceAll] ERROR:", err)
+        StatusLabel.Text = "Place error: " .. tostring(err):match("^[^\n]+")
+    end
+
+    -- ALWAYS restore the button and busy state, even after an exception.
+    PlaceBtn.Text = "Place Slimes (CURRENT CASH first)"
     actionBusy = false
 end)
 
@@ -1191,24 +2630,94 @@ end)
 
 task.spawn(function()
     while true do
-        if upgradeEnabled and UpgradeRemote then
-            local upgrades = getPrioritizedUpgrades()
-            local cash = getCash()
-            if #upgrades == 0 then
-                StatusLabel.Text = string.format("No Spain to upgrade\nCash: $%s", tostring(cash))
-            else
-                for _, info in ipairs(upgrades) do
-                    if not upgradeEnabled then break end
-                    cash = getCash()
-                    if info.cost <= cash then
-                        pcall(function() UpgradeRemote:FireServer(info.id) end)
-                        StatusLabel.Text = string.format("Upgraded Spain %s Lv%d", info.id, info.level)
-                        task.wait(UPGRADE_DELAY)
-                    else break end
+        if upgradeEnabled then
+            local ok, err = xpcall(function()
+                local remote = ResolveUpgradeRemote()
+
+                if not remote then
+                    StatusLabel.Text =
+                        'Auto Upgrade: "Upgrade Slime" remote not found'
+                    return
                 end
+
+                local filterAtDecision = selectedUpgradeMutation
+
+                -- IMPORTANT:
+                -- Rebuild the full eligible list before EVERY SINGLE upgrade.
+                -- getPrioritizedUpgrades() sorts by current next-upgrade cost,
+                -- so upgrades[1] is always the cheapest slime RIGHT NOW.
+                local upgrades = getPrioritizedUpgrades()
+
+                if #upgrades == 0 then
+                    StatusLabel.Text = string.format(
+                        "Auto Upgrade ON | %s | No eligible Spain slime",
+                        upgradeMutationDisplayName(filterAtDecision)
+                    )
+                    return
+                end
+
+                local cheapest = upgrades[1]
+                local cash = getCash()
+                local cost = tonumber(cheapest.cost) or math.huge
+
+                -- If the cheapest candidate is not affordable, then none
+                -- of the more expensive candidates should be upgraded.
+                if cost > cash then
+                    StatusLabel.Text = string.format(
+                        "Auto Upgrade [%s] | Cheapest $%s | Cash $%s",
+                        upgradeMutationDisplayName(filterAtDecision),
+                        tostring(math.floor(cost)),
+                        tostring(math.floor(cash))
+                    )
+                    return
+                end
+
+                -- If the dropdown changed after the list was built,
+                -- do not spend cash on a stale candidate.
+                if filterAtDecision ~= selectedUpgradeMutation then
+                    return
+                end
+
+                local fired, fireErr = pcall(function()
+                    remote:FireServer(cheapest.id)
+                end)
+
+                if not fired then
+                    warn(
+                        "[AutoUpgrade] FireServer failed:",
+                        tostring(cheapest.id),
+                        fireErr
+                    )
+                    return
+                end
+
+                StatusLabel.Text = string.format(
+                    "Upgraded cheapest [%s] | Slot %s | Cost $%s | Lv%d",
+                    upgradeMutationDisplayName(filterAtDecision),
+                    tostring(cheapest.id),
+                    tostring(math.floor(cost)),
+                    tonumber(cheapest.level) or 1
+                )
+
+                -- Allow the server/data to update the slime level and its
+                -- NEXT upgrade cost before we make the next decision.
+                task.wait(UPGRADE_DELAY)
+            end, debug.traceback)
+
+            if not ok then
+                warn("[AutoUpgrade] ERROR:", err)
+
+                StatusLabel.Text =
+                    "Auto Upgrade error: "
+                    .. tostring(err):match("^[^\\n]+")
             end
+
+            -- Fast re-scan after each decision. If an upgrade happened,
+            -- its new higher cost will be included in the next ranking.
+            task.wait(0.05)
+        else
+            task.wait(UPGRADE_SCAN)
         end
-        task.wait(UPGRADE_SCAN)
     end
 end)
 
@@ -1216,31 +2725,254 @@ task.spawn(function()
     while true do
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
-            local block = getTargetLuckyBlock()
-            if not block then
-                StatusLabel.Text = string.format("No Spain boxes | Total: %d", totalCollected)
+
+            -- If we are already carrying a stolen Lucky Block,
+            -- finish returning/depositing it before looking for another.
+            if LocalPlayer:GetAttribute("holdingSlime") == true then
+                StatusLabel.Text = "Lucky Block: carrying -> returning to base"
+                teleportToBase()
+                task.wait(0.35)
+
+                local depositDeadline = os.clock() + 5
+                while luckyEnabled
+                    and LocalPlayer:GetAttribute("holdingSlime") == true
+                    and os.clock() < depositDeadline
+                do
+                    task.wait(0.10)
+                end
+
                 luckyBlockBusy = false
-                task.wait(0.5)
-            else
-                local root = getRoot()
-                if root and block.part then
-                    root.CFrame = block.part.CFrame * CFrame.new(0, 3, 4)
-                    root.AssemblyLinearVelocity = Vector3.zero
-                    task.wait(0.15)
-                    if block.prompt and attemptSteal(block.prompt) then
-                        totalCollected += 1
-                        StatusLabel.Text = string.format("✓ Stole Spain! (#%d)", totalCollected)
-                        task.wait(0.3)
-                        teleportToBase()
-                        task.wait(0.5)
-                    else
-                        task.wait(0.3)
+                task.wait(0.10)
+                continue
+            end
+
+            local block = getTargetLuckyBlock()
+
+            if not block then
+                StatusLabel.Text = string.format(
+                    "No Spain boxes | Total: %d",
+                    totalCollected
+                )
+                luckyBlockBusy = false
+                task.wait(0.50)
+                continue
+            end
+
+            -- ===================================================
+            -- REQUIRED ORDER:
+            -- 1) Turn invisibility ON
+            -- 2) Verify local invisibility
+            -- 3) Teleport to Lucky Block
+            -- 4) Pick it up / retry
+            -- 5) Wait until holdingSlime == true
+            -- 6) ONLY THEN return to base
+            -- ===================================================
+
+            StatusLabel.Text = "Lucky Block: turning invisibility ON..."
+
+            local cloakReady = false
+
+            for invisTry = 1, 4 do
+                if activateCloak() then
+                    task.wait(0.20)
+
+                    local char = LocalPlayer.Character
+                    local invisible = char ~= nil
+                    local visiblePartFound = false
+
+                    if char then
+                        for _, obj in ipairs(char:GetDescendants()) do
+                            if obj:IsA("BasePart")
+                                and obj.Name ~= "HumanoidRootPart"
+                                and obj.Transparency < 0.95
+                            then
+                                visiblePartFound = true
+                                break
+                            end
+                        end
+                    end
+
+                    invisible = invisible and not visiblePartFound
+
+                    if invisible then
+                        cloakReady = true
+                        break
                     end
                 end
-                luckyBlockBusy = false
+
+                StatusLabel.Text = string.format(
+                    "Lucky Block: invis retry %d/4",
+                    invisTry
+                )
+
+                task.wait(0.15)
             end
+
+            if not cloakReady then
+                StatusLabel.Text =
+                    "Lucky Block: invisibility could not be confirmed"
+                luckyBlockBusy = false
+                task.wait(0.50)
+                continue
+            end
+
+            local root = getRoot()
+
+            if not root
+                or not block.part
+                or not block.part.Parent
+            then
+                StatusLabel.Text = "Lucky Block: target disappeared"
+                luckyBlockBusy = false
+                task.wait(0.25)
+                continue
+            end
+
+            -- Go to the Lucky Block only after invisibility is confirmed.
+            root.CFrame = block.part.CFrame * CFrame.new(0, 3, 4)
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            task.wait(0.18)
+
+            local collected = false
+
+            for pickupTry = 1, 5 do
+                if not luckyEnabled then
+                    break
+                end
+
+                -- Game's actual success state.
+                if LocalPlayer:GetAttribute("holdingSlime") == true then
+                    collected = true
+                    break
+                end
+
+                -- Re-assert invisibility before every retry.
+                activateCloak()
+                task.wait(0.12)
+
+                -- Stay beside the same target while retrying.
+                if block.part and block.part.Parent then
+                    local retryRoot = getRoot()
+
+                    if retryRoot then
+                        retryRoot.CFrame =
+                            block.part.CFrame * CFrame.new(0, 3, 4)
+
+                        retryRoot.AssemblyLinearVelocity = Vector3.zero
+                        retryRoot.AssemblyAngularVelocity = Vector3.zero
+                    end
+                end
+
+                -- Re-find a live prompt every attempt.
+                local prompt = nil
+
+                if block.model and block.model.Parent then
+                    for _, d in ipairs(block.model:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") and d.Enabled then
+                            local action =
+                                string.lower(
+                                    tostring(d.ActionText or "")
+                                )
+
+                            if action:find("steal", 1, true)
+                                or action:find("pick", 1, true)
+                                or action:find("take", 1, true)
+                                or action:find("open", 1, true)
+                            then
+                                prompt = d
+                                break
+                            end
+
+                            if not prompt then
+                                prompt = d
+                            end
+                        end
+                    end
+                end
+
+                prompt = prompt or block.prompt
+
+                if prompt and prompt.Parent then
+                    StatusLabel.Text = string.format(
+                        "Lucky Block: pickup attempt %d/5",
+                        pickupTry
+                    )
+
+                    attemptSteal(prompt)
+
+                    -- DO NOT return home based on attemptSteal().
+                    -- Wait for the game's own holding state instead.
+                    local pickupDeadline = os.clock() + 1.50
+
+                    while luckyEnabled
+                        and os.clock() < pickupDeadline
+                    do
+                        if LocalPlayer:GetAttribute("holdingSlime") == true then
+                            collected = true
+                            break
+                        end
+
+                        task.wait(0.05)
+                    end
+
+                    if collected then
+                        break
+                    end
+                else
+                    StatusLabel.Text = string.format(
+                        "Lucky Block: prompt missing %d/5",
+                        pickupTry
+                    )
+                end
+
+                task.wait(0.20)
+            end
+
+            if not collected then
+                -- Failed pickup: DO NOT teleport home.
+                StatusLabel.Text =
+                    "Lucky Block: pickup not confirmed - retrying"
+                luckyBlockBusy = false
+                task.wait(0.25)
+                continue
+            end
+
+            totalCollected += 1
+
+            StatusLabel.Text = string.format(
+                "✓ Lucky Block confirmed (#%d) -> Base",
+                totalCollected
+            )
+
+            -- ONLY NOW, after holdingSlime is true, return to base.
+            teleportToBase()
+            task.wait(0.35)
+
+            -- Wait for deposit/release before searching for the next block.
+            local clearDeadline = os.clock() + 5
+
+            while luckyEnabled
+                and LocalPlayer:GetAttribute("holdingSlime") == true
+                and os.clock() < clearDeadline
+            do
+                task.wait(0.10)
+            end
+
+            if LocalPlayer:GetAttribute("holdingSlime") == true then
+                StatusLabel.Text =
+                    "Lucky Block: still carrying at base - retrying base"
+            else
+                StatusLabel.Text = string.format(
+                    "✓ Deposited (#%d) | finding next...",
+                    totalCollected
+                )
+            end
+
+            luckyBlockBusy = false
         end
-        task.wait(0.1)
+
+        task.wait(0.10)
     end
 end)
 
