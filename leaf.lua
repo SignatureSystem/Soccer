@@ -177,12 +177,6 @@ local State = {
     SmartCapacity = true,
     ReturnAfterSell = true,
 
-    -- TURBO CLUSTER:
-    -- stay in one leaf cluster and perform several native collections
-    -- before teleporting again. This removes most per-leaf TP overhead.
-    TurboCluster = true,
-    TurboActionsPerCluster = 6,
-
     RadiusIndex = 3,
     BatchIndex = 3,
     DelayIndex = 2,
@@ -213,7 +207,6 @@ local doSell
 local AutoCollectBtn = makeButton("AUTO COLLECT: OFF")
 local AutoSellBtn = makeButton("AUTO SELL: ON")
 local TPSweepBtn = makeButton("TP SWEEP: OFF")
-local TurboBtn = makeButton("TURBO CLUSTER: ON")
 local ValueFirstBtn = makeButton("5x / 2x VALUE FIRST: ON")
 local SmartCapacityBtn = makeButton("SMART CAPACITY: ON")
 local ReturnBtn = makeButton("RETURN AFTER SELL: ON")
@@ -309,10 +302,6 @@ TPSweepBtn.MouseButton1Click:Connect(function()
     toggleField(TPSweepBtn, "TPSweep", "TP SWEEP")
 end)
 
-TurboBtn.MouseButton1Click:Connect(function()
-    toggleField(TurboBtn, "TurboCluster", "TURBO CLUSTER")
-end)
-
 ValueFirstBtn.MouseButton1Click:Connect(function()
     toggleField(ValueFirstBtn, "ValueFirst", "5x / 2x VALUE FIRST")
 end)
@@ -349,7 +338,6 @@ end)
 refreshToggle(AutoCollectBtn, "AUTO COLLECT", State.AutoCollect)
 refreshToggle(AutoSellBtn, "AUTO SELL", State.AutoSell)
 refreshToggle(TPSweepBtn, "TP SWEEP", State.TPSweep)
-refreshToggle(TurboBtn, "TURBO CLUSTER", State.TurboCluster)
 refreshToggle(ValueFirstBtn, "5x / 2x VALUE FIRST", State.ValueFirst)
 refreshToggle(SmartCapacityBtn, "SMART CAPACITY", State.SmartCapacity)
 refreshToggle(ReturnBtn, "RETURN AFTER SELL", State.ReturnAfterSell)
@@ -382,13 +370,6 @@ local ControlRows = {
         kind = "toggle",
         activate = function()
             toggleField(TPSweepBtn, "TPSweep", "TP SWEEP")
-        end
-    },
-    {
-        button = TurboBtn,
-        kind = "toggle",
-        activate = function()
-            toggleField(TurboBtn, "TurboCluster", "TURBO CLUSTER")
         end
     },
     {
@@ -1027,7 +1008,7 @@ local function ensureHandSelected()
     return (LocalPlayer:GetAttribute("SelectedTool") or "Hand") == "Hand"
 end
 
-local function nativeCollectLeaf(leaf, keepCamera)
+local function nativeCollectLeaf(leaf)
     if not leaf
         or not leaf.Parent
         or leaf.Parent ~= LeafFolder
@@ -1050,10 +1031,12 @@ local function nativeCollectLeaf(leaf, keepCamera)
     end
 
     if not ensureHandSelected() then
+        Status.Text = "Could not select Hand."
         return 0
     end
 
-    if not waitForHandReady(0.45) then
+    if not waitForHandReady(1.5) then
+        Status.Text = "Waiting for Hand cooldown..."
         return 0
     end
 
@@ -1063,19 +1046,17 @@ local function nativeCollectLeaf(leaf, keepCamera)
 
     local beforeLeaves = getLeaves()
     local beforeParent = leaf.Parent
+
+    -- Move close enough for the game's own camera Spherecast (10 studs).
     local target = leaf.Position
+    local standPos = target + Vector3.new(0, 2.5, 4.5)
 
-    -- Only teleport if outside native interaction range.
-    local distance = (root.Position - target).Magnitude
+    root.CFrame = CFrame.lookAt(standPos, target)
+    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 
-    if distance > 8 then
-        local standPos = target + Vector3.new(0, 2.5, 4.5)
-        root.CFrame = CFrame.lookAt(standPos, target)
-        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-        root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-        task.wait(0.035)
-    end
-
+    -- Force the camera to look straight at THIS leaf briefly.
+    -- The game's RenderStepped selector sets its private v8 target from this ray.
     local oldCameraType = camera.CameraType
     local oldCameraCF = camera.CFrame
 
@@ -1083,26 +1064,29 @@ local function nativeCollectLeaf(leaf, keepCamera)
         camera.CameraType = Enum.CameraType.Scriptable
         camera.CFrame =
             CFrame.lookAt(
-                target + Vector3.new(0, 2.6, 5.5),
+                target + Vector3.new(0, 2.8, 6),
                 target
             )
     end)
 
-    -- One rendered selection update is usually enough.
-    task.wait()
+    -- Give the game's own RenderStepped selection code several frames.
+    task.wait(0.12)
 
+    -- Fire the exact BindableEvent consumed by the game's own LocalScript:
+    -- MobileActionEvent.Event -> doToolAction() -> tryCollect()
     pcall(function()
         MobileActionEvent:Fire("leaf", "began")
     end)
 
-    task.wait(0.015)
+    task.wait(0.05)
 
     pcall(function()
         MobileActionEvent:Fire("leaf", "ended")
     end)
 
-    -- Short confirmation window. We don't need to wait nearly a full second.
-    local deadline = os.clock() + 0.22
+    -- Wait for either server-confirmed bag increase OR the live leaf to be
+    -- removed by the game's own collectMany().
+    local deadline = os.clock() + 0.85
     local success = false
 
     while os.clock() < deadline do
@@ -1116,51 +1100,15 @@ local function nativeCollectLeaf(leaf, keepCamera)
             break
         end
 
-        task.wait(0.01)
+        task.wait(0.03)
     end
 
-    if not keepCamera then
-        pcall(function()
-            camera.CameraType = oldCameraType
-            camera.CFrame = oldCameraCF
-        end)
-    end
+    pcall(function()
+        camera.CameraType = oldCameraType
+        camera.CFrame = oldCameraCF
+    end)
 
     return success and 1 or 0
-end
-
-local function getNearbyCluster(centerLeaf, maxCount)
-    local result = {}
-
-    if not centerLeaf or not centerLeaf.Parent then
-        return result
-    end
-
-    local center = centerLeaf.Position
-    local children = LeafFolder:GetChildren()
-
-    -- Native targeting is roughly 10 studs, so use an 8 stud cluster.
-    local i = 1
-    while i <= #children do
-        local leaf = children[i]
-
-        if leaf:IsA("BasePart")
-            and leaf.Parent == LeafFolder
-            and (leaf.Position - center).Magnitude <= 8
-        then
-            result[#result + 1] = leaf
-        end
-
-        i = i + 1
-    end
-
-    sortLeaves(result, center)
-
-    while #result > maxCount do
-        table.remove(result)
-    end
-
-    return result
 end
 
 local function collectBatch(batch)
@@ -1168,72 +1116,9 @@ local function collectBatch(batch)
         return 0
     end
 
-    local firstLeaf = batch[1]
-
-    if not State.TurboCluster then
-        return nativeCollectLeaf(firstLeaf, false)
-    end
-
-    local cluster =
-        getNearbyCluster(
-            firstLeaf,
-            State.TurboActionsPerCluster
-        )
-
-    if #cluster == 0 then
-        return nativeCollectLeaf(firstLeaf, false)
-    end
-
-    local root = getRoot()
-
-    if root and firstLeaf and firstLeaf.Parent then
-        local target = firstLeaf.Position
-        root.CFrame =
-            CFrame.lookAt(
-                target + Vector3.new(0, 2.5, 4.5),
-                target
-            )
-        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-        root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-        task.wait(0.035)
-    end
-
-    local total = 0
-    local i = 1
-
-    while i <= #cluster do
-        if not infiniteBag()
-            and getLeaves() >= getCapacity()
-        then
-            break
-        end
-
-        local leaf = cluster[i]
-
-        if leaf and leaf.Parent == LeafFolder then
-            total =
-                total
-                + nativeCollectLeaf(
-                    leaf,
-                    i < #cluster
-                )
-
-            -- Tiny inter-action delay only.
-            task.wait(0.012)
-        end
-
-        i = i + 1
-    end
-
-    -- Restore camera once after the whole cluster.
-    local camera = Workspace.CurrentCamera
-    if camera then
-        pcall(function()
-            camera.CameraType = Enum.CameraType.Custom
-        end)
-    end
-
-    return total
+    -- Native Hand collection automatically applies the game's own Grasp
+    -- upgrade to nearby leaves, so one valid targeted action is enough.
+    return nativeCollectLeaf(batch[1])
 end
 
 -- ============================================================
@@ -1408,9 +1293,8 @@ task.spawn(function()
                     local count = collectBatch(batch)
                     if count > 0 then
                         Status.Text =
-                            (State.TurboCluster and "TURBO " or "")
-                            .. "NATIVE COLLECT OK x"
-                            .. tostring(count)
+                            "NATIVE COLLECT OK | value x"
+                            .. tostring(leafValue(batch[1]))
                             .. " | bag "
                             .. tostring(getLeaves())
                             .. "/"
@@ -1424,12 +1308,7 @@ task.spawn(function()
                 end
 
                 State.BusyCollect = false
-
-                if State.TurboCluster then
-                    task.wait(0.01)
-                else
-                    task.wait(DelayValues[State.DelayIndex])
-                end
+                task.wait(DelayValues[State.DelayIndex])
             end
         else
             task.wait(0.08)
