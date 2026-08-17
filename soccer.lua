@@ -1,4 +1,4 @@
--- Combined Script: CHEAPEST-FIRST Spain Upgrade + FILTERED Lucky Block Collector + Burst Place/Open + Manual Place / Open
+-- Combined Script: CHEAPEST-FIRST RARITY + MUTATION Upgrade + FILTERED Lucky Block Collector + Burst Place/Open + Manual Place / Open
 -- + Pick Floor 1 / ALL + dedicated Place-by-Mutation dropdown + FIXED Place button + CURRENT INDIVIDUAL earnings desc + Invis
 
 local Players = game:GetService("Players")
@@ -53,12 +53,23 @@ local PICK_OPTIONS = {}
 for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
 for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
 
--- Auto Upgrade mutation filter.
--- "All" = every mutation / no-mutation slime that is otherwise eligible.
--- "Common" = no base mutation AND no event mutation.
+-- Auto Upgrade RARITY filter.
+-- "All" = every rarity.
+local UPGRADE_RARITY_OPTIONS = {
+    "All",
+    "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
+    "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions", "Spain",
+}
+
+local selectedUpgradeRarity = "All"
+
+-- Auto Upgrade MUTATION filter.
+-- "All" = any mutation.
+-- "Common" is displayed as "Common (No Mutation)" and means
+-- NO base mutation AND NO event mutation.
 local UPGRADE_MUTATION_OPTIONS = { "All", "Common" }
-for _, m in ipairs(ALL_MUTATIONS) do
-    table.insert(UPGRADE_MUTATION_OPTIONS, m)
+for _, mutationName in ipairs(ALL_MUTATIONS) do
+    table.insert(UPGRADE_MUTATION_OPTIONS, mutationName)
 end
 
 local selectedUpgradeMutation = "All"
@@ -194,36 +205,76 @@ local CollectBtn   = createButton("CollectToggle", 30, "Auto Collect: OFF")
 local UpgradeBtn   = createButton("UpgradeToggle", 64, "Auto Upgrade: OFF")
 
 -- ============================================
--- AUTO UPGRADE MUTATION FILTER
--- This selection is read live by the running Auto Upgrade loop.
--- You can change it before OR after enabling Auto Upgrade.
+-- AUTO UPGRADE RARITY + MUTATION FILTERS
+-- Both selections are read live by Auto Upgrade.
+
+-- Forward declaration is required because the Auto Upgrade dropdown
+-- click callbacks also close the Lucky Type dropdown, which is built
+-- slightly later in the GUI.
+local LuckyTypeDropList
+-- Example:
+--   Rarity = Champions
+--   Mutation = Cosmic
+-- -> only Cosmic Champions are eligible.
 -- ============================================
+
+local UpgradeRarityDropBtn = Instance.new("TextButton")
+UpgradeRarityDropBtn.Name = "UpgradeRarityDrop"
+UpgradeRarityDropBtn.Size = UDim2.new(0, 106, 0, 30)
+UpgradeRarityDropBtn.Position = UDim2.new(0, 15, 0, 98)
+UpgradeRarityDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
+UpgradeRarityDropBtn.BorderSizePixel = 0
+UpgradeRarityDropBtn.Text = "Rarity: ▼ All"
+UpgradeRarityDropBtn.TextColor3 = Color3.fromRGB(150, 205, 255)
+UpgradeRarityDropBtn.TextSize = 10
+UpgradeRarityDropBtn.Font = Enum.Font.GothamBold
+UpgradeRarityDropBtn.ZIndex = 50
+UpgradeRarityDropBtn.Parent = MainFrame
+Instance.new("UICorner", UpgradeRarityDropBtn).CornerRadius = UDim.new(0, 8)
 
 local UpgradeMutationDropBtn = Instance.new("TextButton")
 UpgradeMutationDropBtn.Name = "UpgradeMutationDrop"
-UpgradeMutationDropBtn.Size = UDim2.new(0, 220, 0, 30)
-UpgradeMutationDropBtn.Position = UDim2.new(0, 15, 0, 98)
-UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
+UpgradeMutationDropBtn.Size = UDim2.new(0, 106, 0, 30)
+UpgradeMutationDropBtn.Position = UDim2.new(0, 129, 0, 98)
+UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(48, 34, 62)
 UpgradeMutationDropBtn.BorderSizePixel = 0
-UpgradeMutationDropBtn.Text = "Upgrade Mutation: ▼  All"
-UpgradeMutationDropBtn.TextColor3 = Color3.fromRGB(150, 205, 255)
-UpgradeMutationDropBtn.TextSize = 11
+UpgradeMutationDropBtn.Text = "Mutation: ▼ All"
+UpgradeMutationDropBtn.TextColor3 = Color3.fromRGB(220, 180, 255)
+UpgradeMutationDropBtn.TextSize = 10
 UpgradeMutationDropBtn.Font = Enum.Font.GothamBold
 UpgradeMutationDropBtn.ZIndex = 50
 UpgradeMutationDropBtn.Parent = MainFrame
 Instance.new("UICorner", UpgradeMutationDropBtn).CornerRadius = UDim.new(0, 8)
 
+local UpgradeRarityDropList = Instance.new("ScrollingFrame")
+UpgradeRarityDropList.Name = "UpgradeRarityDropList"
+UpgradeRarityDropList.Size = UDim2.new(0, 220, 0, 180)
+UpgradeRarityDropList.Position = UDim2.new(0, 15, 0, 130)
+UpgradeRarityDropList.BackgroundColor3 = Color3.fromRGB(20, 28, 40)
+UpgradeRarityDropList.BorderSizePixel = 0
+UpgradeRarityDropList.Visible = false
+UpgradeRarityDropList.ScrollBarThickness = 4
+UpgradeRarityDropList.CanvasSize =
+    UDim2.new(0, 0, 0, #UPGRADE_RARITY_OPTIONS * 26)
+UpgradeRarityDropList.ZIndex = 60
+UpgradeRarityDropList.Parent = MainFrame
+Instance.new("UICorner", UpgradeRarityDropList).CornerRadius = UDim.new(0, 7)
+
+local upgradeRarityListLayout = Instance.new("UIListLayout")
+upgradeRarityListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+upgradeRarityListLayout.Parent = UpgradeRarityDropList
+
 local UpgradeMutationDropList = Instance.new("ScrollingFrame")
 UpgradeMutationDropList.Name = "UpgradeMutationDropList"
 UpgradeMutationDropList.Size = UDim2.new(0, 220, 0, 180)
 UpgradeMutationDropList.Position = UDim2.new(0, 15, 0, 130)
-UpgradeMutationDropList.BackgroundColor3 = Color3.fromRGB(20, 28, 40)
+UpgradeMutationDropList.BackgroundColor3 = Color3.fromRGB(32, 22, 42)
 UpgradeMutationDropList.BorderSizePixel = 0
 UpgradeMutationDropList.Visible = false
 UpgradeMutationDropList.ScrollBarThickness = 4
 UpgradeMutationDropList.CanvasSize =
     UDim2.new(0, 0, 0, #UPGRADE_MUTATION_OPTIONS * 26)
-UpgradeMutationDropList.ZIndex = 60
+UpgradeMutationDropList.ZIndex = 65
 UpgradeMutationDropList.Parent = MainFrame
 Instance.new("UICorner", UpgradeMutationDropList).CornerRadius = UDim.new(0, 7)
 
@@ -231,46 +282,114 @@ local upgradeMutationListLayout = Instance.new("UIListLayout")
 upgradeMutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 upgradeMutationListLayout.Parent = UpgradeMutationDropList
 
+local function upgradeRarityDisplayName(value)
+    return tostring(value)
+end
+
 local function upgradeMutationDisplayName(value)
-    if value == "Common" then
+    if tostring(value) == "Common" then
         return "Common (No Mutation)"
     end
     return tostring(value)
 end
 
-for i, mutationName in ipairs(UPGRADE_MUTATION_OPTIONS) do
+for i, rarityName in ipairs(UPGRADE_RARITY_OPTIONS) do
     local item = Instance.new("TextButton")
     item.Size = UDim2.new(1, -4, 0, 24)
     item.BackgroundColor3 = Color3.fromRGB(30, 42, 58)
     item.BorderSizePixel = 0
-    item.Text = "  " .. upgradeMutationDisplayName(mutationName)
+    item.Text = "  " .. upgradeRarityDisplayName(rarityName)
     item.TextColor3 = Color3.fromRGB(220, 232, 245)
     item.TextSize = 11
     item.Font = Enum.Font.Gotham
     item.TextXAlignment = Enum.TextXAlignment.Left
     item.LayoutOrder = i
     item.ZIndex = 61
+    item.Parent = UpgradeRarityDropList
+
+    item.MouseButton1Click:Connect(function()
+        selectedUpgradeRarity = rarityName
+        UpgradeRarityDropBtn.Text =
+            "Rarity: ▼ " .. upgradeRarityDisplayName(rarityName)
+
+        UpgradeRarityDropList.Visible = false
+
+        StatusLabel.Text =
+            "Auto Upgrade | Rarity: "
+            .. upgradeRarityDisplayName(selectedUpgradeRarity)
+            .. " | Mutation: "
+            .. upgradeMutationDisplayName(selectedUpgradeMutation)
+    end)
+end
+
+for i, mutationName in ipairs(UPGRADE_MUTATION_OPTIONS) do
+    local item = Instance.new("TextButton")
+    item.Size = UDim2.new(1, -4, 0, 24)
+    item.BackgroundColor3 = Color3.fromRGB(45, 31, 58)
+    item.BorderSizePixel = 0
+    item.Text = "  " .. upgradeMutationDisplayName(mutationName)
+    item.TextColor3 = Color3.fromRGB(235, 220, 248)
+    item.TextSize = 11
+    item.Font = Enum.Font.Gotham
+    item.TextXAlignment = Enum.TextXAlignment.Left
+    item.LayoutOrder = i
+    item.ZIndex = 66
     item.Parent = UpgradeMutationDropList
 
     item.MouseButton1Click:Connect(function()
         selectedUpgradeMutation = mutationName
+
+        local shortName =
+            mutationName == "Common"
+            and "No Mutation"
+            or tostring(mutationName)
+
         UpgradeMutationDropBtn.Text =
-            "Upgrade Mutation: ▼  "
-            .. upgradeMutationDisplayName(mutationName)
+            "Mutation: ▼ " .. shortName
 
         UpgradeMutationDropList.Visible = false
 
         StatusLabel.Text =
-            "Auto Upgrade "
-            .. (upgradeEnabled and "ON" or "OFF")
+            "Auto Upgrade | Rarity: "
+            .. upgradeRarityDisplayName(selectedUpgradeRarity)
             .. " | Mutation: "
-            .. upgradeMutationDisplayName(mutationName)
+            .. upgradeMutationDisplayName(selectedUpgradeMutation)
     end)
 end
 
+UpgradeRarityDropBtn.MouseButton1Click:Connect(function()
+    UpgradeMutationDropList.Visible = false
+
+    if LuckyTypeDropList then
+        LuckyTypeDropList.Visible = false
+    end
+
+    UpgradeRarityDropList.Visible =
+        not UpgradeRarityDropList.Visible
+
+    UpgradeRarityDropBtn.Text =
+        (UpgradeRarityDropList.Visible and "Rarity: ▲ " or "Rarity: ▼ ")
+        .. upgradeRarityDisplayName(selectedUpgradeRarity)
+end)
+
 UpgradeMutationDropBtn.MouseButton1Click:Connect(function()
+    UpgradeRarityDropList.Visible = false
+
+    if LuckyTypeDropList then
+        LuckyTypeDropList.Visible = false
+    end
+
     UpgradeMutationDropList.Visible =
         not UpgradeMutationDropList.Visible
+
+    local mutationLabel =
+        selectedUpgradeMutation == "Common"
+        and "No Mutation"
+        or upgradeMutationDisplayName(selectedUpgradeMutation)
+
+    UpgradeMutationDropBtn.Text =
+        (UpgradeMutationDropList.Visible and "Mutation: ▲ " or "Mutation: ▼ ")
+        .. mutationLabel
 end)
 
 local LuckyBtn     = createButton("LuckyToggle", 132, "Lucky Block: OFF")
@@ -293,7 +412,7 @@ LuckyTypeDropBtn.ZIndex = 70
 LuckyTypeDropBtn.Parent = MainFrame
 Instance.new("UICorner", LuckyTypeDropBtn).CornerRadius = UDim.new(0, 8)
 
-local LuckyTypeDropList = Instance.new("ScrollingFrame")
+LuckyTypeDropList = Instance.new("ScrollingFrame")
 LuckyTypeDropList.Name = "LuckyTypeDropList"
 LuckyTypeDropList.Size = UDim2.new(0, 220, 0, 190)
 LuckyTypeDropList.Position = UDim2.new(0, 15, 0, 198)
@@ -335,6 +454,7 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
 end
 
 LuckyTypeDropBtn.MouseButton1Click:Connect(function()
+    UpgradeRarityDropList.Visible = false
     UpgradeMutationDropList.Visible = false
     LuckyTypeDropList.Visible = not LuckyTypeDropList.Visible
 end)
@@ -457,6 +577,9 @@ DropBtn.MouseButton1Click:Connect(function()
     if MutationDropList then
         MutationDropList.Visible = false
     end
+    if UpgradeRarityDropList then
+        UpgradeRarityDropList.Visible = false
+    end
     if UpgradeMutationDropList then
         UpgradeMutationDropList.Visible = false
     end
@@ -549,6 +672,7 @@ end
 
 MutationDropBtn.MouseButton1Click:Connect(function()
     DropList.Visible = false
+    UpgradeRarityDropList.Visible = false
     UpgradeMutationDropList.Visible = false
     LuckyTypeDropList.Visible = false
     MutationDropList.Visible = not MutationDropList.Visible
@@ -648,6 +772,8 @@ local function setUpgradeState(on)
     StatusLabel.Text =
         "Auto Upgrade "
         .. (on and "ON" or "OFF")
+        .. " | Rarity: "
+        .. upgradeRarityDisplayName(selectedUpgradeRarity)
         .. " | Mutation: "
         .. upgradeMutationDisplayName(selectedUpgradeMutation)
 end
@@ -701,7 +827,9 @@ UpgradeBtn.MouseButton1Click:Connect(function()
 
         if remote then
             print(
-                "[AutoUpgrade] ON | Filter:",
+                "[AutoUpgrade] ON | Rarity:",
+                upgradeRarityDisplayName(selectedUpgradeRarity),
+                "| Mutation:",
                 upgradeMutationDisplayName(selectedUpgradeMutation),
                 "| Remote:",
                 remote:GetFullName()
@@ -1829,8 +1957,8 @@ local function getStandInfo(stand)
             )
     end
 
-    -- Keep the original script's Spain-only Auto Upgrade scope.
-    if not rarity or rarity ~= "Spain" then
+    -- Auto Upgrade supports all rarities; dropdown filtering happens later.
+    if not rarity or tostring(rarity) == "" then
         return nil
     end
 
@@ -1844,26 +1972,48 @@ local function getStandInfo(stand)
         level = level,
         cost = getUpgradeCost(sellPrice, level),
         rarity = rarity,
-        priority = UPGRADE_PRIORITY[rarity],
+        priority = UPGRADE_PRIORITY[rarity] or 999,
         slimeId = slimeId,
     }
 end
 
-local function candidateMatchesUpgradeMutation(info)
-    -- "All" MUST behave exactly like the old working Auto Upgrade.
-    if tostring(selectedUpgradeMutation) == "All" then
-        return true
+local function normalizeUpgradeRarity(rarity)
+    rarity = tostring(rarity or "")
+    if rarity == "Player God" then
+        return "Slime God"
     end
+    return rarity
+end
 
+local function candidateMatchesUpgradeFilters(info)
     if not info or not info.stand then
         return false
+    end
+
+    -- First: rarity filter.
+    if selectedUpgradeRarity ~= "All" then
+        local candidateRarity =
+            string.lower(normalizeUpgradeRarity(info.rarity))
+
+        local wantedRarity =
+            string.lower(normalizeUpgradeRarity(selectedUpgradeRarity))
+
+        if candidateRarity ~= wantedRarity then
+            return false
+        end
+    end
+
+    -- Second: mutation filter.
+    -- "All" skips mutation lookup entirely.
+    if selectedUpgradeMutation == "All" then
+        return true
     end
 
     local data = getData()
     local plotSlimes = (data and data.PlotSlimes) or {}
     local liveFolder = getPlayerSlimesFolder()
 
-    local ok, rarity, mutation, hasEventMutation, eventMutationNames =
+    local ok, _, mutation, hasEventMutation, eventMutationNames =
         pcall(
             getSlotRarityAndMutation,
             info.stand.Name,
@@ -1875,8 +2025,7 @@ local function candidateMatchesUpgradeMutation(info)
     if not ok then
         warn(
             "[AutoUpgrade] Mutation read failed for slot",
-            tostring(info.stand.Name),
-            rarity
+            tostring(info.stand.Name)
         )
         return false
     end
@@ -1909,8 +2058,8 @@ local function getPrioritizedUpgrades()
                 -- First run the ORIGINAL working eligibility/cost scanner.
                 local info = getStandInfo(stand)
 
-                -- Then apply the mutation dropdown as a narrow final filter.
-                if info and candidateMatchesUpgradeMutation(info) then
+                -- Then apply BOTH rarity and mutation dropdowns as final filters.
+                if info and candidateMatchesUpgradeFilters(info) then
                     table.insert(list, info)
                 end
             end
@@ -2640,7 +2789,8 @@ task.spawn(function()
                     return
                 end
 
-                local filterAtDecision = selectedUpgradeMutation
+                local rarityAtDecision = selectedUpgradeRarity
+                local mutationAtDecision = selectedUpgradeMutation
 
                 -- IMPORTANT:
                 -- Rebuild the full eligible list before EVERY SINGLE upgrade.
@@ -2650,8 +2800,9 @@ task.spawn(function()
 
                 if #upgrades == 0 then
                     StatusLabel.Text = string.format(
-                        "Auto Upgrade ON | %s | No eligible Spain slime",
-                        upgradeMutationDisplayName(filterAtDecision)
+                        "Auto Upgrade ON | %s + %s | No eligible slime",
+                        upgradeRarityDisplayName(rarityAtDecision),
+                        upgradeMutationDisplayName(mutationAtDecision)
                     )
                     return
                 end
@@ -2664,8 +2815,9 @@ task.spawn(function()
                 -- of the more expensive candidates should be upgraded.
                 if cost > cash then
                     StatusLabel.Text = string.format(
-                        "Auto Upgrade [%s] | Cheapest $%s | Cash $%s",
-                        upgradeMutationDisplayName(filterAtDecision),
+                        "Auto Upgrade [%s + %s] | Cheapest $%s | Cash $%s",
+                        upgradeRarityDisplayName(rarityAtDecision),
+                        upgradeMutationDisplayName(mutationAtDecision),
                         tostring(math.floor(cost)),
                         tostring(math.floor(cash))
                     )
@@ -2674,7 +2826,9 @@ task.spawn(function()
 
                 -- If the dropdown changed after the list was built,
                 -- do not spend cash on a stale candidate.
-                if filterAtDecision ~= selectedUpgradeMutation then
+                if rarityAtDecision ~= selectedUpgradeRarity
+                    or mutationAtDecision ~= selectedUpgradeMutation
+                then
                     return
                 end
 
@@ -2692,8 +2846,9 @@ task.spawn(function()
                 end
 
                 StatusLabel.Text = string.format(
-                    "Upgraded cheapest [%s] | Slot %s | Cost $%s | Lv%d",
-                    upgradeMutationDisplayName(filterAtDecision),
+                    "Upgraded cheapest [%s + %s] | Slot %s | Cost $%s | Lv%d",
+                    upgradeRarityDisplayName(rarityAtDecision),
+                    upgradeMutationDisplayName(mutationAtDecision),
                     tostring(cheapest.id),
                     tostring(math.floor(cost)),
                     tonumber(cheapest.level) or 1
