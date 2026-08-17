@@ -1,5 +1,6 @@
 -- Combined Script: ICONS UPDATE + CHEAPEST-FIRST RARITY/MUTATION Upgrade + FILTERED Lucky Block Collector
--- + selected-type Lucky Block Place/Open + Pick Floor 1/ALL + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
+-- + selected-type Lucky Block Place/Open + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
+-- + expandable right-side Gift All inventory panel
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,6 +25,7 @@ local REBIRTH_INTERVAL = 5
 local JUMP_UPGRADE_INTERVAL = 0.5
 local BOXES_AUTO_INTERVAL = 30
 local INVIS_REFRESH = 2.5
+local GIFT_REPEAT_INTERVAL = 1.25 -- re-send remaining inventory while Gift All stays ON
 
 local DELAY_EQUIP = 0.12
 local DELAY_PLACE = 0.22
@@ -137,6 +139,12 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 -- Default to the newest live tier.
 local selectedLuckyBlockType = "Icons"
 
+-- Gift All state is declared before GUI construction so the side panel
+-- and the worker loop share the same locals.
+local giftAllEnabled = false
+local giftTargetName = nil
+local giftInFlight = {}
+
 -- ============================================
 -- GUI
 -- ============================================
@@ -178,6 +186,104 @@ Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 15
 Title.Font = Enum.Font.GothamBold
 Title.Parent = MainFrame
+
+-- ============================================
+-- EXPANDABLE RIGHT-SIDE MENU: GIFT ALL
+-- Collapsed by default.  The arrow moves with the main draggable frame.
+-- ============================================
+local SideArrowBtn = Instance.new("TextButton")
+SideArrowBtn.Name = "SideArrow"
+SideArrowBtn.Size = UDim2.new(0, 24, 0, 44)
+SideArrowBtn.Position = UDim2.new(1, 4, 0, 36)
+SideArrowBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+SideArrowBtn.BorderSizePixel = 0
+SideArrowBtn.Text = ">"
+SideArrowBtn.TextColor3 = Color3.fromRGB(220, 220, 235)
+SideArrowBtn.TextSize = 18
+SideArrowBtn.Font = Enum.Font.GothamBold
+SideArrowBtn.ZIndex = 120
+SideArrowBtn.Parent = MainFrame
+Instance.new("UICorner", SideArrowBtn).CornerRadius = UDim.new(0, 7)
+local sideArrowStroke = Instance.new("UIStroke", SideArrowBtn)
+sideArrowStroke.Color = Color3.fromRGB(80, 80, 100)
+sideArrowStroke.Thickness = 1.5
+
+local GiftPanel = Instance.new("Frame")
+GiftPanel.Name = "GiftPanel"
+GiftPanel.Size = UDim2.new(0, 220, 0, 162)
+GiftPanel.Position = UDim2.new(1, 32, 0, 36)
+GiftPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 31)
+GiftPanel.BackgroundTransparency = 0.03
+GiftPanel.BorderSizePixel = 0
+GiftPanel.Visible = false
+GiftPanel.ZIndex = 115
+GiftPanel.Parent = MainFrame
+Instance.new("UICorner", GiftPanel).CornerRadius = UDim.new(0, 9)
+local giftPanelStroke = Instance.new("UIStroke", GiftPanel)
+giftPanelStroke.Color = Color3.fromRGB(85, 85, 108)
+giftPanelStroke.Thickness = 1.5
+
+local GiftTitle = Instance.new("TextLabel")
+GiftTitle.Size = UDim2.new(1, -20, 0, 26)
+GiftTitle.Position = UDim2.new(0, 10, 0, 6)
+GiftTitle.BackgroundTransparency = 1
+GiftTitle.Text = "Gift Inventory"
+GiftTitle.TextColor3 = Color3.fromRGB(245, 245, 250)
+GiftTitle.TextSize = 13
+GiftTitle.Font = Enum.Font.GothamBold
+GiftTitle.TextXAlignment = Enum.TextXAlignment.Left
+GiftTitle.ZIndex = 116
+GiftTitle.Parent = GiftPanel
+
+local GiftNameBox = Instance.new("TextBox")
+GiftNameBox.Name = "PlayerName"
+GiftNameBox.Size = UDim2.new(1, -20, 0, 32)
+GiftNameBox.Position = UDim2.new(0, 10, 0, 36)
+GiftNameBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
+GiftNameBox.BorderSizePixel = 0
+GiftNameBox.PlaceholderText = "Player username..."
+GiftNameBox.Text = ""
+GiftNameBox.ClearTextOnFocus = false
+GiftNameBox.TextColor3 = Color3.fromRGB(245, 245, 250)
+GiftNameBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 155)
+GiftNameBox.TextSize = 12
+GiftNameBox.Font = Enum.Font.Gotham
+GiftNameBox.ZIndex = 116
+GiftNameBox.Parent = GiftPanel
+Instance.new("UICorner", GiftNameBox).CornerRadius = UDim.new(0, 7)
+
+local GiftAllBtn = Instance.new("TextButton")
+GiftAllBtn.Name = "GiftAllToggle"
+GiftAllBtn.Size = UDim2.new(1, -20, 0, 32)
+GiftAllBtn.Position = UDim2.new(0, 10, 0, 75)
+GiftAllBtn.BackgroundColor3 = Color3.fromRGB(52, 38, 42)
+GiftAllBtn.BorderSizePixel = 0
+GiftAllBtn.Text = "Gift All: OFF"
+GiftAllBtn.TextColor3 = Color3.fromRGB(255, 105, 115)
+GiftAllBtn.TextSize = 12
+GiftAllBtn.Font = Enum.Font.GothamBold
+GiftAllBtn.ZIndex = 116
+GiftAllBtn.Parent = GiftPanel
+Instance.new("UICorner", GiftAllBtn).CornerRadius = UDim.new(0, 7)
+
+local GiftStatus = Instance.new("TextLabel")
+GiftStatus.Size = UDim2.new(1, -20, 0, 42)
+GiftStatus.Position = UDim2.new(0, 10, 0, 113)
+GiftStatus.BackgroundTransparency = 1
+GiftStatus.Text = "Enter a player in this server."
+GiftStatus.TextColor3 = Color3.fromRGB(185, 185, 200)
+GiftStatus.TextSize = 10
+GiftStatus.Font = Enum.Font.Gotham
+GiftStatus.TextWrapped = true
+GiftStatus.TextXAlignment = Enum.TextXAlignment.Left
+GiftStatus.TextYAlignment = Enum.TextYAlignment.Top
+GiftStatus.ZIndex = 116
+GiftStatus.Parent = GiftPanel
+
+SideArrowBtn.MouseButton1Click:Connect(function()
+    GiftPanel.Visible = not GiftPanel.Visible
+    SideArrowBtn.Text = GiftPanel.Visible and "<" or ">"
+end)
 
 local function createButton(name, y, text)
     local btn = Instance.new("TextButton")
@@ -821,6 +927,88 @@ local PlaceRemote, PickupRemote, OpenRemote
 local UpgradeChannel = nil
 local getPrioritizedUpgrades
 
+local GiftChannel = nil
+local GiftRawRemote = nil
+
+-- Match the game's own gifting handler exactly:
+-- _Lib.Network.new("Gift Slime", "RemoteFunction"):Fire(playerName, slimeUID)
+local function ResolveGiftChannel()
+    if GiftChannel and type(GiftChannel) == "table" then
+        return GiftChannel
+    end
+
+    if _Lib and _Lib.Network and typeof(_Lib.Network.new) == "function" then
+        local ok, channel = pcall(function()
+            return _Lib.Network.new("Gift Slime", "RemoteFunction")
+        end)
+
+        if ok and channel then
+            GiftChannel = channel
+            return GiftChannel
+        end
+    end
+
+    return nil
+end
+
+local function ResolveGiftRawRemote()
+    if GiftRawRemote
+        and GiftRawRemote.Parent
+        and GiftRawRemote:IsA("RemoteFunction")
+    then
+        return GiftRawRemote
+    end
+
+    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteFunction") and v.Name == "Gift Slime" then
+            GiftRawRemote = v
+            return GiftRawRemote
+        end
+    end
+
+    return nil
+end
+
+local function FireGiftSlime(playerName, slimeUID)
+    if LocalPlayer:GetAttribute("OldDataMigrationLocked") == true then
+        return false, "Trade/Gift locked while saved data is loading"
+    end
+
+    local channel = ResolveGiftChannel()
+    if channel and typeof(channel.Fire) == "function" then
+        local ok, result, message = pcall(function()
+            return channel:Fire(playerName, slimeUID)
+        end)
+
+        if ok then
+            if result == true then
+                return true, message
+            end
+            return false, (type(message) == "string" and message ~= "" and message) or "Gift request rejected"
+        end
+
+        GiftChannel = nil
+    end
+
+    local raw = ResolveGiftRawRemote()
+    if raw then
+        local ok, result, message = pcall(function()
+            return raw:InvokeServer(playerName, slimeUID)
+        end)
+
+        if ok then
+            if result == true then
+                return true, message
+            end
+            return false, (type(message) == "string" and message ~= "" and message) or "Gift request rejected"
+        end
+
+        return false, tostring(result)
+    end
+
+    return false, 'RemoteFunction "Gift Slime" unavailable'
+end
+
 -- Match the latest game's own upgrade path exactly:
 -- _Lib.Network.new("Upgrade Slime", "RemoteEvent"):Fire(slotName)
 -- Raw RemoteEvent is retained only as a fallback.
@@ -1137,6 +1325,101 @@ local function getData()
     end
 
     return nil
+end
+
+local function trimText(value)
+    value = tostring(value or "")
+    return value:match("^%s*(.-)%s*$") or ""
+end
+
+local function resolveGiftTarget(input)
+    local wanted = string.lower(trimText(input))
+    if wanted == "" then
+        return nil, "Type a player username first"
+    end
+
+    -- Exact username first.
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and string.lower(player.Name) == wanted then
+            return player
+        end
+    end
+
+    -- Exact display name second.
+    local exactDisplay = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and string.lower(player.DisplayName) == wanted then
+            if exactDisplay then
+                return nil, "Display name matches multiple players; use username"
+            end
+            exactDisplay = player
+        end
+    end
+    if exactDisplay then
+        return exactDisplay
+    end
+
+    -- Unique username prefix for convenience.
+    local prefixMatch = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer
+            and string.sub(string.lower(player.Name), 1, #wanted) == wanted
+        then
+            if prefixMatch then
+                return nil, "Name prefix matches multiple players; type more letters"
+            end
+            prefixMatch = player
+        end
+    end
+
+    if prefixMatch then
+        return prefixMatch
+    end
+
+    return nil, "Player not found in this server"
+end
+
+local function getGiftableInventoryUIDs()
+    local data = getData()
+    local inventory = data and data.Inventory
+    local list, seen = {}, {}
+
+    if type(inventory) ~= "table" then
+        return list
+    end
+
+    for _, entry in pairs(inventory) do
+        if type(entry) == "table" and entry.uid ~= nil then
+            local key = tostring(entry.uid)
+            if not seen[key] then
+                seen[key] = true
+                table.insert(list, entry.uid)
+            end
+        end
+    end
+
+    return list
+end
+
+local function setGiftAllState(on, resolvedPlayer)
+    giftAllEnabled = on == true
+
+    if giftAllEnabled then
+        giftTargetName = resolvedPlayer and resolvedPlayer.Name or giftTargetName
+        GiftAllBtn.Text = "Gift All: ON"
+        GiftAllBtn.TextColor3 = Color3.fromRGB(105, 255, 145)
+        GiftAllBtn.BackgroundColor3 = Color3.fromRGB(30, 62, 43)
+        GiftNameBox.TextEditable = false
+        GiftStatus.Text = "Target: " .. tostring(giftTargetName) .. " | sending inventory..."
+    else
+        GiftAllBtn.Text = "Gift All: OFF"
+        GiftAllBtn.TextColor3 = Color3.fromRGB(255, 105, 115)
+        GiftAllBtn.BackgroundColor3 = Color3.fromRGB(52, 38, 42)
+        GiftNameBox.TextEditable = true
+        giftTargetName = nil
+        table.clear(giftInFlight)
+        GiftStatus.Text = "Gift All stopped."
+    end
 end
 
 local function getBaseLevel(data)
@@ -2935,6 +3218,25 @@ local function doPlaceAndOpenBoxes()
 end
 
 -- ============================================
+-- GIFT ALL SIDE-PANEL CONTROL
+-- ============================================
+GiftAllBtn.MouseButton1Click:Connect(function()
+    if giftAllEnabled then
+        setGiftAllState(false)
+        return
+    end
+
+    local target, err = resolveGiftTarget(GiftNameBox.Text)
+    if not target then
+        GiftStatus.Text = tostring(err)
+        return
+    end
+
+    GiftNameBox.Text = target.Name
+    setGiftAllState(true, target)
+end)
+
+-- ============================================
 -- MANUAL BUTTONS
 -- ============================================
 PickupBtn.MouseButton1Click:Connect(function()
@@ -3756,6 +4058,76 @@ task.spawn(function()
     end
 end)
 
+-- Gift every UID currently in Data.Inventory in one burst, then re-read
+-- inventory and repeat while the toggle remains ON. Server-side gift rules,
+-- recipient acceptance, cooldowns and restrictions are left intact.
+task.spawn(function()
+    while true do
+        if giftAllEnabled then
+            local target = giftTargetName and Players:FindFirstChild(giftTargetName)
+
+            if not target or target == LocalPlayer then
+                GiftStatus.Text = "Target left the server. Gift All is still ON."
+                task.wait(GIFT_REPEAT_INTERVAL)
+                continue
+            end
+
+            local uids = getGiftableInventoryUIDs()
+
+            if #uids == 0 then
+                GiftStatus.Text = "Inventory empty | Gift All remains ON"
+                task.wait(GIFT_REPEAT_INTERVAL)
+                continue
+            end
+
+            local firedNow = 0
+            local total = #uids
+
+            -- Launch all currently available UIDs concurrently: one normal
+            -- Gift Slime request per inventory item.
+            for _, uid in ipairs(uids) do
+                if not giftAllEnabled then
+                    break
+                end
+
+                local key = tostring(uid)
+                if not giftInFlight[key] then
+                    giftInFlight[key] = true
+                    firedNow += 1
+
+                    task.spawn(function()
+                        local ok, message = FireGiftSlime(target.Name, uid)
+                        giftInFlight[key] = nil
+
+                        if not giftAllEnabled then
+                            return
+                        end
+
+                        if ok then
+                            if type(message) == "string" and message ~= "" then
+                                GiftStatus.Text = message
+                            end
+                        elseif type(message) == "string" and message ~= "" then
+                            -- Keep running; show the server's actual reason rather
+                            -- than trying to bypass its gifting restrictions.
+                            GiftStatus.Text = message
+                        end
+                    end)
+                end
+            end
+
+            GiftStatus.Text = string.format(
+                "Target: %s | batch %d/%d sent",
+                target.Name,
+                firedNow,
+                total
+            )
+        end
+
+        task.wait(GIFT_REPEAT_INTERVAL)
+    end
+end)
+
 task.spawn(function()
     while true do
         if rebirthEnabled and RebirthRemote then
@@ -3818,6 +4190,7 @@ function stopAll()
     setJumpUpgradeState(false)
     setBoxesAutoState(false)
     setInvisState(false)
+    setGiftAllState(false)
     deactivateCloak()
     StatusLabel.Text = "All systems stopped"
 end
@@ -3827,7 +4200,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS update + upgrade + steal + selected-type place/open")
+print("[AutoFarm] ICONS + upgrade + steal + selected-type place/open + Gift All panel")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
