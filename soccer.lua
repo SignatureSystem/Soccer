@@ -101,6 +101,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Secret",
     "Cosmic",
     "Soccer God",
+    "Divine",
     "Rainbow",
     "Exclusive",
     "Limited",
@@ -128,6 +129,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
         ["Slime God Lucky Block"] = true,
         ["Soccer God Lucky Block"] = true,
     },
+    ["Divine"] = { ["Divine Lucky Block"] = true },
     ["Rainbow"] = { ["Rainbow Lucky Block"] = true },
     ["Exclusive"] = { ["Exclusive Lucky Block"] = true },
     ["Limited"] = { ["Limited Lucky Block"] = true },
@@ -3512,12 +3514,26 @@ local function getTargetLuckyBlock()
             local matches = false
 
             if selectedLuckyBlockType == "All" then
-                -- Only accept the exact Lucky Block models from this game's database.
+                -- Prefer the known registry, but also accept newly-added live
+                -- Lucky Block models (for example Divine) by their model name/type.
                 for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
                     if names[modelName] == true then
                         matches = true
                         break
                     end
+                end
+
+                if not matches then
+                    local lowerName = string.lower(modelName)
+                    local modelType = string.lower(tostring(
+                        model:GetAttribute("Type")
+                        or model:GetAttribute("type")
+                        or ""
+                    ))
+
+                    matches =
+                        lowerName:find("lucky block", 1, true) ~= nil
+                        or modelType:find("lucky", 1, true) ~= nil
                 end
             else
                 local allowedNames =
@@ -3526,6 +3542,23 @@ local function getTargetLuckyBlock()
                 matches =
                     allowedNames ~= nil
                     and allowedNames[modelName] == true
+
+                -- Forward-compatible fallback for newly-added tiers.
+                if not matches then
+                    local wanted = string.lower(tostring(selectedLuckyBlockType))
+                    local lowerName = string.lower(modelName)
+                    local liveRarity = string.lower(tostring(
+                        model:GetAttribute("Rarity")
+                        or model:GetAttribute("rarity")
+                        or ""
+                    ))
+
+                    matches =
+                        (lowerName:find("lucky", 1, true) ~= nil
+                            and lowerName:find(wanted, 1, true) ~= nil)
+                        or (liveRarity ~= "" and liveRarity == wanted
+                            and lowerName:find("lucky", 1, true) ~= nil)
+                end
             end
 
             if not matches then
@@ -3599,14 +3632,38 @@ local function getTargetLuckyBlock()
 end
 
 local function attemptSteal(prompt)
-    if not prompt then return false end
-    local hold = prompt.HoldDuration or 0
-    if typeof(fireproximityprompt) == "function" then
-        local ok = pcall(function() fireproximityprompt(prompt) end)
-        if ok then task.wait(hold + 0.5) return true end
+    if not prompt or not prompt.Parent or not prompt.Enabled then
+        return false
     end
-    local ok = pcall(function() prompt:Trigger() end)
-    if ok then task.wait(hold + 0.5) return true end
+
+    local hold = math.max(0, tonumber(prompt.HoldDuration) or 0)
+
+    -- First use Roblox's actual hold lifecycle.  Waiting AFTER a one-shot
+    -- fireproximityprompt does not guarantee a stricter/longer prompt was held.
+    local began = pcall(function()
+        prompt:InputHoldBegin()
+    end)
+
+    if began then
+        task.wait(hold + 0.12)
+        pcall(function()
+            prompt:InputHoldEnd()
+        end)
+        task.wait(0.12)
+        return true
+    end
+
+    -- Executor fallback.
+    if typeof(fireproximityprompt) == "function" then
+        local ok = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+        if ok then
+            task.wait(hold + 0.35)
+            return true
+        end
+    end
+
     return false
 end
 
@@ -4558,15 +4615,28 @@ task.spawn(function()
                 continue
             end
 
-            -- Go to the Lucky Block only after invisibility is confirmed.
-            root.CFrame = block.part.CFrame * CFrame.new(0, 3, 4)
+            -- Go to the actual steal prompt part when possible.  New/larger
+            -- Lucky Block models can have a PrimaryPart offset from StealPrompt.
+            local approachPart = block.part
+            if block.prompt and block.prompt.Parent then
+                if block.prompt.Parent:IsA("BasePart") then
+                    approachPart = block.prompt.Parent
+                elseif block.prompt.Parent:IsA("Attachment")
+                    and block.prompt.Parent.Parent
+                    and block.prompt.Parent.Parent:IsA("BasePart")
+                then
+                    approachPart = block.prompt.Parent.Parent
+                end
+            end
+
+            root.CFrame = approachPart.CFrame * CFrame.new(0, 2, 2.25)
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
-            task.wait(0.18)
+            task.wait(0.20)
 
             local collected = false
 
-            for pickupTry = 1, 5 do
+            for pickupTry = 1, 7 do
                 if not luckyEnabled then
                     break
                 end
@@ -4587,7 +4657,7 @@ task.spawn(function()
 
                     if retryRoot then
                         retryRoot.CFrame =
-                            block.part.CFrame * CFrame.new(0, 3, 4)
+                            block.part.CFrame * CFrame.new(0, 2, 2.25)
 
                         retryRoot.AssemblyLinearVelocity = Vector3.zero
                         retryRoot.AssemblyAngularVelocity = Vector3.zero
@@ -4624,16 +4694,42 @@ task.spawn(function()
                 prompt = prompt or block.prompt
 
                 if prompt and prompt.Parent then
+                    -- Reposition to the prompt itself on every retry.  This is
+                    -- important for boxes whose visible/PrimaryPart center is
+                    -- offset from the actual interaction RootPart.
+                    local promptPart = nil
+                    if prompt.Parent:IsA("BasePart") then
+                        promptPart = prompt.Parent
+                    elseif prompt.Parent:IsA("Attachment")
+                        and prompt.Parent.Parent
+                        and prompt.Parent.Parent:IsA("BasePart")
+                    then
+                        promptPart = prompt.Parent.Parent
+                    end
+
+                    local retryRoot = getRoot()
+                    if retryRoot and promptPart then
+                        local maxDistance = tonumber(prompt.MaxActivationDistance) or 10
+                        local approachDistance = math.max(1.25, math.min(2.25, maxDistance * 0.35))
+
+                        retryRoot.CFrame =
+                            promptPart.CFrame * CFrame.new(0, 1.6, approachDistance)
+                        retryRoot.AssemblyLinearVelocity = Vector3.zero
+                        retryRoot.AssemblyAngularVelocity = Vector3.zero
+                        task.wait(0.10)
+                    end
+
                     StatusLabel.Text = string.format(
-                        "Lucky Block: pickup attempt %d/5",
-                        pickupTry
+                        "Lucky Block: pickup attempt %d/7 | hold %.2fs",
+                        pickupTry,
+                        tonumber(prompt.HoldDuration) or 0
                     )
 
                     attemptSteal(prompt)
 
                     -- DO NOT return home based on attemptSteal().
                     -- Wait for the game's own holding state instead.
-                    local pickupDeadline = os.clock() + 1.50
+                    local pickupDeadline = os.clock() + 2.25
 
                     while luckyEnabled
                         and os.clock() < pickupDeadline
@@ -4651,7 +4747,7 @@ task.spawn(function()
                     end
                 else
                     StatusLabel.Text = string.format(
-                        "Lucky Block: prompt missing %d/5",
+                        "Lucky Block: prompt missing %d/7",
                         pickupTry
                     )
                 end
@@ -4895,7 +4991,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS + upgrade + steal + selected-type place + OPEN ALL boxes + Gift All + Auto Accept Gifts + Lowest Profit pickup")
+print("[AutoFarm] ICONS + upgrade + steal + selected-type place + OPEN ALL boxes + Divine steal reliability + Gift All + Auto Accept Gifts + Lowest Profit pickup")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
