@@ -1,6 +1,6 @@
 -- Combined Script: ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
 -- + selected-type Lucky Block Place + OPEN ALL active boxes + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
--- + expandable right-side Gift All inventory panel + Auto Accept Gifts + Pick Lowest Profit by count
+-- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
 
 local Players = game:GetService("Players")
@@ -216,7 +216,7 @@ sideArrowStroke.Thickness = 1.5
 
 local GiftPanel = Instance.new("Frame")
 GiftPanel.Name = "GiftPanel"
-GiftPanel.Size = UDim2.new(0, 220, 0, 286)
+GiftPanel.Size = UDim2.new(0, 220, 0, 326)
 GiftPanel.Position = UDim2.new(1, 32, 0, 36)
 GiftPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 31)
 GiftPanel.BackgroundTransparency = 0.03
@@ -272,9 +272,58 @@ GiftAllBtn.ZIndex = 116
 GiftAllBtn.Parent = GiftPanel
 Instance.new("UICorner", GiftAllBtn).CornerRadius = UDim.new(0, 7)
 
+-- Gift run controls. Kept inside a scope so this very large script does not
+-- add more long-lived top-level locals. The worker resolves them by Name.
+do
+    local countBox = Instance.new("TextBox")
+    countBox.Name = "GiftCount"
+    countBox.Size = UDim2.new(0, 94, 0, 30)
+    countBox.Position = UDim2.new(0, 10, 0, 113)
+    countBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
+    countBox.BorderSizePixel = 0
+    countBox.PlaceholderText = "Gift Count"
+    countBox.Text = "10"
+    countBox.ClearTextOnFocus = false
+    countBox.TextColor3 = Color3.fromRGB(245, 245, 250)
+    countBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 155)
+    countBox.TextSize = 11
+    countBox.Font = Enum.Font.GothamBold
+    countBox.ZIndex = 116
+    countBox.Parent = GiftPanel
+    Instance.new("UICorner", countBox).CornerRadius = UDim.new(0, 7)
+
+    local delayBox = Instance.new("TextBox")
+    delayBox.Name = "GiftDelay"
+    delayBox.Size = UDim2.new(0, 100, 0, 30)
+    delayBox.Position = UDim2.new(0, 110, 0, 113)
+    delayBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
+    delayBox.BorderSizePixel = 0
+    delayBox.PlaceholderText = "Delay sec"
+    delayBox.Text = "1.25"
+    delayBox.ClearTextOnFocus = false
+    delayBox.TextColor3 = Color3.fromRGB(245, 245, 250)
+    delayBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 155)
+    delayBox.TextSize = 11
+    delayBox.Font = Enum.Font.GothamBold
+    delayBox.ZIndex = 116
+    delayBox.Parent = GiftPanel
+    Instance.new("UICorner", delayBox).CornerRadius = UDim.new(0, 7)
+
+    countBox.FocusLost:Connect(function()
+        local count = math.floor(tonumber(countBox.Text) or 10)
+        countBox.Text = tostring(math.max(1, count))
+    end)
+
+    delayBox.FocusLost:Connect(function()
+        local delay = tonumber(delayBox.Text) or 1.25
+        delay = math.max(0, delay)
+        delayBox.Text = string.format("%.2f", delay)
+    end)
+end
+
 local GiftStatus = Instance.new("TextLabel")
 GiftStatus.Size = UDim2.new(1, -20, 0, 42)
-GiftStatus.Position = UDim2.new(0, 10, 0, 113)
+GiftStatus.Position = UDim2.new(0, 10, 0, 149)
 GiftStatus.BackgroundTransparency = 1
 GiftStatus.Text = "Enter a player in this server."
 GiftStatus.TextColor3 = Color3.fromRGB(185, 185, 200)
@@ -294,7 +343,7 @@ GiftStatus.Parent = GiftPanel
 local LowestProfitLabel = Instance.new("TextLabel")
 LowestProfitLabel.Name = "LowestProfitLabel"
 LowestProfitLabel.Size = UDim2.new(1, -20, 0, 16)
-LowestProfitLabel.Position = UDim2.new(0, 10, 0, 157)
+LowestProfitLabel.Position = UDim2.new(0, 10, 0, 190)
 LowestProfitLabel.BackgroundTransparency = 1
 LowestProfitLabel.Text = "Pick lowest-profit players:"
 LowestProfitLabel.TextColor3 = Color3.fromRGB(200, 200, 215)
@@ -307,7 +356,7 @@ LowestProfitLabel.Parent = GiftPanel
 local LowestProfitCountBox = Instance.new("TextBox")
 LowestProfitCountBox.Name = "LowestProfitCount"
 LowestProfitCountBox.Size = UDim2.new(0, 54, 0, 30)
-LowestProfitCountBox.Position = UDim2.new(0, 10, 0, 176)
+LowestProfitCountBox.Position = UDim2.new(0, 10, 0, 209)
 LowestProfitCountBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
 LowestProfitCountBox.BorderSizePixel = 0
 LowestProfitCountBox.PlaceholderText = "Count"
@@ -324,7 +373,7 @@ Instance.new("UICorner", LowestProfitCountBox).CornerRadius = UDim.new(0, 7)
 local PickLowestProfitBtn = Instance.new("TextButton")
 PickLowestProfitBtn.Name = "PickLowestProfitBtn"
 PickLowestProfitBtn.Size = UDim2.new(0, 140, 0, 30)
-PickLowestProfitBtn.Position = UDim2.new(0, 70, 0, 176)
+PickLowestProfitBtn.Position = UDim2.new(0, 70, 0, 209)
 PickLowestProfitBtn.BackgroundColor3 = Color3.fromRGB(38, 48, 62)
 PickLowestProfitBtn.BorderSizePixel = 0
 PickLowestProfitBtn.Text = "Pick Lowest Profit"
@@ -338,7 +387,7 @@ Instance.new("UICorner", PickLowestProfitBtn).CornerRadius = UDim.new(0, 7)
 local LowestProfitStatus = Instance.new("TextLabel")
 LowestProfitStatus.Name = "LowestProfitStatus"
 LowestProfitStatus.Size = UDim2.new(1, -20, 0, 30)
-LowestProfitStatus.Position = UDim2.new(0, 10, 0, 211)
+LowestProfitStatus.Position = UDim2.new(0, 10, 0, 244)
 LowestProfitStatus.BackgroundTransparency = 1
 LowestProfitStatus.Text = "Lowest cash/s first."
 LowestProfitStatus.TextColor3 = Color3.fromRGB(165, 165, 180)
@@ -358,7 +407,7 @@ LowestProfitStatus.Parent = GiftPanel
 local AutoAcceptGiftBtn = Instance.new("TextButton")
 AutoAcceptGiftBtn.Name = "AutoAcceptGiftToggle"
 AutoAcceptGiftBtn.Size = UDim2.new(1, -20, 0, 30)
-AutoAcceptGiftBtn.Position = UDim2.new(0, 10, 0, 248)
+AutoAcceptGiftBtn.Position = UDim2.new(0, 10, 0, 282)
 AutoAcceptGiftBtn.BackgroundColor3 = Color3.fromRGB(52, 38, 42)
 AutoAcceptGiftBtn.BorderSizePixel = 0
 AutoAcceptGiftBtn.Text = "Auto Accept Gifts: OFF"
@@ -1007,6 +1056,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[LuckyCollector] NO INVISIBILITY GATE BUILD")
 
 -- ============================================
 -- STATE
@@ -1648,28 +1698,6 @@ local function resolveGiftTarget(input)
     return nil, "Player not found in this server"
 end
 
-local function getGiftableInventoryUIDs()
-    local data = getData()
-    local inventory = data and data.Inventory
-    local list, seen = {}, {}
-
-    if type(inventory) ~= "table" then
-        return list
-    end
-
-    for _, entry in pairs(inventory) do
-        if type(entry) == "table" and entry.uid ~= nil then
-            local key = tostring(entry.uid)
-            if not seen[key] then
-                seen[key] = true
-                table.insert(list, entry.uid)
-            end
-        end
-    end
-
-    return list
-end
-
 local function setAutoAcceptGiftsState(on)
     autoAcceptGiftsEnabled = on == true
 
@@ -1704,7 +1732,7 @@ local function setGiftAllState(on, resolvedPlayer)
         GiftAllBtn.TextColor3 = Color3.fromRGB(105, 255, 145)
         GiftAllBtn.BackgroundColor3 = Color3.fromRGB(30, 62, 43)
         GiftNameBox.TextEditable = false
-        GiftStatus.Text = "Target: " .. tostring(giftTargetName) .. " | sending inventory..."
+        GiftStatus.Text = "Target: " .. tostring(giftTargetName) .. " | highest cash/s first..."
     else
         GiftAllBtn.Text = "Gift All: OFF"
         GiftAllBtn.TextColor3 = Color3.fromRGB(255, 105, 115)
@@ -2422,6 +2450,69 @@ local function calculateOwnedSlimeEarnings(inventoryEntry, def, playerData)
     end
 
     return math.max(0, earnings)
+end
+
+-- Gift queue ordered by the EXACT same final CURRENT cash/s used by Place Slimes.
+-- This means level + rebirth + base production + mutation/event mutation +
+-- invite/friend/admin production multipliers are already included.
+local function getGiftableInventoryUIDs()
+    local data = getData()
+    local inventory = data and data.Inventory
+    local list, seen = {}, {}
+
+    if type(inventory) ~= "table" then
+        return list
+    end
+
+    for _, entry in pairs(inventory) do
+        if type(entry) == "table" and entry.uid ~= nil then
+            local key = tostring(entry.uid)
+
+            if not seen[key] then
+                seen[key] = true
+
+                local def = resolveSlimeDefinition(entry)
+                local earnings = calculateOwnedSlimeEarnings(entry, def, data)
+                local rarity =
+                    (def and (def.Rarity or def.rarity))
+                    or entry.Rarity
+                    or entry.rarity
+                    or "Unknown"
+
+                if tostring(rarity) == "Player God" then
+                    rarity = "Slime God"
+                end
+
+                table.insert(list, {
+                    uid = entry.uid,
+                    value = tonumber(earnings) or 0,
+                    level = math.max(1, tonumber(entry.level) or 1),
+                    mutation = entry.mutation or entry.Mutation or "None",
+                    rarity = tostring(rarity),
+                    displayName =
+                        (def and def.Name)
+                        or tostring(entry.Name or entry.name or entry.id or entry.uid),
+                })
+            end
+        end
+    end
+
+    table.sort(list, function(a, b)
+        local av = tonumber(a.value) or 0
+        local bv = tonumber(b.value) or 0
+
+        if av ~= bv then
+            return av > bv
+        end
+
+        if (a.level or 1) ~= (b.level or 1) then
+            return (a.level or 1) > (b.level or 1)
+        end
+
+        return tostring(a.uid) < tostring(b.uid)
+    end)
+
+    return list
 end
 
 -- Return currently PLACED normal players ordered by CURRENT cash/s ASCENDING.
@@ -4499,7 +4590,7 @@ task.spawn(function()
             -- 6) ONLY THEN return to base
             -- ===================================================
 
-            StatusLabel.Text = "Lucky Block: firing invisibility..."
+            StatusLabel.Text = "Lucky Block: cloak fire (NON-BLOCKING) -> collecting..."
 
             -- Invisibility is best-effort only. It MUST be attempted, but a
             -- missing cloak / failed activation must never block collection.
@@ -4539,9 +4630,8 @@ task.spawn(function()
                     break
                 end
 
-                -- Best-effort invisibility fire before every retry; never block collection.
-                pcall(function() activateCloak() end)
-                task.wait(0.12)
+                -- Do NOT retry/verify invisibility here. Collection must proceed
+                -- regardless of cloak state once the initial fire was attempted.
 
                 -- Stay beside the same target while retrying.
                 if block.part and block.part.Parent then
@@ -4714,73 +4804,123 @@ task.spawn(function()
     end
 end)
 
--- Gift every UID currently in Data.Inventory in one burst, then re-read
--- inventory and repeat while the toggle remains ON. Server-side gift rules,
--- recipient acceptance, cooldowns and restrictions are left intact.
+-- Gift worker: highest FINAL current cash/s first.
+-- Gift Count = maximum number of DISTINCT inventory slimes attempted per run.
+-- Gift Delay = seconds between each request. The server remains authoritative
+-- for acceptance, restrictions, and any hidden rate limits.
 task.spawn(function()
     while true do
         if giftAllEnabled then
             local target = giftTargetName and Players:FindFirstChild(giftTargetName)
 
             if not target or target == LocalPlayer then
-                GiftStatus.Text = "Target left the server. Gift All is still ON."
-                task.wait(GIFT_REPEAT_INTERVAL)
+                GiftStatus.Text = "Target left the server. Gift All stopped."
+                setGiftAllState(false)
+                task.wait(0.20)
                 continue
             end
 
-            local uids = getGiftableInventoryUIDs()
+            local countBox = GiftPanel:FindFirstChild("GiftCount")
+            local delayBox = GiftPanel:FindFirstChild("GiftDelay")
+            local requestedCount = math.max(
+                1,
+                math.floor(tonumber(countBox and countBox.Text) or 10)
+            )
+            local giftDelay = math.max(
+                0,
+                tonumber(delayBox and delayBox.Text) or 1.25
+            )
 
-            if #uids == 0 then
-                GiftStatus.Text = "Inventory empty | Gift All remains ON"
-                task.wait(GIFT_REPEAT_INTERVAL)
+            if countBox then
+                countBox.Text = tostring(requestedCount)
+            end
+            if delayBox then
+                delayBox.Text = string.format("%.2f", giftDelay)
+            end
+
+            local ranked = getGiftableInventoryUIDs()
+
+            if #ranked == 0 then
+                GiftStatus.Text = "Inventory empty | Gift All stopped"
+                setGiftAllState(false)
+                task.wait(0.20)
                 continue
             end
 
-            local firedNow = 0
-            local total = #uids
+            local attempted = 0
+            local availableAtStart = #ranked
 
-            -- Launch all currently available UIDs concurrently: one normal
-            -- Gift Slime request per inventory item.
-            for _, uid in ipairs(uids) do
-                if not giftAllEnabled then
+            for _, gift in ipairs(ranked) do
+                if not giftAllEnabled or attempted >= requestedCount then
                     break
                 end
 
-                local key = tostring(uid)
+                local key = tostring(gift.uid)
+
+                -- Keep each UID unique for this Gift All run. setGiftAllState(false)
+                -- clears this table ready for the next run.
                 if not giftInFlight[key] then
                     giftInFlight[key] = true
-                    firedNow += 1
+                    attempted += 1
 
-                    task.spawn(function()
-                        local ok, message = FireGiftSlime(target.Name, uid)
-                        giftInFlight[key] = nil
+                    GiftStatus.Text = string.format(
+                        "%d/%d | %s | %.2f cash/s | %s | %s",
+                        attempted,
+                        math.min(requestedCount, availableAtStart),
+                        tostring(gift.displayName),
+                        tonumber(gift.value) or 0,
+                        tostring(gift.rarity),
+                        tostring(gift.mutation)
+                    )
 
-                        if not giftAllEnabled then
-                            return
-                        end
+                    print(string.format(
+                        "[GiftPriority] #%d UID=%s | %s | Cash/s=%.2f | Lv=%d | Rarity=%s | Mutation=%s",
+                        attempted,
+                        tostring(gift.uid),
+                        tostring(gift.displayName),
+                        tonumber(gift.value) or 0,
+                        tonumber(gift.level) or 1,
+                        tostring(gift.rarity),
+                        tostring(gift.mutation)
+                    ))
 
-                        if ok then
-                            if type(message) == "string" and message ~= "" then
-                                GiftStatus.Text = message
-                            end
-                        elseif type(message) == "string" and message ~= "" then
-                            -- Keep running; show the server's actual reason rather
-                            -- than trying to bypass its gifting restrictions.
-                            GiftStatus.Text = message
-                        end
-                    end)
+                    local ok, message = FireGiftSlime(target.Name, gift.uid)
+
+                    if type(message) == "string" and message ~= "" then
+                        GiftStatus.Text = string.format(
+                            "%d/%d | %.2f cash/s | %s",
+                            attempted,
+                            math.min(requestedCount, availableAtStart),
+                            tonumber(gift.value) or 0,
+                            message
+                        )
+                    elseif not ok then
+                        GiftStatus.Text = string.format(
+                            "%d/%d | request rejected | %.2f cash/s",
+                            attempted,
+                            math.min(requestedCount, availableAtStart),
+                            tonumber(gift.value) or 0
+                        )
+                    end
+
+                    if giftAllEnabled and attempted < requestedCount then
+                        task.wait(giftDelay)
+                    end
                 end
             end
 
+            local completed = attempted
+            local wanted = requestedCount
+            setGiftAllState(false)
             GiftStatus.Text = string.format(
-                "Target: %s | batch %d/%d sent",
-                target.Name,
-                firedNow,
-                total
+                "Gift run complete: %d/%d attempted | highest cash/s first | delay %.2fs",
+                completed,
+                wanted,
+                giftDelay
             )
         end
 
-        task.wait(GIFT_REPEAT_INTERVAL)
+        task.wait(0.10)
     end
 end)
 
@@ -4857,7 +4997,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS + upgrade + steal + selected-type place + OPEN ALL boxes + Gift All + Auto Accept Gifts + Lowest Profit pickup")
+print("[AutoFarm] ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
