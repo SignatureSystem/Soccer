@@ -1,6 +1,7 @@
 -- Combined Script: ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
 -- + selected-type Lucky Block Place + OPEN ALL active boxes + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + Auto Accept Gifts + Pick Lowest Profit by count
+-- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -4489,62 +4490,23 @@ task.spawn(function()
             end
 
             -- ===================================================
-            -- REQUIRED ORDER:
-            -- 1) Turn invisibility ON
-            -- 2) Verify local invisibility
+            -- WORKING LUCKY BLOCK ORDER (kept intact):
+            -- 1) FIRE invisibility attempt first
+            -- 2) Do NOT require invisibility to succeed/confirm
             -- 3) Teleport to Lucky Block
-            -- 4) Pick it up / retry
+            -- 4) Pick it up / retry using the original prompt mechanism
             -- 5) Wait until holdingSlime == true
             -- 6) ONLY THEN return to base
             -- ===================================================
 
-            StatusLabel.Text = "Lucky Block: turning invisibility ON..."
+            StatusLabel.Text = "Lucky Block: firing invisibility..."
 
-            local cloakReady = false
-
-            for invisTry = 1, 4 do
-                if activateCloak() then
-                    task.wait(0.20)
-
-                    local char = LocalPlayer.Character
-                    local invisible = char ~= nil
-                    local visiblePartFound = false
-
-                    if char then
-                        for _, obj in ipairs(char:GetDescendants()) do
-                            if obj:IsA("BasePart")
-                                and obj.Name ~= "HumanoidRootPart"
-                                and obj.Transparency < 0.95
-                            then
-                                visiblePartFound = true
-                                break
-                            end
-                        end
-                    end
-
-                    invisible = invisible and not visiblePartFound
-
-                    if invisible then
-                        cloakReady = true
-                        break
-                    end
-                end
-
-                StatusLabel.Text = string.format(
-                    "Lucky Block: invis retry %d/4",
-                    invisTry
-                )
-
-                task.wait(0.15)
-            end
-
-            if not cloakReady then
-                StatusLabel.Text =
-                    "Lucky Block: invisibility could not be confirmed"
-                luckyBlockBusy = false
-                task.wait(0.50)
-                continue
-            end
+            -- Invisibility is best-effort only. It MUST be attempted, but a
+            -- missing cloak / failed activation must never block collection.
+            pcall(function()
+                activateCloak()
+            end)
+            task.wait(0.12)
 
             local root = getRoot()
 
@@ -4558,7 +4520,7 @@ task.spawn(function()
                 continue
             end
 
-            -- Go to the Lucky Block only after invisibility is confirmed.
+            -- Go to the Lucky Block after the best-effort invisibility fire.
             root.CFrame = block.part.CFrame * CFrame.new(0, 3, 4)
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
@@ -4577,8 +4539,8 @@ task.spawn(function()
                     break
                 end
 
-                -- Re-assert invisibility before every retry.
-                activateCloak()
+                -- Best-effort invisibility fire before every retry; never block collection.
+                pcall(function() activateCloak() end)
                 task.wait(0.12)
 
                 -- Stay beside the same target while retrying.
