@@ -1,36 +1,64 @@
--- ICONIC BOX COLLECTOR - BOOT DIAGNOSTIC
--- UI MUST APPEAR IMMEDIATELY
+-- ============================================================
+-- ICONS LUCKY BLOCK AUTO COLLECTOR
+-- + LIVE LOG UI
+-- + AUTO SERVER HOP WHEN NONE FOUND
+-- ============================================================
 
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 
 local player = Players.LocalPlayer
+local PLACE_ID = game.PlaceId
+local CURRENT_JOB = game.JobId
 
--- Remove old logger
+local TARGET_NAME = "Icons Lucky Block"
+
+local SCAN_WAIT = 3
+local PICKUP_TRIES = 5
+local PICKUP_CONFIRM_TIMEOUT = 1.5
+local DEPOSIT_TIMEOUT = 5
+
+-- ============================================================
+-- STOP OLD INSTANCE
+-- ============================================================
+
+local RUN_TOKEN = {}
+_G.__IconsLuckyCollector = RUN_TOKEN
+
+local function running()
+    return _G.__IconsLuckyCollector == RUN_TOKEN
+end
+
+-- ============================================================
+-- UI FIRST
+-- ============================================================
+
 pcall(function()
     CoreGui.IconicCollectorDebug:Destroy()
 end)
 
--- =========================================================
--- UI FIRST
--- =========================================================
+pcall(function()
+    player.PlayerGui.IconicCollectorDebug:Destroy()
+end)
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "IconicCollectorDebug"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 
-local parentSuccess = pcall(function()
+local ok = pcall(function()
     gui.Parent = CoreGui
 end)
 
-if not parentSuccess then
+if not ok then
     gui.Parent = player:WaitForChild("PlayerGui")
 end
 
 local frame = Instance.new("Frame")
 frame.Parent = gui
-frame.Size = UDim2.new(0, 420, 0, 260)
+frame.Size = UDim2.new(0, 430, 0, 285)
 frame.Position = UDim2.new(0, 20, 0, 100)
 frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 frame.BorderSizePixel = 0
@@ -42,7 +70,7 @@ title.Parent = frame
 title.Size = UDim2.new(1, -20, 0, 35)
 title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "ICONIC COLLECTOR DEBUG"
+title.Text = "ICONIC LUCKY BOX COLLECTOR"
 title.TextColor3 = Color3.fromRGB(255, 220, 70)
 title.TextSize = 18
 title.Font = Enum.Font.GothamBold
@@ -55,19 +83,30 @@ status.Position = UDim2.new(0, 10, 0, 40)
 status.BackgroundTransparency = 1
 status.Text = "BOOTING..."
 status.TextColor3 = Color3.fromRGB(100, 255, 130)
-status.TextSize = 16
+status.TextSize = 15
 status.Font = Enum.Font.GothamBold
 status.TextXAlignment = Enum.TextXAlignment.Left
 
+local counter = Instance.new("TextLabel")
+counter.Parent = frame
+counter.Size = UDim2.new(1, -20, 0, 22)
+counter.Position = UDim2.new(0, 10, 0, 67)
+counter.BackgroundTransparency = 1
+counter.Text = "Collected: 0"
+counter.TextColor3 = Color3.fromRGB(220, 220, 220)
+counter.TextSize = 13
+counter.Font = Enum.Font.Gotham
+counter.TextXAlignment = Enum.TextXAlignment.Left
+
 local logs = Instance.new("TextLabel")
 logs.Parent = frame
-logs.Size = UDim2.new(1, -20, 1, -85)
-logs.Position = UDim2.new(0, 10, 0, 75)
+logs.Size = UDim2.new(1, -20, 1, -105)
+logs.Position = UDim2.new(0, 10, 0, 94)
 logs.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
 logs.BorderSizePixel = 0
 logs.Text = ""
 logs.TextColor3 = Color3.fromRGB(235, 235, 235)
-logs.TextSize = 13
+logs.TextSize = 12
 logs.Font = Enum.Font.Code
 logs.TextWrapped = true
 logs.TextXAlignment = Enum.TextXAlignment.Left
@@ -80,130 +119,579 @@ local messages = {}
 local function LOG(text)
     text = tostring(text)
 
-    table.insert(messages, text)
+    table.insert(messages, "[" .. os.date("%H:%M:%S") .. "] " .. text)
 
-    if #messages > 12 then
+    while #messages > 11 do
         table.remove(messages, 1)
     end
 
     logs.Text = table.concat(messages, "\n")
-    print("[ICONIC DEBUG] " .. text)
+    print("[ICONIC]", text)
 end
 
 local function STATUS(text)
-    status.Text = tostring(text)
+    status.Text = "Status: " .. tostring(text)
     LOG("> " .. tostring(text))
 end
 
 STATUS("SCRIPT LAUNCHED")
 
--- =========================================================
--- BASIC CHECKS
--- =========================================================
+-- ============================================================
+-- CHARACTER
+-- ============================================================
 
-task.wait(0.5)
-
-if not player then
-    STATUS("ERROR: LocalPlayer missing")
-    return
+local function getCharacter()
+    return player.Character
 end
 
-LOG("Player: " .. player.Name)
-
-local character = player.Character
-
-if not character then
-    STATUS("Waiting for character...")
-    character = player.CharacterAdded:Wait()
+local function getRoot()
+    local char = getCharacter()
+    return char and char:FindFirstChild("HumanoidRootPart")
 end
 
-LOG("Character found")
-
-local root = character:FindFirstChild("HumanoidRootPart")
-
-if root then
-    LOG("HumanoidRootPart found")
-else
-    STATUS("ERROR: HumanoidRootPart missing")
-    return
+local function getHumanoid()
+    local char = getCharacter()
+    return char and char:FindFirstChildOfClass("Humanoid")
 end
 
--- =========================================================
--- CHECK GAME STRUCTURE
--- =========================================================
+-- ============================================================
+-- GAME FOLDERS
+-- ============================================================
 
-local live = workspace:FindFirstChild("Live")
-
-if not live then
-    STATUS("ERROR: workspace.Live NOT FOUND")
-    return
+local function getSlimesFolder()
+    local live = workspace:FindFirstChild("Live")
+    return live and live:FindFirstChild("Slimes")
 end
 
-LOG("workspace.Live found")
+-- ============================================================
+-- FIND ICONS BOX
+-- ============================================================
 
-local slimes = live:FindFirstChild("Slimes")
+local function findPrompt(model)
+    for _, obj in ipairs(model:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") and obj.Enabled then
+            return obj
+        end
+    end
 
-if not slimes then
-    STATUS("ERROR: Live.Slimes NOT FOUND")
-    return
+    return nil
 end
 
-LOG("Live.Slimes found")
-LOG("Objects inside Slimes: " .. tostring(#slimes:GetChildren()))
+local function findIconsBoxes()
+    local slimes = getSlimesFolder()
 
--- =========================================================
--- LIST LUCKY BLOCK NAMES
--- =========================================================
+    if not slimes then
+        return {}
+    end
 
-STATUS("Scanning Lucky Blocks...")
+    local results = {}
 
-local luckyNames = {}
-local iconicCount = 0
+    for _, model in ipairs(slimes:GetChildren()) do
+        if model:IsA("Model")
+            and model.Name == TARGET_NAME
+            and not model:GetAttribute("Carrying") then
 
-for _, object in ipairs(slimes:GetChildren()) do
-    local lower = string.lower(object.Name)
+            local part =
+                model.PrimaryPart
+                or model:FindFirstChildWhichIsA("BasePart")
 
-    if string.find(lower, "lucky")
-        or string.find(lower, "icon")
-        or string.find(lower, "block") then
+            if part then
+                table.insert(results, {
+                    model = model,
+                    part = part,
+                    prompt = findPrompt(model)
+                })
+            end
+        end
+    end
 
-        if not luckyNames[object.Name] then
-            luckyNames[object.Name] = true
-            LOG("Found model name: " .. object.Name)
+    return results
+end
+
+-- ============================================================
+-- INVISIBILITY CLOAK
+-- ============================================================
+
+local function findCloak()
+    local function scan(container)
+        if not container then
+            return nil
         end
 
-        if object.Name == "Icons Lucky Block" then
-            iconicCount = iconicCount + 1
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") then
+                local n = string.lower(tool.Name)
+
+                if n:find("invisibility", 1, true)
+                    or n:find("cloak", 1, true)
+                    or n:find("invis", 1, true) then
+
+                    return tool
+                end
+            end
+        end
+    end
+
+    return scan(player.Character)
+        or scan(player:FindFirstChild("Backpack"))
+end
+
+local function activateCloak()
+    local tool = findCloak()
+
+    if not tool then
+        LOG("Cloak not found.")
+        return false
+    end
+
+    local humanoid = getHumanoid()
+    local char = player.Character
+
+    if not humanoid or not char then
+        return false
+    end
+
+    if tool.Parent ~= char then
+        pcall(function()
+            humanoid:EquipTool(tool)
+        end)
+
+        task.wait(0.15)
+    end
+
+    pcall(function()
+        tool:Activate()
+    end)
+
+    LOG("Cloak activated.")
+    return true
+end
+
+-- ============================================================
+-- HOLD STATE
+-- ============================================================
+
+local function isHolding()
+    return player:GetAttribute("holdingSlime") == true
+end
+
+local function waitPickup()
+    local timeout = os.clock() + PICKUP_CONFIRM_TIMEOUT
+
+    while running() and os.clock() < timeout do
+        if isHolding() then
+            return true
+        end
+
+        task.wait(0.05)
+    end
+
+    return isHolding()
+end
+
+-- ============================================================
+-- BASE
+-- ============================================================
+
+local function findMyPlot()
+    if _G.MyPlot and _G.MyPlot.Parent then
+        return _G.MyPlot
+    end
+
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then
+        return nil
+    end
+
+    for _, plot in ipairs(plots:GetChildren()) do
+        local owner = plot:FindFirstChild("owner")
+
+        if owner and tostring(owner.Value) == player.Name then
+            return plot
         end
     end
 end
 
-LOG("--------------------")
-LOG("Exact 'Icons Lucky Block' count: " .. iconicCount)
+local function teleportBase()
+    local root = getRoot()
 
-if iconicCount > 0 then
-    STATUS("ICONIC BOX FOUND - detector works")
-else
-    STATUS("NO EXACT ICONIC NAME FOUND")
+    if not root then
+        LOG("Root missing while returning.")
+        return false
+    end
+
+    local plot = findMyPlot()
+
+    if not plot then
+        LOG("My plot not found.")
+        return false
+    end
+
+    local base = plot:FindFirstChild("Base")
+    local tp = base and base:FindFirstChild("Teleport")
+
+    if not tp then
+        LOG("Base teleport missing.")
+        return false
+    end
+
+    if tp:IsA("Attachment") then
+        root.CFrame = tp.WorldCFrame + Vector3.new(0, 3, 0)
+
+    elseif tp:IsA("BasePart") then
+        root.CFrame = tp.CFrame + Vector3.new(0, 3, 0)
+
+    else
+        LOG("Unknown base teleport type.")
+        return false
+    end
+
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+
+    LOG("Returned to base.")
+    return true
 end
 
--- =========================================================
--- CONTINUOUS WATCH
--- =========================================================
+local function waitDeposit()
+    STATUS("Depositing box")
 
-while task.wait(1) do
+    local timeout = os.clock() + DEPOSIT_TIMEOUT
 
-    local count = 0
+    while running()
+        and isHolding()
+        and os.clock() < timeout do
 
-    for _, object in ipairs(slimes:GetChildren()) do
-        if object.Name == "Icons Lucky Block" then
-            count = count + 1
+        task.wait(0.1)
+    end
+
+    if not isHolding() then
+        LOG("Deposit confirmed.")
+        return true
+    end
+
+    LOG("Deposit timeout.")
+    return false
+end
+
+-- ============================================================
+-- PICKUP
+-- ============================================================
+
+local function firePrompt(prompt)
+    if not prompt or not prompt.Parent then
+        return false
+    end
+
+    if typeof(fireproximityprompt) == "function" then
+        local success = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+
+        if success then
+            return true
         end
     end
 
-    status.Text =
-        "Running | Icons Lucky Block: "
-        .. tostring(count)
-        .. " | holdingSlime: "
-        .. tostring(player:GetAttribute("holdingSlime"))
+    return pcall(function()
+        prompt:InputHoldBegin()
+
+        task.wait(
+            math.max(
+                tonumber(prompt.HoldDuration) or 0,
+                0.05
+            )
+        )
+
+        prompt:InputHoldEnd()
+    end)
+end
+
+local function collectBox(box)
+    STATUS("Iconic box found")
+
+    activateCloak()
+
+    local root = getRoot()
+
+    if not root or not box.part or not box.part.Parent then
+        LOG("Target/root disappeared.")
+        return false
+    end
+
+    STATUS("Teleporting to Iconic box")
+
+    root.CFrame =
+        box.part.CFrame
+        * CFrame.new(0, 3, 4)
+
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+
+    task.wait(0.2)
+
+    for attempt = 1, PICKUP_TRIES do
+        STATUS(
+            "Pickup attempt "
+            .. attempt
+            .. "/"
+            .. PICKUP_TRIES
+        )
+
+        if isHolding() then
+            return true
+        end
+
+        activateCloak()
+
+        local prompt =
+            box.model
+            and box.model.Parent
+            and findPrompt(box.model)
+
+        if prompt then
+            LOG("Firing pickup prompt.")
+
+            firePrompt(prompt)
+
+            if waitPickup() then
+                LOG("holdingSlime = TRUE")
+                return true
+            end
+        else
+            LOG("No pickup prompt found.")
+        end
+
+        task.wait(0.2)
+    end
+
+    LOG("Pickup failed.")
+    return false
+end
+
+-- ============================================================
+-- HTTP REQUEST
+-- ============================================================
+
+local requestFunction =
+    request
+    or http_request
+    or (syn and syn.request)
+    or (http and http.request)
+
+-- ============================================================
+-- SERVER HOP
+-- ============================================================
+
+local visited = {}
+
+local function getServer()
+    if not requestFunction then
+        LOG("Executor HTTP request function unavailable.")
+        return nil
+    end
+
+    local cursor = nil
+
+    for page = 1, 5 do
+        local url =
+            "https://games.roblox.com/v1/games/"
+            .. tostring(PLACE_ID)
+            .. "/servers/Public?sortOrder=Asc&limit=100"
+
+        if cursor then
+            url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
+        end
+
+        local success, response = pcall(function()
+            return requestFunction({
+                Url = url,
+                Method = "GET"
+            })
+        end)
+
+        if not success or not response then
+            LOG("Server API request failed.")
+            return nil
+        end
+
+        local body = response.Body or response.body
+
+        if not body then
+            LOG("Server API returned no body.")
+            return nil
+        end
+
+        local decoded
+
+        local decodeSuccess = pcall(function()
+            decoded = HttpService:JSONDecode(body)
+        end)
+
+        if not decodeSuccess or not decoded then
+            LOG("Unable to decode server list.")
+            return nil
+        end
+
+        for _, server in ipairs(decoded.data or {}) do
+            if server.id
+                and server.id ~= CURRENT_JOB
+                and not visited[server.id]
+                and tonumber(server.playing or 0)
+                    < tonumber(server.maxPlayers or 0) then
+
+                visited[server.id] = true
+
+                return server.id
+            end
+        end
+
+        cursor = decoded.nextPageCursor
+
+        if not cursor then
+            break
+        end
+    end
+
+    return nil
+end
+
+local function serverHop()
+    STATUS("No Iconic box - finding new server")
+
+    local serverId = getServer()
+
+    if not serverId then
+        LOG("No available server found.")
+        STATUS("Retrying server search")
+        return false
+    end
+
+    LOG("New server: " .. serverId)
+    STATUS("SERVER HOPPING...")
+
+    task.wait(0.5)
+
+    local success, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(
+            PLACE_ID,
+            serverId,
+            player
+        )
+    end)
+
+    if not success then
+        LOG("Teleport failed: " .. tostring(err))
+        return false
+    end
+
+    return true
+end
+
+-- ============================================================
+-- MAIN
+-- ============================================================
+
+local collected = 0
+
+-- Allow game objects to finish loading
+STATUS("Waiting for game to load")
+task.wait(2)
+
+while running() do
+
+    if isHolding() then
+        STATUS("Already holding Iconic box")
+
+        teleportBase()
+
+        task.wait(0.35)
+        waitDeposit()
+
+        task.wait(0.2)
+        continue
+    end
+
+    STATUS("Scanning server")
+
+    local boxes = findIconsBoxes()
+
+    LOG(
+        "Icons Lucky Block count: "
+        .. tostring(#boxes)
+    )
+
+    -- ========================================================
+    -- NONE FOUND -> SERVER HOP
+    -- ========================================================
+
+    if #boxes == 0 then
+        STATUS("No Iconic Lucky Box found")
+
+        task.wait(SCAN_WAIT)
+
+        -- Check once more before leaving
+        boxes = findIconsBoxes()
+
+        if #boxes == 0 then
+            LOG("Second scan = 0. Server hop triggered.")
+
+            if serverHop() then
+                break
+            end
+
+            task.wait(3)
+            continue
+        end
+    end
+
+    -- ========================================================
+    -- COLLECT EVERYTHING FOUND
+    -- ========================================================
+
+    for _, box in ipairs(boxes) do
+        if not running() then
+            break
+        end
+
+        if box.model and box.model.Parent then
+
+            local success = collectBox(box)
+
+            if success then
+                collected += 1
+                counter.Text = "Collected: " .. collected
+
+                STATUS("COLLECTED!")
+
+                teleportBase()
+                task.wait(0.35)
+
+                waitDeposit()
+
+                task.wait(0.25)
+            end
+        end
+    end
+
+    -- ========================================================
+    -- AFTER COLLECTION RESCAN
+    -- ========================================================
+
+    task.wait(0.5)
+
+    local remaining = findIconsBoxes()
+
+    if #remaining == 0 then
+        LOG("No more Iconic boxes in this server.")
+        STATUS("Preparing next server")
+
+        task.wait(1)
+
+        if serverHop() then
+            break
+        end
+    end
+
+    task.wait(1)
 end
