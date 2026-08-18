@@ -101,7 +101,6 @@ local LUCKY_BLOCK_OPTIONS = {
     "Secret",
     "Cosmic",
     "Soccer God",
-    "Divine",
     "Rainbow",
     "Exclusive",
     "Limited",
@@ -129,7 +128,6 @@ local LUCKY_BLOCK_MODEL_NAMES = {
         ["Slime God Lucky Block"] = true,
         ["Soccer God Lucky Block"] = true,
     },
-    ["Divine"] = { ["Divine Lucky Block"] = true },
     ["Rainbow"] = { ["Rainbow Lucky Block"] = true },
     ["Exclusive"] = { ["Exclusive Lucky Block"] = true },
     ["Limited"] = { ["Limited Lucky Block"] = true },
@@ -3528,23 +3526,6 @@ local function getTargetLuckyBlock()
                 matches =
                     allowedNames ~= nil
                     and allowedNames[modelName] == true
-
-                -- Narrow live-update fallback for Divine only.
-                -- Keep the old collector behavior for every existing box type.
-                if not matches and selectedLuckyBlockType == "Divine" then
-                    local lowerName = string.lower(modelName)
-                    local liveRarity = string.lower(tostring(
-                        model:GetAttribute("Rarity")
-                        or model:GetAttribute("rarity")
-                        or ""
-                    ))
-
-                    matches =
-                        (lowerName:find("divine", 1, true) ~= nil
-                            and lowerName:find("lucky", 1, true) ~= nil)
-                        or (liveRarity == "divine"
-                            and lowerName:find("lucky", 1, true) ~= nil)
-                end
             end
 
             if not matches then
@@ -4585,7 +4566,7 @@ task.spawn(function()
 
             local collected = false
 
-            for pickupTry = 1, 7 do
+            for pickupTry = 1, 5 do
                 if not luckyEnabled then
                     break
                 end
@@ -4644,7 +4625,7 @@ task.spawn(function()
 
                 if prompt and prompt.Parent then
                     StatusLabel.Text = string.format(
-                        "Lucky Block: pickup attempt %d/7",
+                        "Lucky Block: pickup attempt %d/5",
                         pickupTry
                     )
 
@@ -4652,7 +4633,7 @@ task.spawn(function()
 
                     -- DO NOT return home based on attemptSteal().
                     -- Wait for the game's own holding state instead.
-                    local pickupDeadline = os.clock() + 2.00
+                    local pickupDeadline = os.clock() + 1.50
 
                     while luckyEnabled
                         and os.clock() < pickupDeadline
@@ -4670,7 +4651,7 @@ task.spawn(function()
                     end
                 else
                     StatusLabel.Text = string.format(
-                        "Lucky Block: prompt missing %d/7",
+                        "Lucky Block: prompt missing %d/5",
                         pickupTry
                     )
                 end
@@ -4914,7 +4895,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS + batch10 upgrade + WORKING lucky steal + Divine target support + OPEN ALL boxes + Gift All + Auto Accept Gifts + Lowest Profit pickup")
+print("[AutoFarm] ICONS + upgrade + steal + selected-type place + OPEN ALL boxes + Gift All + Auto Accept Gifts + Lowest Profit pickup")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
