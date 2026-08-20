@@ -2733,10 +2733,47 @@ end
 
 local function normalizeMutationName(mutation)
     mutation = tostring(mutation or "None")
-    if mutation == "" then
-        mutation = "None"
+    mutation = string.lower(mutation)
+    if mutation == "" or mutation == "nil" or mutation == "none" or mutation == "normal" or mutation == "no mutation" then
+        return "None"
     end
     return mutation
+end
+
+-- Robust rarity resolver for held tools. Some live items store rarity in
+-- different fields (rarity, Rarity, tier, Attributes, or display names).
+local function resolveHeldToolRarity(entry)
+    local candidates = {
+        entry.rarity,
+        entry.Rarity,
+        entry.tier,
+        entry.Tier,
+        entry.displayRarity,
+        entry.displayName,
+        entry.name,
+        entry.id,
+    }
+
+    for _, value in ipairs(candidates) do
+        if value ~= nil then
+            local text = tostring(value)
+            local lower = string.lower(text)
+
+            if lower:find("icons") then return "Icons" end
+            if lower:find("spain") then return "Spain" end
+            if lower:find("champion") then return "Champions" end
+            if lower:find("exclusive") then return "Exclusive" end
+            if lower:find("legendary") then return "Legendary" end
+            if lower:find("mythic") then return "Mythic" end
+            if lower:find("secret") then return "Secret" end
+            if lower:find("divine") then return "Divine" end
+            if lower:find("rare") then return "Rare" end
+            if lower:find("epic") then return "Epic" end
+            if lower:find("common") then return "Common" end
+        end
+    end
+
+    return tostring(entry.rarity or "")
 end
 
 local function getHeldSlimeToolsByDualFilter(rarityFilter, mutationFilter)
@@ -2745,7 +2782,7 @@ local function getHeldSlimeToolsByDualFilter(rarityFilter, mutationFilter)
     local wantedRarity = string.lower(tostring(rarityFilter or "All"))
 
     for _, entry in ipairs(allTools) do
-        local entryRarity = tostring(entry.rarity or "")
+        local entryRarity = resolveHeldToolRarity(entry)
         if entryRarity == "Player God" then
             entryRarity = "Slime God"
         end
@@ -2789,7 +2826,7 @@ local function getHeldSlimeToolsByDualFilter(rarityFilter, mutationFilter)
         local baseMutation = entry.mutation
         if baseMutation ~= nil then
             local lower = string.lower(tostring(baseMutation))
-            if lower == "" or lower == "none" or lower == "normal" then
+            if lower == "" or lower == "none" or lower == "normal" or lower == "no mutation" then
                 baseMutation = nil
             end
         end
