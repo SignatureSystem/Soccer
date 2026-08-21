@@ -30,7 +30,7 @@ local CollectFilter = {
 
 local SCAN_WAIT = 3
 local PICKUP_TRIES = 5
-local PICKUP_CONFIRM_TIMEOUT = 1.5
+local PICKUP_CONFIRM_TIMEOUT = 4
 local DEPOSIT_TIMEOUT = 5
 
 -- ============================================================
@@ -537,7 +537,8 @@ local function collectBox(box)
     root.AssemblyLinearVelocity = Vector3.zero
     root.AssemblyAngularVelocity = Vector3.zero
 
-    task.wait(0.2)
+    -- Give the proximity prompt time to load after teleport
+    task.wait(1)
 
     for attempt = 1, PICKUP_TRIES do
         STATUS(
@@ -547,7 +548,9 @@ local function collectBox(box)
             .. PICKUP_TRIES
         )
 
+        -- Never return to base unless pickup is confirmed
         if isHolding() then
+            LOG("Already holding box.")
             return true
         end
 
@@ -563,18 +566,19 @@ local function collectBox(box)
 
             firePrompt(prompt)
 
+            -- Wait until server confirms holdingSlime
             if waitPickup() then
-                LOG("holdingSlime = TRUE")
+                LOG("Pickup successful - holdingSlime TRUE")
                 return true
             end
         else
-            LOG("No pickup prompt found.")
+            LOG("Prompt not ready, waiting.")
         end
 
-        task.wait(0.2)
+        task.wait(0.5)
     end
 
-    LOG("Pickup failed.")
+    LOG("Pickup failed after all attempts.")
     return false
 end
 
@@ -668,7 +672,7 @@ while running() do
 
             local success = collectBox(box)
 
-            if success then
+            if success and isHolding() then
                 collected += 1
                 counter.Text = "Collected: " .. collected
 
