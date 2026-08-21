@@ -15,7 +15,17 @@ local CURRENT_JOB = game.JobId
 
 local TARGET_NAMES = {
     "Japan Lucky Block",
-    "Icons Lucky Block"
+    "Icons Lucky Block",
+    "Spain Lucky Block",
+    "Champions Lucky Block"
+}
+
+-- Collection filters
+local CollectFilter = {
+    Japan = true,
+    Icons = true,
+    Spain = false,
+    Champions = false
 }
 
 local SCAN_WAIT = 3
@@ -73,7 +83,7 @@ title.Parent = frame
 title.Size = UDim2.new(1, -20, 0, 35)
 title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "JAPAN + ICONS LUCKY BLOCK COLLECTOR"
+title.Text = "LUCKY BLOCK FILTER COLLECTOR"
 title.TextColor3 = Color3.fromRGB(255, 220, 70)
 title.TextSize = 18
 title.Font = Enum.Font.GothamBold
@@ -137,6 +147,39 @@ local function STATUS(text)
     LOG("> " .. tostring(text))
 end
 
+
+-- ============================================================
+-- LUCKY BLOCK CHECKBOX FILTER UI
+-- ============================================================
+
+local function createCheckbox(name, key, y)
+    local box = Instance.new("TextButton")
+    box.Parent = frame
+    box.Size = UDim2.new(0, 170, 0, 25)
+    box.Position = UDim2.new(0, 240, 0, y)
+    box.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    box.TextColor3 = Color3.fromRGB(255,255,255)
+    box.TextSize = 13
+    box.Font = Enum.Font.Gotham
+
+    local function update()
+        box.Text = name .. ": " .. (CollectFilter[key] and "ON" or "OFF")
+    end
+
+    update()
+
+    box.MouseButton1Click:Connect(function()
+        CollectFilter[key] = not CollectFilter[key]
+        update()
+        LOG(name .. " collection " .. (CollectFilter[key] and "enabled" or "disabled"))
+    end)
+end
+
+createCheckbox("Japan", "Japan", 120)
+createCheckbox("Icons", "Icons", 150)
+createCheckbox("Spain", "Spain", 180)
+createCheckbox("Champions", "Champions", 210)
+
 STATUS("SCRIPT LAUNCHED")
 
 -- ============================================================
@@ -181,18 +224,29 @@ local function findPrompt(model)
 end
 
 local function isTargetLuckyBlock(name)
-    name = string.lower(tostring(name))
+    local n = string.lower(tostring(name))
 
-    -- Japan Lucky Block detection
-    -- Supports normal and cloned naming formats
-
-    if name == "japan lucky block" then
+    if n:find("japan", 1, true)
+        and n:find("lucky", 1, true)
+        and CollectFilter.Japan then
         return true
     end
 
-    if string.find(name, "japan", 1, true)
-        and string.find(name, "lucky", 1, true)
-    then
+    if n:find("icons", 1, true)
+        and n:find("lucky", 1, true)
+        and CollectFilter.Icons then
+        return true
+    end
+
+    if n:find("spain", 1, true)
+        and n:find("lucky", 1, true)
+        and CollectFilter.Spain then
+        return true
+    end
+
+    if n:find("champions", 1, true)
+        and n:find("lucky", 1, true)
+        and CollectFilter.Champions then
         return true
     end
 
@@ -203,50 +257,32 @@ end
 local function countLuckyBoxes()
     local slimes = getSlimesFolder()
 
-    local counts = {
-        Japan = 0,
-        Icons = 0,
-        Spain = 0,
-        Champions = 0,
-        Other = 0,
-        Total = 0
-    }
+    local japan = 0
+    local icons = 0
+    local total = 0
 
     if not slimes then
-        return counts
+        return japan, icons, total
     end
 
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model") then
-
             local n = string.lower(model.Name)
 
-            if n:find("lucky", 1, true)
-                or n:find("luckyblock", 1, true)
-                or n:find("lucky block", 1, true) then
+            if n == "japan lucky block"
+                or (n:find("japan", 1, true) and n:find("lucky", 1, true)) then
+                japan += 1
+                total += 1
 
-                counts.Total += 1
-
-                if n:find("japan", 1, true) then
-                    counts.Japan += 1
-
-                elseif n:find("icons", 1, true) then
-                    counts.Icons += 1
-
-                elseif n:find("spain", 1, true) then
-                    counts.Spain += 1
-
-                elseif n:find("champions", 1, true) then
-                    counts.Champions += 1
-
-                else
-                    counts.Other += 1
-                end
+            elseif n == "icons lucky block"
+                or (n:find("icons", 1, true) and n:find("lucky", 1, true)) then
+                icons += 1
+                total += 1
             end
         end
     end
 
-    return counts
+    return japan, icons, total
 end
 
 
@@ -585,16 +621,15 @@ while running() do
 
     local boxes = findIconsBoxes()
 
-    local boxCounts = countLuckyBoxes()
+    local japanCount, iconsCount, totalCount = countLuckyBoxes()
 
     LOG(
-        "MAP LUCKY BOXES | "
-        .. "Japan: " .. tostring(boxCounts.Japan)
-        .. " | Icons: " .. tostring(boxCounts.Icons)
-        .. " | Spain: " .. tostring(boxCounts.Spain)
-        .. " | Champions: " .. tostring(boxCounts.Champions)
-        .. " | Other: " .. tostring(boxCounts.Other)
-        .. " | TOTAL: " .. tostring(boxCounts.Total)
+        "Lucky Boxes Map | Japan: "
+        .. tostring(japanCount)
+        .. " | Icons: "
+        .. tostring(iconsCount)
+        .. " | Total: "
+        .. tostring(totalCount)
     )
 
     LOG(
