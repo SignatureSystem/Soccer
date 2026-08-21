@@ -72,7 +72,7 @@ title.Parent = frame
 title.Size = UDim2.new(1, -20, 0, 35)
 title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "JAPAN LUCKY BOX COLLECTOR"
+title.Text = "JAPAN LUCKY BLOCK COLLECTOR"
 title.TextColor3 = Color3.fromRGB(255, 220, 70)
 title.TextSize = 18
 title.Font = Enum.Font.GothamBold
@@ -182,10 +182,17 @@ end
 local function isTargetLuckyBlock(name)
     name = string.lower(tostring(name))
 
-    for _, target in ipairs(TARGET_NAMES) do
-        if name == string.lower(target) then
-            return true
-        end
+    -- Japan Lucky Block detection
+    -- Supports normal and cloned naming formats
+
+    if name == "japan lucky block" then
+        return true
+    end
+
+    if string.find(name, "japan", 1, true)
+        and string.find(name, "lucky", 1, true)
+    then
+        return true
     end
 
     return false
@@ -632,7 +639,7 @@ while running() do
     local boxes = findIconsBoxes()
 
     LOG(
-        "Japan Lucky Block count: "
+        "Japan Lucky Block detected: "
         .. tostring(#boxes)
     )
 
