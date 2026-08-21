@@ -13,7 +13,7 @@ local player = Players.LocalPlayer
 local PLACE_ID = game.PlaceId
 local CURRENT_JOB = game.JobId
 
-local TARGET_NAME = "Icons Lucky Block"
+local TARGET_NAME = "Japan Lucky Block"
 
 local SCAN_WAIT = 3
 local PICKUP_TRIES = 5
@@ -25,10 +25,10 @@ local DEPOSIT_TIMEOUT = 5
 -- ============================================================
 
 local RUN_TOKEN = {}
-_G.__IconsLuckyCollector = RUN_TOKEN
+_G.__JapanLuckyCollector = RUN_TOKEN
 
 local function running()
-    return _G.__IconsLuckyCollector == RUN_TOKEN
+    return _G.__JapanLuckyCollector == RUN_TOKEN
 end
 
 -- ============================================================
@@ -36,15 +36,15 @@ end
 -- ============================================================
 
 pcall(function()
-    CoreGui.IconicCollectorDebug:Destroy()
+    CoreGui.JapanCollectorDebug:Destroy()
 end)
 
 pcall(function()
-    player.PlayerGui.IconicCollectorDebug:Destroy()
+    player.PlayerGui.JapanCollectorDebug:Destroy()
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "IconicCollectorDebug"
+gui.Name = "JapanCollectorDebug"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 
@@ -70,7 +70,7 @@ title.Parent = frame
 title.Size = UDim2.new(1, -20, 0, 35)
 title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "ICONIC LUCKY BOX COLLECTOR"
+title.Text = "JAPAN LUCKY BOX COLLECTOR"
 title.TextColor3 = Color3.fromRGB(255, 220, 70)
 title.TextSize = 18
 title.Font = Enum.Font.GothamBold
@@ -126,7 +126,7 @@ local function LOG(text)
     end
 
     logs.Text = table.concat(messages, "\n")
-    print("[ICONIC]", text)
+    print("[JAPAN]", text)
 end
 
 local function STATUS(text)
@@ -177,7 +177,7 @@ local function findPrompt(model)
     return nil
 end
 
-local function findIconsBoxes()
+local function findJapanBoxes()
     local slimes = getSlimesFolder()
 
     if not slimes then
@@ -408,7 +408,7 @@ local function firePrompt(prompt)
 end
 
 local function collectBox(box)
-    STATUS("Iconic box found")
+    STATUS("Japan box found")
 
     activateCloak()
 
@@ -419,7 +419,7 @@ local function collectBox(box)
         return false
     end
 
-    STATUS("Teleporting to Iconic box")
+    STATUS("Teleporting to Japan box")
 
     root.CFrame =
         box.part.CFrame
@@ -557,7 +557,7 @@ local function getServer()
 end
 
 local function serverHop()
-    STATUS("No Iconic box - finding new server")
+    STATUS("No Japan box - finding new server")
 
     local serverId = getServer()
 
@@ -601,7 +601,7 @@ task.wait(2)
 while running() do
 
     if isHolding() then
-        STATUS("Already holding Iconic box")
+        STATUS("Already holding Japan box")
 
         teleportBase()
 
@@ -614,10 +614,10 @@ while running() do
 
     STATUS("Scanning server")
 
-    local boxes = findIconsBoxes()
+    local boxes = findJapanBoxes()
 
     LOG(
-        "Icons Lucky Block count: "
+        "Japan Lucky Block count: "
         .. tostring(#boxes)
     )
 
@@ -626,12 +626,12 @@ while running() do
     -- ========================================================
 
     if #boxes == 0 then
-        STATUS("No Iconic Lucky Box found")
+        STATUS("No Japan Lucky Box found")
 
         task.wait(SCAN_WAIT)
 
         -- Check once more before leaving
-        boxes = findIconsBoxes()
+        boxes = findJapanBoxes()
 
         if #boxes == 0 then
             LOG("Second scan = 0. Server hop triggered.")
@@ -680,10 +680,10 @@ while running() do
 
     task.wait(0.5)
 
-    local remaining = findIconsBoxes()
+    local remaining = findJapanBoxes()
 
     if #remaining == 0 then
-        LOG("No more Iconic boxes in this server.")
+        LOG("No more Japan boxes in this server.")
         STATUS("Preparing next server")
 
         task.wait(1)
