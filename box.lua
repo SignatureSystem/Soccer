@@ -1,710 +1,584 @@
--- ============================================================
--- ICONS LUCKY BLOCK AUTO COLLECTOR
--- + LIVE LOG UI
--- + AUTO SERVER HOP WHEN NONE FOUND
--- ============================================================
+--[[
+    JAPAN LUCKY BLOCK COLLECTOR SCRIPT
+    Automatically collects lucky blocks from each rarity zone
+    
+    How it works:
+    1. GUI appears with checkboxes for each rarity
+    2. When checked, player teleports to that zone's floor
+    3. Automatically triggers the "Pick Up" proximity prompt
+    4. Returns to the base spawn point
+    5. Unchecks the box when complete
+]]
 
 local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 
-local player = Players.LocalPlayer
-local PLACE_ID = game.PlaceId
-local CURRENT_JOB = game.JobId
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
 
-local TARGET_NAMES = {
-    "Japan Lucky Block",
-    "Icons Lucky Block",
-    "Spain Lucky Block",
-    "Champions Lucky Block"
+-- ====================================================
+-- CONFIGURATION
+-- ====================================================
+
+local CONFIG = {
+    -- Zone floor positions from the extracted data
+    ZONES = {
+        Japan = {
+            floor1 = Vector3.new(198.1033935546875, 4072.846923828125, -1599.916259765625),
+            floor2 = Vector3.new(198.1018524169922, 4794.3828125, -1694.916015625),
+            rarity = "Japan",
+            id = "1113"
+        },
+        Icons = {
+            floor1 = Vector3.new(198.1033935546875, 2923, -1416),
+            floor2 = Vector3.new(198.1033935546875, 3479, -1508),
+            rarity = "Icons",
+            id = "1112"
+        },
+        Spain = {
+            floor1 = Vector3.new(198.1033935546875, 1964, -1221),
+            floor2 = Vector3.new(198.1033935546875, 2367, -1317),
+            rarity = "Spain",
+            id = "1111"
+        },
+        Champions = {
+            floor1 = Vector3.new(198.1033935546875, 1309, -1036),
+            floor2 = Vector3.new(198.1033935546875, 1581, -1128),
+            rarity = "Champions",
+            id = "1103"
+        }
+    },
+    
+    -- Base spawn location (adjust as needed)
+    BASE_POSITION = Vector3.new(0, 50, 0),
+    
+    -- Timing settings
+    TELEPORT_DELAY = 0.5,          -- Delay between teleport and pickup attempt
+    COLLECT_DELAY = 1.0,           -- Time to wait after collecting
+    RETURN_DELAY = 0.5,            -- Delay before returning to base
+    
+    -- Humanoid settings
+    WALK_SPEED = 24,
+    JUMP_POWER = 50,
 }
 
--- Collection filters
-local CollectFilter = {
-    Japan = true,
-    Icons = true,
-    Spain = false,
-    Champions = false
-}
+-- ====================================================
+-- REMOTE REFERENCES
+-- ====================================================
 
-local SCAN_WAIT = 3
-local PICKUP_TRIES = 5
-local PICKUP_CONFIRM_TIMEOUT = 4
-local DEPOSIT_TIMEOUT = 5
-
--- ============================================================
--- STOP OLD INSTANCE
--- ============================================================
-
-local RUN_TOKEN = {}
-_G.__IconsLuckyCollector = RUN_TOKEN
-
-local function running()
-    return _G.__IconsLuckyCollector == RUN_TOKEN
+-- Find the pickup remote (from the extracted data: v8:Fire(v4))
+local PickupRemote
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if Remotes then
+    PickupRemote = Remotes:FindFirstChild("PickupSlime") 
+        or Remotes:FindFirstChild("PickUpSlime")
+        or Remotes:FindFirstChild("Pickup")
 end
 
--- ============================================================
--- UI FIRST
--- ============================================================
-
-pcall(function()
-    CoreGui.IconicCollectorDebug:Destroy()
-end)
-
-pcall(function()
-    player.PlayerGui.IconicCollectorDebug:Destroy()
-end)
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "IconicCollectorDebug"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-
-local ok = pcall(function()
-    gui.Parent = CoreGui
-end)
-
-if not ok then
-    gui.Parent = player:WaitForChild("PlayerGui")
-end
-
-local frame = Instance.new("Frame")
-frame.Parent = gui
-frame.Size = UDim2.new(0, 430, 0, 285)
-frame.Position = UDim2.new(0, 20, 0, 100)
-frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-frame.BorderSizePixel = 0
-
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
-
-local title = Instance.new("TextLabel")
-title.Parent = frame
-title.Size = UDim2.new(1, -20, 0, 35)
-title.Position = UDim2.new(0, 10, 0, 5)
-title.BackgroundTransparency = 1
-title.Text = "LUCKY BLOCK FILTER COLLECTOR"
-title.TextColor3 = Color3.fromRGB(255, 220, 70)
-title.TextSize = 18
-title.Font = Enum.Font.GothamBold
-title.TextXAlignment = Enum.TextXAlignment.Left
-
-local status = Instance.new("TextLabel")
-status.Parent = frame
-status.Size = UDim2.new(1, -20, 0, 30)
-status.Position = UDim2.new(0, 10, 0, 40)
-status.BackgroundTransparency = 1
-status.Text = "BOOTING..."
-status.TextColor3 = Color3.fromRGB(100, 255, 130)
-status.TextSize = 15
-status.Font = Enum.Font.GothamBold
-status.TextXAlignment = Enum.TextXAlignment.Left
-
-local counter = Instance.new("TextLabel")
-counter.Parent = frame
-counter.Size = UDim2.new(1, -20, 0, 22)
-counter.Position = UDim2.new(0, 10, 0, 67)
-counter.BackgroundTransparency = 1
-counter.Text = "Collected: 0"
-counter.TextColor3 = Color3.fromRGB(220, 220, 220)
-counter.TextSize = 13
-counter.Font = Enum.Font.Gotham
-counter.TextXAlignment = Enum.TextXAlignment.Left
-
-local logs = Instance.new("TextLabel")
-logs.Parent = frame
-logs.Size = UDim2.new(1, -20, 1, -105)
-logs.Position = UDim2.new(0, 10, 0, 94)
-logs.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
-logs.BorderSizePixel = 0
-logs.Text = ""
-logs.TextColor3 = Color3.fromRGB(235, 235, 235)
-logs.TextSize = 12
-logs.Font = Enum.Font.Code
-logs.TextWrapped = true
-logs.TextXAlignment = Enum.TextXAlignment.Left
-logs.TextYAlignment = Enum.TextYAlignment.Top
-
-Instance.new("UICorner", logs).CornerRadius = UDim.new(0, 7)
-
-local messages = {}
-
-local function LOG(text)
-    text = tostring(text)
-
-    table.insert(messages, "[" .. os.date("%H:%M:%S") .. "] " .. text)
-
-    while #messages > 11 do
-        table.remove(messages, 1)
+if not PickupRemote then
+    warn("[Collector] Could not find pickup remote! Trying to find by search...")
+    -- Search for any remote that might handle pickup
+    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+        if obj:IsA("RemoteEvent") and (
+            obj.Name:lower():find("pickup") or 
+            obj.Name:lower():find("collect")
+        ) then
+            PickupRemote = obj
+            break
+        end
     end
-
-    logs.Text = table.concat(messages, "\n")
-    print("[ICONIC]", text)
 end
 
-local function STATUS(text)
-    status.Text = "Status: " .. tostring(text)
-    LOG("> " .. tostring(text))
-end
+-- ====================================================
+-- GUI CREATION
+-- ====================================================
 
-
--- ============================================================
--- LUCKY BLOCK CHECKBOX FILTER UI
--- ============================================================
-
-local function createCheckbox(name, key, y)
-    local box = Instance.new("TextButton")
-    box.Parent = frame
-    box.Size = UDim2.new(0, 170, 0, 25)
-    box.Position = UDim2.new(0, 240, 0, y)
-    box.BackgroundColor3 = Color3.fromRGB(40,40,40)
-    box.TextColor3 = Color3.fromRGB(255,255,255)
-    box.TextSize = 13
-    box.Font = Enum.Font.Gotham
-
-    local function update()
-        box.Text = name .. ": " .. (CollectFilter[key] and "ON" or "OFF")
+local function createGUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "LuckyBlockCollector"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    -- Main Frame
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 250, 0, 300)
+    MainFrame.Position = UDim2.new(0, 10, 0, 100)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    MainFrame.BackgroundTransparency = 0.1
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Parent = ScreenGui
+    
+    -- Corner rounding
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = MainFrame
+    
+    -- Title
+    local Title = Instance.new("TextLabel")
+    Title.Name = "Title"
+    Title.Size = UDim2.new(1, 0, 0, 30)
+    Title.Position = UDim2.new(0, 0, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.Text = "LUCKY BLOCK COLLECTOR"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextScaled = true
+    Title.Font = Enum.Font.GothamBold
+    Title.Parent = MainFrame
+    
+    -- Checkbox container
+    local Container = Instance.new("Frame")
+    Container.Name = "Container"
+    Container.Size = UDim2.new(1, -20, 1, -60)
+    Container.Position = UDim2.new(0, 10, 0, 35)
+    Container.BackgroundTransparency = 1
+    Container.Parent = MainFrame
+    
+    -- Create checkboxes for each rarity
+    local checkboxes = {}
+    local yOffset = 0
+    local checkboxHeight = 35
+    
+    local RARITY_ORDER = {"Japan", "Icons", "Spain", "Champions"}
+    local RARITY_COLORS = {
+        Japan = Color3.fromRGB(170, 34, 34),
+        Icons = Color3.fromRGB(212, 175, 55),
+        Spain = Color3.fromRGB(255, 255, 255),
+        Champions = Color3.fromRGB(255, 237, 99),
+    }
+    
+    for _, rarity in ipairs(RARITY_ORDER) do
+        local CheckboxFrame = Instance.new("Frame")
+        CheckboxFrame.Name = rarity .. "Checkbox"
+        CheckboxFrame.Size = UDim2.new(1, 0, 0, checkboxHeight)
+        CheckboxFrame.Position = UDim2.new(0, 0, 0, yOffset)
+        CheckboxFrame.BackgroundTransparency = 1
+        CheckboxFrame.Parent = Container
+        
+        -- Checkbox button
+        local Checkbox = Instance.new("ImageButton")
+        Checkbox.Name = "Checkbox"
+        Checkbox.Size = UDim2.new(0, 24, 0, 24)
+        Checkbox.Position = UDim2.new(0, 0, 0, 5)
+        Checkbox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        Checkbox.BackgroundTransparency = 0.3
+        Checkbox.BorderSizePixel = 0
+        Checkbox.Image = "rbxassetid://0"
+        Checkbox.Parent = CheckboxFrame
+        
+        local CheckCorner = Instance.new("UICorner")
+        CheckCorner.CornerRadius = UDim.new(0, 4)
+        CheckCorner.Parent = Checkbox
+        
+        -- Checkmark (hidden by default)
+        local Checkmark = Instance.new("ImageLabel")
+        Checkmark.Name = "Checkmark"
+        Checkmark.Size = UDim2.new(1, 0, 1, 0)
+        Checkmark.BackgroundTransparency = 1
+        Checkmark.Image = "rbxassetid://6023420880" -- Checkmark icon
+        Checkmark.ImageColor3 = Color3.fromRGB(0, 255, 0)
+        Checkmark.Visible = false
+        Checkmark.Parent = Checkbox
+        
+        -- Label
+        local Label = Instance.new("TextLabel")
+        Label.Name = "Label"
+        Label.Size = UDim2.new(1, -30, 1, 0)
+        Label.Position = UDim2.new(0, 30, 0, 0)
+        Label.BackgroundTransparency = 1
+        Label.Text = rarity .. " Lucky Block"
+        Label.TextColor3 = RARITY_COLORS[rarity] or Color3.fromRGB(255, 255, 255)
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+        Label.TextScaled = true
+        Label.Font = Enum.Font.Gotham
+        Label.Parent = CheckboxFrame
+        
+        -- Status label (shows collecting/complete)
+        local Status = Instance.new("TextLabel")
+        Status.Name = "Status"
+        Status.Size = UDim2.new(0, 60, 1, 0)
+        Status.Position = UDim2.new(1, -65, 0, 0)
+        Status.BackgroundTransparency = 1
+        Status.Text = ""
+        Status.TextColor3 = Color3.fromRGB(150, 150, 150)
+        Status.TextScaled = true
+        Status.Font = Enum.Font.Gotham
+        Status.TextXAlignment = Enum.TextXAlignment.Right
+        Status.Parent = CheckboxFrame
+        
+        yOffset = yOffset + checkboxHeight + 5
+        
+        local checkboxData = {
+            frame = CheckboxFrame,
+            checkbox = Checkbox,
+            checkmark = Checkmark,
+            label = Label,
+            status = Status,
+            rarity = rarity,
+            checked = false,
+            isCollecting = false,
+        }
+        table.insert(checkboxes, checkboxData)
+        
+        -- Click handler
+        Checkbox.MouseButton1Click:Connect(function()
+            if checkboxData.isCollecting then return end
+            checkboxData.checked = not checkboxData.checked
+            Checkmark.Visible = checkboxData.checked
+            
+            if checkboxData.checked then
+                -- Start collection
+                task.spawn(function()
+                    collectLuckyBlock(checkboxData)
+                end)
+            else
+                Status.Text = ""
+            end
+        end)
     end
-
-    update()
-
-    box.MouseButton1Click:Connect(function()
-        CollectFilter[key] = not CollectFilter[key]
-        update()
-        LOG(name .. " collection " .. (CollectFilter[key] and "enabled" or "disabled"))
+    
+    -- Control buttons at bottom
+    local ButtonFrame = Instance.new("Frame")
+    ButtonFrame.Name = "ButtonFrame"
+    ButtonFrame.Size = UDim2.new(1, -20, 0, 40)
+    ButtonFrame.Position = UDim2.new(0, 10, 1, -45)
+    ButtonFrame.BackgroundTransparency = 1
+    ButtonFrame.Parent = MainFrame
+    
+    -- Select All button
+    local SelectAll = Instance.new("TextButton")
+    SelectAll.Name = "SelectAll"
+    SelectAll.Size = UDim2.new(0.45, -5, 1, 0)
+    SelectAll.Position = UDim2.new(0, 0, 0, 0)
+    SelectAll.BackgroundColor3 = Color3.fromRGB(60, 80, 120)
+    SelectAll.Text = "SELECT ALL"
+    SelectAll.TextColor3 = Color3.fromRGB(255, 255, 255)
+    SelectAll.TextScaled = true
+    SelectAll.Font = Enum.Font.GothamBold
+    SelectAll.BorderSizePixel = 0
+    SelectAll.Parent = ButtonFrame
+    
+    local SelectCorner = Instance.new("UICorner")
+    SelectCorner.CornerRadius = UDim.new(0, 4)
+    SelectCorner.Parent = SelectAll
+    
+    SelectAll.MouseButton1Click:Connect(function()
+        for _, data in ipairs(checkboxes) do
+            if not data.isCollecting then
+                data.checked = true
+                data.checkmark.Visible = true
+                task.spawn(function()
+                    collectLuckyBlock(data)
+                end)
+            end
+        end
     end)
-end
-
-createCheckbox("Japan", "Japan", 120)
-createCheckbox("Icons", "Icons", 150)
-createCheckbox("Spain", "Spain", 180)
-createCheckbox("Champions", "Champions", 210)
-
-STATUS("SCRIPT LAUNCHED")
-
--- ============================================================
--- CHARACTER
--- ============================================================
-
-local function getCharacter()
-    return player.Character
-end
-
-local function getRoot()
-    local char = getCharacter()
-    return char and char:FindFirstChild("HumanoidRootPart")
-end
-
-local function getHumanoid()
-    local char = getCharacter()
-    return char and char:FindFirstChildOfClass("Humanoid")
-end
-
--- ============================================================
--- GAME FOLDERS
--- ============================================================
-
-local function getSlimesFolder()
-    local live = workspace:FindFirstChild("Live")
-    return live and live:FindFirstChild("Slimes")
-end
-
--- ============================================================
--- FIND ICONS BOX
--- ============================================================
-
-local function findPrompt(model)
-    for _, obj in ipairs(model:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.Enabled then
-            return obj
+    
+    -- Deselect All button
+    local DeselectAll = Instance.new("TextButton")
+    DeselectAll.Name = "DeselectAll"
+    DeselectAll.Size = UDim2.new(0.45, -5, 1, 0)
+    DeselectAll.Position = UDim2.new(0.55, 5, 0, 0)
+    DeselectAll.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
+    DeselectAll.Text = "DESELECT ALL"
+    DeselectAll.TextColor3 = Color3.fromRGB(255, 255, 255)
+    DeselectAll.TextScaled = true
+    DeselectAll.Font = Enum.Font.GothamBold
+    DeselectAll.BorderSizePixel = 0
+    DeselectAll.Parent = ButtonFrame
+    
+    local DeselectCorner = Instance.new("UICorner")
+    DeselectCorner.CornerRadius = UDim.new(0, 4)
+    DeselectCorner.Parent = DeselectAll
+    
+    DeselectAll.MouseButton1Click:Connect(function()
+        for _, data in ipairs(checkboxes) do
+            data.checked = false
+            data.checkmark.Visible = false
+            data.status.Text = ""
         end
-    end
-
-    return nil
+    end)
+    
+    return checkboxes, ScreenGui
 end
 
-local function isTargetLuckyBlock(name)
-    local n = string.lower(tostring(name))
+-- ====================================================
+-- COLLECTION LOGIC
+-- ====================================================
 
-    if n:find("japan", 1, true)
-        and n:find("lucky", 1, true)
-        and CollectFilter.Japan then
-        return true
+local function teleportPlayer(position)
+    if not Character or not Character.Parent then
+        Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        Humanoid = Character:WaitForChild("Humanoid")
     end
-
-    if n:find("icons", 1, true)
-        and n:find("lucky", 1, true)
-        and CollectFilter.Icons then
-        return true
-    end
-
-    if n:find("spain", 1, true)
-        and n:find("lucky", 1, true)
-        and CollectFilter.Spain then
-        return true
-    end
-
-    if n:find("champions", 1, true)
-        and n:find("lucky", 1, true)
-        and CollectFilter.Champions then
-        return true
-    end
-
-    return false
+    
+    -- Store current position for return
+    local rootPart = Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    -- Teleport
+    rootPart.CFrame = CFrame.new(position)
+    return true
 end
 
-
-local function countLuckyBoxes()
-    local slimes = getSlimesFolder()
-
-    local japan = 0
-    local icons = 0
-    local total = 0
-
-    if not slimes then
-        return japan, icons, total
-    end
-
-    for _, model in ipairs(slimes:GetChildren()) do
-        if model:IsA("Model") then
-            local n = string.lower(model.Name)
-
-            if n == "japan lucky block"
-                or (n:find("japan", 1, true) and n:find("lucky", 1, true)) then
-                japan += 1
-                total += 1
-
-            elseif n == "icons lucky block"
-                or (n:find("icons", 1, true) and n:find("lucky", 1, true)) then
-                icons += 1
-                total += 1
+local function triggerPickupPrompt()
+    -- Method 1: Use the remote found earlier
+    if PickupRemote then
+        -- Find the stand name. The pickup remote expects a stand name.
+        -- We need to find the nearest stand to our current position.
+        local Stands = Workspace:FindFirstChild("Stands")
+        if Stands then
+            local nearestStand = nil
+            local nearestDist = math.huge
+            local currentPos = Character and Character:FindFirstChild("HumanoidRootPart")
+            
+            if currentPos then
+                for _, stand in ipairs(Stands:GetChildren()) do
+                    if stand:IsA("Model") then
+                        local mainPart = stand:FindFirstChild("Main")
+                        if mainPart then
+                            local dist = (mainPart.Position - currentPos.Position).Magnitude
+                            if dist < nearestDist then
+                                nearestDist = dist
+                                nearestStand = stand
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if nearestStand then
+                -- Fire the pickup remote with the stand name
+                PickupRemote:FireServer(tostring(nearestStand.Name))
+                print("[Collector] Triggered pickup for stand:", nearestStand.Name)
+                return true
             end
         end
+        
+        -- Fallback: just fire the remote with a generic name
+        PickupRemote:FireServer("1")
+        return true
     end
-
-    return japan, icons, total
-end
-
-
-local function findIconsBoxes()
-    local slimes = getSlimesFolder()
-
-    if not slimes then
-        return {}
-    end
-
-    local results = {}
-
-    for _, model in ipairs(slimes:GetChildren()) do
-        if model:IsA("Model")
-            and isTargetLuckyBlock(model.Name)
-            and not model:GetAttribute("Carrying") then
-
-            local part =
-                model.PrimaryPart
-                or model:FindFirstChildWhichIsA("BasePart")
-
-            if part then
-                table.insert(results, {
-                    model = model,
-                    part = part,
-                    prompt = findPrompt(model)
-                })
-            end
-        end
-    end
-
-    return results
-end
-
--- ============================================================
--- INVISIBILITY CLOAK
--- ============================================================
-
-local function findCloak()
-    local function scan(container)
-        if not container then
-            return nil
-        end
-
-        for _, tool in ipairs(container:GetChildren()) do
-            if tool:IsA("Tool") then
-                local n = string.lower(tool.Name)
-
-                if n:find("invisibility", 1, true)
-                    or n:find("cloak", 1, true)
-                    or n:find("invis", 1, true) then
-
-                    return tool
+    
+    -- Method 2: Simulate proximity prompt trigger
+    -- Find proximity prompts in the area and trigger them
+    if Character then
+        local rootPart = Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            -- Look for nearby proximity prompts
+            for _, prompt in ipairs(Workspace:GetDescendants()) do
+                if prompt:IsA("ProximityPrompt") and 
+                   prompt.Name == "Pick Up" and 
+                   prompt.Enabled then
+                    local parent = prompt.Parent
+                    -- Check if the prompt is within range
+                    local promptPos = prompt.Parent and prompt.Parent.Parent and 
+                                     prompt.Parent.Parent:FindFirstChild("Main")
+                    if promptPos then
+                        local dist = (promptPos.Position - rootPart.Position).Magnitude
+                        if dist <= prompt.MaxActivationDistance then
+                            -- Trigger the prompt
+                            prompt:InputHoldBegin()
+                            task.wait(prompt.HoldDuration)
+                            prompt:InputHoldEnd()
+                            print("[Collector] Triggered proximity prompt:", prompt.Name)
+                            return true
+                        end
+                    end
                 end
             end
         end
     end
-
-    return scan(player.Character)
-        or scan(player:FindFirstChild("Backpack"))
-end
-
-local function activateCloak()
-    local tool = findCloak()
-
-    if not tool then
-        LOG("Cloak not found.")
-        return false
-    end
-
-    local humanoid = getHumanoid()
-    local char = player.Character
-
-    if not humanoid or not char then
-        return false
-    end
-
-    if tool.Parent ~= char then
-        pcall(function()
-            humanoid:EquipTool(tool)
-        end)
-
-        task.wait(0.15)
-    end
-
-    pcall(function()
-        tool:Activate()
-    end)
-
-    LOG("Cloak activated.")
-    return true
-end
-
--- ============================================================
--- HOLD STATE
--- ============================================================
-
-local function isHolding()
-    return player:GetAttribute("holdingSlime") == true
-end
-
-local function waitPickup()
-    local timeout = os.clock() + PICKUP_CONFIRM_TIMEOUT
-
-    while running() and os.clock() < timeout do
-        if isHolding() then
-            return true
-        end
-
-        task.wait(0.05)
-    end
-
-    return isHolding()
-end
-
--- ============================================================
--- BASE
--- ============================================================
-
-local function findMyPlot()
-    if _G.MyPlot and _G.MyPlot.Parent then
-        return _G.MyPlot
-    end
-
-    local plots = workspace:FindFirstChild("Plots")
-    if not plots then
-        return nil
-    end
-
-    for _, plot in ipairs(plots:GetChildren()) do
-        local owner = plot:FindFirstChild("owner")
-
-        if owner and tostring(owner.Value) == player.Name then
-            return plot
-        end
-    end
-end
-
-local function teleportBase()
-    local root = getRoot()
-
-    if not root then
-        LOG("Root missing while returning.")
-        return false
-    end
-
-    local plot = findMyPlot()
-
-    if not plot then
-        LOG("My plot not found.")
-        return false
-    end
-
-    local base = plot:FindFirstChild("Base")
-    local tp = base and base:FindFirstChild("Teleport")
-
-    if not tp then
-        LOG("Base teleport missing.")
-        return false
-    end
-
-    if tp:IsA("Attachment") then
-        root.CFrame = tp.WorldCFrame + Vector3.new(0, 3, 0)
-
-    elseif tp:IsA("BasePart") then
-        root.CFrame = tp.CFrame + Vector3.new(0, 3, 0)
-
-    else
-        LOG("Unknown base teleport type.")
-        return false
-    end
-
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
-
-    LOG("Returned to base.")
-    return true
-end
-
-local function waitDeposit()
-    STATUS("Depositing box")
-
-    local timeout = os.clock() + DEPOSIT_TIMEOUT
-
-    while running()
-        and isHolding()
-        and os.clock() < timeout do
-
-        task.wait(0.1)
-    end
-
-    if not isHolding() then
-        LOG("Deposit confirmed.")
-        return true
-    end
-
-    LOG("Deposit timeout.")
+    
+    warn("[Collector] Could not trigger pickup prompt!")
     return false
 end
 
--- ============================================================
--- PICKUP
--- ============================================================
-
-local function firePrompt(prompt)
-    if not prompt or not prompt.Parent then
-        return false
+function collectLuckyBlock(checkboxData)
+    if checkboxData.isCollecting then return end
+    checkboxData.isCollecting = true
+    checkboxData.status.Text = "Collecting..."
+    checkboxData.status.TextColor3 = Color3.fromRGB(255, 255, 100)
+    
+    local rarity = checkboxData.rarity
+    local zone = CONFIG.ZONES[rarity]
+    
+    if not zone then
+        checkboxData.status.Text = "Error!"
+        checkboxData.status.TextColor3 = Color3.fromRGB(255, 0, 0)
+        checkboxData.isCollecting = false
+        return
     end
-
-    if typeof(fireproximityprompt) == "function" then
-        local success = pcall(function()
-            fireproximityprompt(prompt)
-        end)
-
-        if success then
-            return true
-        end
+    
+    -- Get current position for return
+    local startPos = Character and Character:FindFirstChild("HumanoidRootPart")
+    local returnPos = startPos and startPos.Position or CONFIG.BASE_POSITION
+    
+    -- Disable jump while carrying (simulate the carry penalty)
+    local originalJumpPower = Humanoid.JumpPower
+    
+    -- Step 1: Teleport to the zone
+    print("[Collector] Teleporting to", rarity, "zone...")
+    local success = teleportPlayer(zone.floor1)
+    
+    if not success then
+        checkboxData.status.Text = "Teleport Failed!"
+        checkboxData.status.TextColor3 = Color3.fromRGB(255, 0, 0)
+        checkboxData.isCollecting = false
+        return
     end
-
-    return pcall(function()
-        prompt:InputHoldBegin()
-
-        task.wait(
-            math.max(
-                tonumber(prompt.HoldDuration) or 0,
-                0.05
-            )
-        )
-
-        prompt:InputHoldEnd()
-    end)
-end
-
-local function collectBox(box)
-    STATUS("Iconic box found")
-
-    activateCloak()
-
-    local root = getRoot()
-
-    if not root or not box.part or not box.part.Parent then
-        LOG("Target/root disappeared.")
-        return false
-    end
-
-    STATUS("Teleporting to Iconic box")
-
-    root.CFrame =
-        box.part.CFrame
-        * CFrame.new(0, 3, 4)
-
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
-
-    -- Give the proximity prompt time to load after teleport
-    task.wait(1)
-
-    for attempt = 1, PICKUP_TRIES do
-        STATUS(
-            "Pickup attempt "
-            .. attempt
-            .. "/"
-            .. PICKUP_TRIES
-        )
-
-        -- Never return to base unless pickup is confirmed
-        if isHolding() then
-            LOG("Already holding box.")
-            return true
-        end
-
-        activateCloak()
-
-        local prompt =
-            box.model
-            and box.model.Parent
-            and findPrompt(box.model)
-
-        if prompt then
-            LOG("Firing pickup prompt.")
-
-            firePrompt(prompt)
-
-            -- Wait until server confirms holdingSlime
-            if waitPickup() then
-                LOG("Pickup successful - holdingSlime TRUE")
-                return true
-            end
-        else
-            LOG("Prompt not ready, waiting.")
-        end
-
-        task.wait(0.5)
-    end
-
-    LOG("Pickup failed after all attempts.")
-    return false
-end
-
--- ============================================================
--- HTTP REQUEST
--- ============================================================
-
-local requestFunction =
-    request
-    or http_request
-    or (syn and syn.request)
-    or (http and http.request)
-
--- ============================================================
--- ============================================================
--- SERVER HOP REMOVED
--- Script will remain in the same server and keep scanning
--- ============================================================
-
--- MAIN
--- ============================================================
-
-local collected = 0
-
--- Allow game objects to finish loading
-STATUS("Waiting for game to load")
-task.wait(2)
-
-while running() do
-
-    if isHolding() then
-        STATUS("Already holding Iconic box")
-
-        teleportBase()
-
-        task.wait(0.35)
-        waitDeposit()
-
-        task.wait(0.2)
-        continue
-    end
-
-    STATUS("Scanning server")
-
-    local boxes = findIconsBoxes()
-
-    local japanCount, iconsCount, totalCount = countLuckyBoxes()
-
-    LOG(
-        "Lucky Boxes Map | Japan: "
-        .. tostring(japanCount)
-        .. " | Icons: "
-        .. tostring(iconsCount)
-        .. " | Total: "
-        .. tostring(totalCount)
-    )
-
-    LOG(
-        "Collectable boxes found: "
-        .. tostring(#boxes)
-    )
-
-    -- ========================================================
-    -- NONE FOUND -> SERVER HOP
-    -- ========================================================
-
-    if #boxes == 0 then
-        STATUS("No Japan Lucky Box found - rescanning same server")
-
-        task.wait(SCAN_WAIT)
-
-        boxes = findIconsBoxes()
-
-        if #boxes == 0 then
-            LOG("No Japan Lucky Block yet. Continuing scan in same server.")
-            task.wait(SCAN_WAIT)
-            continue
-        end
-    end
-
-    -- ========================================================
-    -- COLLECT EVERYTHING FOUND
-    -- ========================================================
-
-    for _, box in ipairs(boxes) do
-        if not running() then
+    
+    -- Wait for the teleport to settle
+    task.wait(CONFIG.TELEPORT_DELAY)
+    
+    -- Step 2: Find and collect the lucky block
+    print("[Collector] Attempting to collect", rarity, "lucky block...")
+    
+    -- Try multiple times to trigger the prompt
+    local collected = false
+    for attempt = 1, 3 do
+        local triggerSuccess = triggerPickupPrompt()
+        if triggerSuccess then
+            collected = true
             break
         end
-
-        if box.model and box.model.Parent then
-
-            local success = collectBox(box)
-
-            if success and isHolding() then
-                collected += 1
-                counter.Text = "Collected: " .. collected
-
-                STATUS("COLLECTED!")
-
-                teleportBase()
-                task.wait(0.35)
-
-                waitDeposit()
-
-                task.wait(0.25)
+        task.wait(0.5)
+    end
+    
+    if not collected then
+        -- Try alternative: look for the "Pick Up" prompt and trigger it directly
+        local prompts = Workspace:GetDescendants()
+        for _, prompt in ipairs(prompts) do
+            if prompt:IsA("ProximityPrompt") and 
+               prompt.Name == "Pick Up" and 
+               prompt.Enabled and
+               prompt:GetAttribute("IsCollecting") ~= false then
+                -- Try to trigger it
+                local rootPart = Character:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    local parentPart = prompt.Parent and prompt.Parent.Parent
+                    if parentPart then
+                        local mainPart = parentPart:FindFirstChild("Main")
+                        if mainPart then
+                            local dist = (mainPart.Position - rootPart.Position).Magnitude
+                            if dist <= prompt.MaxActivationDistance then
+                                prompt:InputHoldBegin()
+                                task.wait(prompt.HoldDuration)
+                                prompt:InputHoldEnd()
+                                collected = true
+                                break
+                            end
+                        end
+                    end
+                end
             end
         end
     end
-
-    -- ========================================================
-    -- AFTER COLLECTION RESCAN
-    -- ========================================================
-
-    task.wait(0.5)
-
-    local remaining = findIconsBoxes()
-
-    if #remaining == 0 then
-        LOG("No more Iconic boxes in this server.")
-        STATUS("Preparing next server")
-
-        task.wait(1)
-
-        LOG("Continuing scan in same server.")
-        task.wait(SCAN_WAIT)
+    
+    if collected then
+        checkboxData.status.Text = "Collected!"
+        checkboxData.status.TextColor3 = Color3.fromRGB(0, 255, 0)
+        print("[Collector] Successfully collected", rarity, "lucky block!")
+    else
+        checkboxData.status.Text = "Failed!"
+        checkboxData.status.TextColor3 = Color3.fromRGB(255, 0, 0)
+        warn("[Collector] Failed to collect", rarity, "lucky block!")
     end
-
-    task.wait(1)
+    
+    -- Wait a moment for the collection to register
+    task.wait(CONFIG.COLLECT_DELAY)
+    
+    -- Step 3: Return to base
+    print("[Collector] Returning to base...")
+    teleportPlayer(returnPos)
+    
+    task.wait(CONFIG.RETURN_DELAY)
+    
+    -- Step 4: Reset state
+    checkboxData.checked = false
+    checkboxData.checkmark.Visible = false
+    checkboxData.isCollecting = false
+    
+    if collected then
+        checkboxData.status.Text = "Done ✓"
+        checkboxData.status.TextColor3 = Color3.fromRGB(0, 255, 0)
+        -- Clear status after a moment
+        task.wait(2)
+        checkboxData.status.Text = ""
+    else
+        checkboxData.status.Text = "Retry?"
+        checkboxData.status.TextColor3 = Color3.fromRGB(255, 100, 0)
+    end
+    
+    -- Restore jump power
+    Humanoid.JumpPower = originalJumpPower
 end
+
+-- ====================================================
+-- BIND TO KEY (Optional)
+-- ====================================================
+
+local function toggleGUI(ScreenGui)
+    if ScreenGui then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end
+
+-- ====================================================
+-- INITIALIZATION
+-- ====================================================
+
+print("[Collector] Initializing Japan Lucky Block Collector...")
+
+-- Check for required services
+if not ReplicatedStorage then
+    warn("[Collector] ReplicatedStorage not found!")
+end
+
+-- Create the GUI
+local checkboxes, ScreenGui = createGUI()
+
+-- Set up keybind (F2 to toggle)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.F2 then
+        toggleGUI(ScreenGui)
+    end
+end)
+
+-- Handle character respawn
+LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+    Character = newCharacter
+    Humanoid = Character:WaitForChild("Humanoid")
+end)
+
+print("[Collector] Ready! Press F2 to toggle the GUI.")
+print("[Collector] Check the boxes to automatically collect lucky blocks!")
+
+-- ====================================================
+-- AUTOMATIC COLLECTION (Optional)
+-- ====================================================
+
+-- Uncomment this section to automatically collect all blocks on startup
+--[[
+task.wait(3) -- Wait for everything to load
+for _, data in ipairs(checkboxes) do
+    data.checked = true
+    data.checkmark.Visible = true
+    task.spawn(function()
+        collectLuckyBlock(data)
+    end)
+    task.wait(5) -- Wait between collections
+end
+--]]
+
+return {
+    collectLuckyBlock = collectLuckyBlock,
+    checkboxes = checkboxes,
+    ScreenGui = ScreenGui,
+}
