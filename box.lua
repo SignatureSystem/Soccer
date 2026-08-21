@@ -502,115 +502,11 @@ local requestFunction =
     or (http and http.request)
 
 -- ============================================================
--- SERVER HOP
+-- ============================================================
+-- SERVER HOP REMOVED
+-- Script will remain in the same server and keep scanning
 -- ============================================================
 
-local visited = {}
-
-local function getServer()
-    if not requestFunction then
-        LOG("Executor HTTP request function unavailable.")
-        return nil
-    end
-
-    local cursor = nil
-
-    for page = 1, 5 do
-        local url =
-            "https://games.roblox.com/v1/games/"
-            .. tostring(PLACE_ID)
-            .. "/servers/Public?sortOrder=Asc&limit=100"
-
-        if cursor then
-            url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
-        end
-
-        local success, response = pcall(function()
-            return requestFunction({
-                Url = url,
-                Method = "GET"
-            })
-        end)
-
-        if not success or not response then
-            LOG("Server API request failed.")
-            return nil
-        end
-
-        local body = response.Body or response.body
-
-        if not body then
-            LOG("Server API returned no body.")
-            return nil
-        end
-
-        local decoded
-
-        local decodeSuccess = pcall(function()
-            decoded = HttpService:JSONDecode(body)
-        end)
-
-        if not decodeSuccess or not decoded then
-            LOG("Unable to decode server list.")
-            return nil
-        end
-
-        for _, server in ipairs(decoded.data or {}) do
-            if server.id
-                and server.id ~= CURRENT_JOB
-                and not visited[server.id]
-                and tonumber(server.playing or 0)
-                    < tonumber(server.maxPlayers or 0) then
-
-                visited[server.id] = true
-
-                return server.id
-            end
-        end
-
-        cursor = decoded.nextPageCursor
-
-        if not cursor then
-            break
-        end
-    end
-
-    return nil
-end
-
-local function serverHop()
-    STATUS("No Iconic box - finding new server")
-
-    local serverId = getServer()
-
-    if not serverId then
-        LOG("No available server found.")
-        STATUS("Retrying server search")
-        return false
-    end
-
-    LOG("New server: " .. serverId)
-    STATUS("SERVER HOPPING...")
-
-    task.wait(0.5)
-
-    local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(
-            PLACE_ID,
-            serverId,
-            player
-        )
-    end)
-
-    if not success then
-        LOG("Teleport failed: " .. tostring(err))
-        return false
-    end
-
-    return true
-end
-
--- ============================================================
 -- MAIN
 -- ============================================================
 
@@ -648,21 +544,15 @@ while running() do
     -- ========================================================
 
     if #boxes == 0 then
-        STATUS("No Japan Lucky Box found")
+        STATUS("No Japan Lucky Box found - rescanning same server")
 
         task.wait(SCAN_WAIT)
 
-        -- Check once more before leaving
         boxes = findIconsBoxes()
 
         if #boxes == 0 then
-            LOG("Second scan = 0. Server hop triggered.")
-
-            if serverHop() then
-                break
-            end
-
-            task.wait(3)
+            LOG("No Japan Lucky Block yet. Continuing scan in same server.")
+            task.wait(SCAN_WAIT)
             continue
         end
     end
@@ -710,9 +600,8 @@ while running() do
 
         task.wait(1)
 
-        if serverHop() then
-            break
-        end
+        LOG("Continuing scan in same server.")
+        task.wait(SCAN_WAIT)
     end
 
     task.wait(1)
