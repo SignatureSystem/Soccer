@@ -14,7 +14,8 @@ local PLACE_ID = game.PlaceId
 local CURRENT_JOB = game.JobId
 
 local TARGET_NAMES = {
-    "Japan Lucky Block"
+    "Japan Lucky Block",
+    "Icons Lucky Block"
 }
 
 local SCAN_WAIT = 3
@@ -72,7 +73,7 @@ title.Parent = frame
 title.Size = UDim2.new(1, -20, 0, 35)
 title.Position = UDim2.new(0, 10, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "JAPAN LUCKY BLOCK COLLECTOR"
+title.Text = "JAPAN + ICONS LUCKY BLOCK COLLECTOR"
 title.TextColor3 = Color3.fromRGB(255, 220, 70)
 title.TextSize = 18
 title.Font = Enum.Font.GothamBold
@@ -196,6 +197,56 @@ local function isTargetLuckyBlock(name)
     end
 
     return false
+end
+
+
+local function countLuckyBoxes()
+    local slimes = getSlimesFolder()
+
+    local counts = {
+        Japan = 0,
+        Icons = 0,
+        Spain = 0,
+        Champions = 0,
+        Other = 0,
+        Total = 0
+    }
+
+    if not slimes then
+        return counts
+    end
+
+    for _, model in ipairs(slimes:GetChildren()) do
+        if model:IsA("Model") then
+
+            local n = string.lower(model.Name)
+
+            if n:find("lucky", 1, true)
+                or n:find("luckyblock", 1, true)
+                or n:find("lucky block", 1, true) then
+
+                counts.Total += 1
+
+                if n:find("japan", 1, true) then
+                    counts.Japan += 1
+
+                elseif n:find("icons", 1, true) then
+                    counts.Icons += 1
+
+                elseif n:find("spain", 1, true) then
+                    counts.Spain += 1
+
+                elseif n:find("champions", 1, true) then
+                    counts.Champions += 1
+
+                else
+                    counts.Other += 1
+                end
+            end
+        end
+    end
+
+    return counts
 end
 
 
@@ -534,8 +585,20 @@ while running() do
 
     local boxes = findIconsBoxes()
 
+    local boxCounts = countLuckyBoxes()
+
     LOG(
-        "Japan Lucky Block detected: "
+        "MAP LUCKY BOXES | "
+        .. "Japan: " .. tostring(boxCounts.Japan)
+        .. " | Icons: " .. tostring(boxCounts.Icons)
+        .. " | Spain: " .. tostring(boxCounts.Spain)
+        .. " | Champions: " .. tostring(boxCounts.Champions)
+        .. " | Other: " .. tostring(boxCounts.Other)
+        .. " | TOTAL: " .. tostring(boxCounts.Total)
+    )
+
+    LOG(
+        "Collectable boxes found: "
         .. tostring(#boxes)
     )
 
