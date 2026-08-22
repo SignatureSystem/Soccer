@@ -2,6 +2,7 @@
 -- + selected-type Lucky Block Place + OPEN ALL active boxes + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
+-- + JAPAN RARITY ADDED
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -36,21 +37,21 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2 }
-local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true }
+local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2, ["Japan"] = 3 }
+local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true, ["Japan"] = true }
 
 local RARITY_VALUE = {
     ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
     ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
     ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
     ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
-    ["Rare"] = 100, ["Common"] = 25,
+    ["Rare"] = 100, ["Common"] = 25, ["Japan"] = 7000000,
 }
 
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
@@ -68,7 +69,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 local selectedUpgradeRarity = "All"
@@ -109,6 +110,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Champions",
     "Spain",
     "Icons",
+    "Japan",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -136,6 +138,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Champions"] = { ["Champions Lucky Block"] = true },
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
+    ["Japan"] = { ["Japan Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
@@ -1069,7 +1072,7 @@ PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
-print("[AutoFarm] GUI — ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[AutoFarm] GUI — ICONS UPDATE + Japan + selected-type Place/Open burst buttons")
 print("[LuckyCollector] NO INVISIBILITY GATE BUILD")
 
 -- ============================================
@@ -2770,6 +2773,7 @@ local function resolveHeldToolRarity(entry)
             if lower:find("rare") then return "Rare" end
             if lower:find("epic") then return "Epic" end
             if lower:find("common") then return "Common" end
+            if lower:find("japan") then return "Japan" end
         end
     end
 
@@ -2864,7 +2868,7 @@ local function isLuckyBlock(tool)
     if typ and tostring(typ):lower():find("lucky") then return true end
     local name = tostring(tool.Name):lower()
     if name:find("lucky") or name:find("box") or name:find("crate") then return true end
-    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret"}) do
+    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret", "japan"}) do
         if name:find(n) then return true end
     end
     return false
@@ -5140,7 +5144,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
+print("[AutoFarm] ICONS + Japan + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
