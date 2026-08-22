@@ -1,3 +1,67 @@
+
+-- ============================================================
+-- AUTO PATCH LAYER
+-- Compatibility fixes added after checking extracted game scripts
+-- ============================================================
+
+-- Prevent duplicate execution
+if _G.__AUTO_FARM_PATCH_LOADED then
+    return
+end
+_G.__AUTO_FARM_PATCH_LOADED = true
+
+local function safeCall(fn, ...)
+    local ok, result = pcall(fn, ...)
+    if ok then
+        return result
+    end
+    warn("[AutoFarm SafeCall]", result)
+    return nil
+end
+
+-- Live discovery helpers
+local function findRemote(name)
+    local rs = game:GetService("ReplicatedStorage")
+    for _, obj in ipairs(rs:GetDescendants()) do
+        if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction"))
+            and obj.Name == name then
+            return obj
+        end
+    end
+end
+
+local function collectLiveNames(container)
+    local result = {}
+    local seen = {}
+    if not container then return result end
+
+    for _, obj in ipairs(container:GetDescendants()) do
+        local n = obj.Name
+        if not seen[n] then
+            seen[n] = true
+            table.insert(result, n)
+        end
+    end
+
+    return result
+end
+
+-- Refresh hook for future updates
+_G.AutoFarmRefreshRegistry = function()
+    return {
+        remotes = {
+            gift = findRemote("Gift Slime"),
+            accept = findRemote("Accept Gift"),
+            upgrade = findRemote("Upgrade Slime"),
+            place = findRemote("Place Slime"),
+        }
+    }
+end
+
+-- ============================================================
+-- ORIGINAL SCRIPT BELOW
+-- ============================================================
+
 - ============================================ - LATEST GAME UPDATE
 PATCH - Added Lucky Blocks: Alien, Cheese, MEME, Japan, US, Moon, Planet
 - Added future mutation placeholders for new event content -
