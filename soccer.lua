@@ -47,25 +47,6 @@ local RARITY_VALUE = {
     ["Rare"] = 100, ["Common"] = 25,
 }
 
-
-local RARITY_ORDER = {
-    "Japan",
-    "Icons",
-    "Spain",
-    "Champions",
-    "OG",
-    "Exclusive",
-    "LIMITED",
-    "Divine",
-    "Slime God",
-    "Secret",
-    "Mythic",
-    "Legendary",
-    "Epic",
-    "Rare",
-    "Common",
-}
-
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
@@ -128,7 +109,6 @@ local LUCKY_BLOCK_OPTIONS = {
     "Champions",
     "Spain",
     "Icons",
-    "Japan",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -160,18 +140,8 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 }
 
 -- Default to the newest live tier.
-local getSelectedLuckyBlockLabel()s = { ["Icons"] = true }
-
-local function getSelectedLuckyBlockLabel()
-    local list = {}
-    for name, enabled in pairs(getSelectedLuckyBlockLabel()s) do
-        if enabled then
-            table.insert(list, name)
-        end
-    end
-    table.sort(list)
-    return #list > 0 and table.concat(list, ", ") or "None"
-end
+local selectedLuckyBlockType = "Japan"
+local selectedLuckyBlockTypes = { ["Japan"] = true }
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -658,7 +628,7 @@ LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
 LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
 LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
 LuckyTypeDropBtn.BorderSizePixel = 0
-LuckyTypeDropBtn.Text = "Lucky Types: Icons
+LuckyTypeDropBtn.Text = "Lucky Types: ▼ Japan"
 LuckyTypeDropBtn.TextColor3 = Color3.fromRGB(255, 214, 125)
 LuckyTypeDropBtn.TextSize = 11
 LuckyTypeDropBtn.Font = Enum.Font.GothamBold
@@ -688,7 +658,7 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
     item.Size = UDim2.new(1, -4, 0, 24)
     item.BackgroundColor3 = Color3.fromRGB(52, 40, 23)
     item.BorderSizePixel = 0
-    item.Text = (((getSelectedLuckyBlockLabel()s and getSelectedLuckyBlockLabel()s[boxType]) and "☑ " or "☐ ") .. boxType)
+    item.Text = ((selectedLuckyBlockTypes[boxType] and "☑ " or "☐ ") .. boxType)
     item.TextColor3 = Color3.fromRGB(244, 229, 195)
     item.TextSize = 11
     item.Font = Enum.Font.Gotham
@@ -699,27 +669,30 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
 
     item.MouseButton1Click:Connect(function()
         if boxType == "All" then
-            getSelectedLuckyBlockLabel()s = { ["All"] = true }
+            selectedLuckyBlockTypes = { ["All"] = true }
         else
-            if getSelectedLuckyBlockLabel()s["All"] then
-                getSelectedLuckyBlockLabel()s["All"] = nil
+            selectedLuckyBlockTypes["All"] = nil
+            selectedLuckyBlockTypes[boxType] = not selectedLuckyBlockTypes[boxType]
+        end
+
+        local chosen = {}
+        for name, enabled in pairs(selectedLuckyBlockTypes) do
+            if enabled then
+                table.insert(chosen, name)
             end
-            getSelectedLuckyBlockLabel()s[boxType] = not getSelectedLuckyBlockLabel()s[boxType]
         end
-
-        local selectedNames = {}
-        for name, enabled in pairs(getSelectedLuckyBlockLabel()s) do
-            if enabled then table.insert(selectedNames, name) end
-        end
-        table.sort(selectedNames)
-
-        item.Text = (((getSelectedLuckyBlockLabel()s and getSelectedLuckyBlockLabel()s[boxType]) and "☑ " or "☐ ") .. boxType)
+        table.sort(chosen)
 
         LuckyTypeDropBtn.Text =
-            "Lucky Types: " .. (#selectedNames > 0 and table.concat(selectedNames, ", ") or "None")
+            "Lucky Types: ▼ " .. (#chosen > 0 and table.concat(chosen, ", ") or "None")
+
+        selectedLuckyBlockType = chosen[1] or "All"
+
+        item.Text =
+            ((selectedLuckyBlockTypes[boxType] and "☑ " or "☐ ") .. boxType)
 
         StatusLabel.Text =
-            "Lucky Types selected: " .. (#selectedNames > 0 and table.concat(selectedNames, ", ") or "None")
+            "Lucky Types selected: " .. (#chosen > 0 and table.concat(chosen, ", ") or "None")
     end)
 end
 
@@ -1458,7 +1431,7 @@ local function setLuckyState(on)
         LuckyBtn.TextColor3 = Color3.fromRGB(255, 200, 80)
         LuckyBtn.BackgroundColor3 = Color3.fromRGB(60, 45, 20)
         StatusLabel.Text =
-            "Lucky Block: ON | Type: " .. getSelectedLuckyBlockLabel()
+            "Lucky Block: ON | Type: " .. selectedLuckyBlockType
     else
         LuckyBtn.Text = "Lucky Block: OFF"
         LuckyBtn.TextColor3 = Color3.fromRGB(255, 90, 90)
@@ -2802,7 +2775,7 @@ local function getSelectedLuckyBlockTools()
                     and not seen[key]
                     and luckyBlockToolMatchesType(
                         item,
-                        getSelectedLuckyBlockLabel(),
+                        selectedLuckyBlockType,
                         playerData,
                         inventoryByUID
                     )
@@ -3560,7 +3533,8 @@ local function getTargetLuckyBlock()
             local modelName = tostring(model.Name)
             local matches = false
 
-            if getSelectedLuckyBlockLabel()s["All"] then
+            if selectedLuckyBlockType == "All" then
+                -- Only accept the exact Lucky Block models from this game's database.
                 for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
                     if names[modelName] == true then
                         matches = true
@@ -3568,15 +3542,12 @@ local function getTargetLuckyBlock()
                     end
                 end
             else
-                for selectedType, enabled in pairs(getSelectedLuckyBlockLabel()s) do
-                    if enabled then
-                        local allowedNames = LUCKY_BLOCK_MODEL_NAMES[selectedType]
-                        if allowedNames and allowedNames[modelName] == true then
-                            matches = true
-                            break
-                        end
-                    end
-                end
+                local allowedNames =
+                    LUCKY_BLOCK_MODEL_NAMES[selectedLuckyBlockType]
+
+                matches =
+                    allowedNames ~= nil
+                    and allowedNames[modelName] == true
             end
 
             if not matches then
@@ -3636,7 +3607,7 @@ local function getTargetLuckyBlock()
                 bestDistance = distance
                 best = {
                     name = modelName,
-                    type = modelName,
+                    type = selectedLuckyBlockType,
                     value = value,
                     part = primary,
                     prompt = prompt,
@@ -4298,7 +4269,7 @@ BoxesBtn.MouseButton1Click:Connect(function()
     local p, o = doPlaceAndOpenBoxes()
     StatusLabel.Text = string.format(
         "Burst %s — Placed %d | Opened %d",
-        getSelectedLuckyBlockLabel(),
+        selectedLuckyBlockType,
         p,
         o
     )
@@ -4314,7 +4285,7 @@ PlaceBoxesBtn.MouseButton1Click:Connect(function()
     StatusLabel.Text = string.format(
         "Placed %d %s boxes (instant)",
         p,
-        getSelectedLuckyBlockLabel()
+        selectedLuckyBlockType
     )
     PlaceBoxesBtn.Text = "Place Boxes"
     actionBusy = false
@@ -4531,7 +4502,7 @@ task.spawn(function()
             if not block then
                 StatusLabel.Text = string.format(
                     "No %s boxes | Total: %d",
-                    getSelectedLuckyBlockLabel(),
+                    selectedLuckyBlockType,
                     totalCollected
                 )
                 luckyBlockBusy = false
@@ -4875,7 +4846,7 @@ task.spawn(function()
             if p > 0 or o > 0 then
                 StatusLabel.Text = string.format(
                     "Auto Boxes [%s]: +%d / +%d",
-                    getSelectedLuckyBlockLabel(),
+                    selectedLuckyBlockType,
                     p,
                     o
                 )
