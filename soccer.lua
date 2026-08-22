@@ -141,7 +141,6 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 
 -- Default to the newest live tier.
 local selectedLuckyBlockType = "Japan"
-local selectedLuckyBlockTypes = { ["Japan"] = true }
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -628,7 +627,7 @@ LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
 LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
 LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
 LuckyTypeDropBtn.BorderSizePixel = 0
-LuckyTypeDropBtn.Text = "Lucky Types: ▼ Japan"
+LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. selectedLuckyBlockType
 LuckyTypeDropBtn.TextColor3 = Color3.fromRGB(255, 214, 125)
 LuckyTypeDropBtn.TextSize = 11
 LuckyTypeDropBtn.Font = Enum.Font.GothamBold
@@ -658,7 +657,7 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
     item.Size = UDim2.new(1, -4, 0, 24)
     item.BackgroundColor3 = Color3.fromRGB(52, 40, 23)
     item.BorderSizePixel = 0
-    item.Text = ((selectedLuckyBlockTypes[boxType] and "☑ " or "☐ ") .. boxType)
+    item.Text = "  " .. boxType
     item.TextColor3 = Color3.fromRGB(244, 229, 195)
     item.TextSize = 11
     item.Font = Enum.Font.Gotham
@@ -668,31 +667,12 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
     item.Parent = LuckyTypeDropList
 
     item.MouseButton1Click:Connect(function()
-        if boxType == "All" then
-            selectedLuckyBlockTypes = { ["All"] = true }
-        else
-            selectedLuckyBlockTypes["All"] = nil
-            selectedLuckyBlockTypes[boxType] = not selectedLuckyBlockTypes[boxType]
-        end
-
-        local chosen = {}
-        for name, enabled in pairs(selectedLuckyBlockTypes) do
-            if enabled then
-                table.insert(chosen, name)
-            end
-        end
-        table.sort(chosen)
-
-        LuckyTypeDropBtn.Text =
-            "Lucky Types: ▼ " .. (#chosen > 0 and table.concat(chosen, ", ") or "None")
-
-        selectedLuckyBlockType = chosen[1] or "All"
-
-        item.Text =
-            ((selectedLuckyBlockTypes[boxType] and "☑ " or "☐ ") .. boxType)
+        selectedLuckyBlockType = boxType
+        LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. boxType
+        LuckyTypeDropList.Visible = false
 
         StatusLabel.Text =
-            "Lucky Types selected: " .. (#chosen > 0 and table.concat(chosen, ", ") or "None")
+            "Lucky Type selected: " .. boxType
     end)
 end
 
