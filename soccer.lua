@@ -40,7 +40,7 @@ local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
 local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
-    ["Japan"] = 7000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
+    ["Japan"] = 7000000, ["Japan"] = 7000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
     ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
     ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
     ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
@@ -109,6 +109,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Champions",
     "Spain",
     "Icons",
+    "Japan",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -627,7 +628,7 @@ LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
 LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
 LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
 LuckyTypeDropBtn.BorderSizePixel = 0
-LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. selectedLuckyBlockType
+LuckyTypeDropBtn.Text = "Lucky Types: Icons
 LuckyTypeDropBtn.TextColor3 = Color3.fromRGB(255, 214, 125)
 LuckyTypeDropBtn.TextSize = 11
 LuckyTypeDropBtn.Font = Enum.Font.GothamBold
@@ -667,12 +668,26 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
     item.Parent = LuckyTypeDropList
 
     item.MouseButton1Click:Connect(function()
-        selectedLuckyBlockType = boxType
-        LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. boxType
-        LuckyTypeDropList.Visible = false
+        if boxType == "All" then
+            selectedLuckyBlockTypes = { ["All"] = true }
+        else
+            if selectedLuckyBlockTypes["All"] then
+                selectedLuckyBlockTypes["All"] = nil
+            end
+            selectedLuckyBlockTypes[boxType] = not selectedLuckyBlockTypes[boxType]
+        end
+
+        local selectedNames = {}
+        for name, enabled in pairs(selectedLuckyBlockTypes) do
+            if enabled then table.insert(selectedNames, name) end
+        end
+        table.sort(selectedNames)
+
+        LuckyTypeDropBtn.Text =
+            "Lucky Types: " .. (#selectedNames > 0 and table.concat(selectedNames, ", ") or "None")
 
         StatusLabel.Text =
-            "Lucky Type selected: " .. boxType
+            "Lucky Types selected: " .. (#selectedNames > 0 and table.concat(selectedNames, ", ") or "None")
     end)
 end
 
@@ -3513,8 +3528,7 @@ local function getTargetLuckyBlock()
             local modelName = tostring(model.Name)
             local matches = false
 
-            if selectedLuckyBlockType == "All" then
-                -- Only accept the exact Lucky Block models from this game's database.
+            if selectedLuckyBlockTypes["All"] then
                 for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
                     if names[modelName] == true then
                         matches = true
@@ -3522,12 +3536,15 @@ local function getTargetLuckyBlock()
                     end
                 end
             else
-                local allowedNames =
-                    LUCKY_BLOCK_MODEL_NAMES[selectedLuckyBlockType]
-
-                matches =
-                    allowedNames ~= nil
-                    and allowedNames[modelName] == true
+                for selectedType, enabled in pairs(selectedLuckyBlockTypes) do
+                    if enabled then
+                        local allowedNames = LUCKY_BLOCK_MODEL_NAMES[selectedType]
+                        if allowedNames and allowedNames[modelName] == true then
+                            matches = true
+                            break
+                        end
+                    end
+                end
             end
 
             if not matches then
@@ -3587,7 +3604,7 @@ local function getTargetLuckyBlock()
                 bestDistance = distance
                 best = {
                     name = modelName,
-                    type = selectedLuckyBlockType,
+                    type = modelName,
                     value = value,
                     part = primary,
                     prompt = prompt,
