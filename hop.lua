@@ -1,5 +1,5 @@
 -- Minimal Japan-only Stealer + timer + count
--- Auto-starts on execute. Fast scan; hops server if no Japan boxes found.
+-- Auto-starts on execute. Fast scan; hops to lowest-pop public server (max 1 player) if no Japan boxes.
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local LP = Players.LocalPlayer
@@ -156,6 +156,108 @@ local function steal(prompt)
     return false
 end
 
+-- HTTP helpers (executor-friendly; falls back when available)
+local function httpGet(url)
+    local body
+    local ok = pcall(function()
+        if typeof(game.HttpGet) == "function" then
+            body = game:HttpGet(url)
+            return
+        end
+        if typeof(httpget) == "function" then
+            body = httpget(url)
+            return
+        end
+        if typeof(request) == "function" then
+            local res = request({ Url = url, Method = "GET" })
+            body = res and (res.Body or res.body)
+            return
+        end
+        if typeof(http_request) == "function" then
+            local res = http_request({ Url = url, Method = "GET" })
+            body = res and (res.Body or res.body)
+            return
+        end
+        if typeof(syn) == "table" and typeof(syn.request) == "function" then
+            local res = syn.request({ Url = url, Method = "GET" })
+            body = res and (res.Body or res.body)
+            return
+        end
+        local HttpService = game:GetService("HttpService")
+        body = HttpService:GetAsync(url)
+    end)
+    if ok and type(body) == "string" and #body > 0 then
+        return body
+    end
+    return nil
+end
+
+local function decodeJson(str)
+    local HttpService = game:GetService("HttpService")
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(str)
+    end)
+    if ok then return data end
+    return nil
+end
+
+-- Find public servers with the fewest players (prefer 0, allow only <= MAX_SERVER_PLAYERS)
+local MAX_SERVER_PLAYERS = 1
+
+local function findLowPopJobId(placeId)
+    local cursor = ""
+    local bestId, bestPlaying = nil, math.huge
+    local pages = 0
+
+    while pages < 5 do
+        pages += 1
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true%s",
+            placeId,
+            cursor ~= "" and ("&cursor=" .. cursor) or ""
+        )
+        local body = httpGet(url)
+        if not body then
+            break
+        end
+
+        local data = decodeJson(body)
+        if type(data) ~= "table" or type(data.data) ~= "table" then
+            break
+        end
+
+        for _, server in ipairs(data.data) do
+            local playing = tonumber(server.playing) or 999
+            local maxPlayers = tonumber(server.maxPlayers) or 0
+            local id = server.id or server.jobId
+
+            -- Skip current server and invalid ids
+            if id and tostring(id) ~= "" and tostring(id) ~= tostring(game.JobId) then
+                if playing <= MAX_SERVER_PLAYERS and playing < bestPlaying then
+                    bestPlaying = playing
+                    bestId = tostring(id)
+                    -- Perfect: empty server
+                    if playing == 0 then
+                        return bestId, bestPlaying
+                    end
+                end
+            end
+        end
+
+        -- sortOrder=Asc already prefers low pop; if we found any <= limit, use it
+        if bestId and bestPlaying <= MAX_SERVER_PLAYERS then
+            return bestId, bestPlaying
+        end
+
+        cursor = data.nextPageCursor
+        if type(cursor) ~= "string" or cursor == "" then
+            break
+        end
+    end
+
+    return bestId, bestPlaying
+end
+
 local function hopServer()
     if hopping then return end
     if os.clock() - lastHopAt < HOP_COOLDOWN then return end
@@ -163,24 +265,64 @@ local function hopServer()
     lastHopAt = os.clock()
     enabled = false
 
+    local placeId = game.PlaceId
+
     pcall(function()
         if statusLbl then
-            statusLbl.Text = "No Japan boxes — hopping..."
+            statusLbl.Text = "Finding server with <= " .. tostring(MAX_SERVER_PLAYERS) .. " players..."
         end
     end)
 
-    local placeId = game.PlaceId
-    local ok = pcall(function()
-        TeleportService:TeleportAsync(placeId, { LP })
-    end)
-    if not ok then
+    local jobId, playing = findLowPopJobId(placeId)
+
+    if not jobId then
         pcall(function()
-            TeleportService:Teleport(placeId, LP)
+            if statusLbl then
+                statusLbl.Text = "No 0-1 player server found — retry later"
+            end
+        end)
+        hopping = false
+        enabled = true
+        emptyScans = 0
+        task.wait(2)
+        return
+    end
+
+    pcall(function()
+        if statusLbl then
+            statusLbl.Text = string.format("Hop -> %d player server...", tonumber(playing) or 0)
+        end
+    end)
+
+    local teleported = false
+
+    -- Prefer exact instance (low-pop)
+    teleported = pcall(function()
+        TeleportService:TeleportToPlaceInstance(placeId, jobId, LP)
+    end)
+
+    if not teleported then
+        teleported = pcall(function()
+            local opts = Instance.new("TeleportOptions")
+            opts.ServerInstanceId = jobId
+            TeleportService:TeleportAsync(placeId, { LP }, opts)
         end)
     end
 
+    if not teleported then
+        pcall(function()
+            if statusLbl then
+                statusLbl.Text = "Teleport failed — will retry"
+            end
+        end)
+        hopping = false
+        enabled = true
+        emptyScans = 0
+        return
+    end
+
     -- If teleport fails/stalls, allow retry later
-    task.delay(8, function()
+    task.delay(10, function()
         hopping = false
         enabled = true
         emptyScans = 0
@@ -407,4 +549,4 @@ task.spawn(function()
     end
 end)
 
-print("[JapanStealer] Auto-run ON | hop if no Japan after", EMPTY_SCANS_BEFORE_HOP, "empty scans")
+print("[JapanStealer] Auto-run ON | hop to <=1 player servers if no Japan after", EMPTY_SCANS_BEFORE_HOP, "empty scans")
