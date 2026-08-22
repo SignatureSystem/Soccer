@@ -36,11 +36,11 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2 }
-local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true }
+local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
+local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
-    ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
+    ["Japan"] = 7000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
     ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
     ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
     ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
@@ -50,7 +50,7 @@ local RARITY_VALUE = {
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
@@ -68,7 +68,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 local selectedUpgradeRarity = "All"
@@ -136,10 +136,11 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Champions"] = { ["Champions Lucky Block"] = true },
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
+    ["Japan"] = { ["Japan Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
-local selectedLuckyBlockType = "Icons"
+local selectedLuckyBlockType = "Japan"
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -4521,9 +4522,17 @@ task.spawn(function()
             end
 
             -- Go to the Lucky Block after the best-effort invisibility fire.
-            root.CFrame = block.part.CFrame * CFrame.new(0, 3, 4)
+            root.CFrame = block.part.CFrame * CFrame.new(0, -1, 0)
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
+
+            local luckyFloat = Instance.new("BodyVelocity")
+            luckyFloat.Name = "LuckyBlockFloat"
+            luckyFloat.Velocity = Vector3.zero
+            luckyFloat.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+            luckyFloat.P = 1250
+            luckyFloat.Parent = root
+
             task.wait(0.18)
 
             local collected = false
@@ -4549,7 +4558,7 @@ task.spawn(function()
 
                     if retryRoot then
                         retryRoot.CFrame =
-                            block.part.CFrame * CFrame.new(0, 3, 4)
+                            block.part.CFrame * CFrame.new(0, -1, 0)
 
                         retryRoot.AssemblyLinearVelocity = Vector3.zero
                         retryRoot.AssemblyAngularVelocity = Vector3.zero
@@ -4619,6 +4628,10 @@ task.spawn(function()
                 end
 
                 task.wait(0.20)
+            end
+
+            if luckyFloat and luckyFloat.Parent then
+                luckyFloat:Destroy()
             end
 
             if not collected then
