@@ -1,9 +1,9 @@
--- Minimal Japan / Icons Stealer + timer + count
+-- Minimal Japan-only Stealer + timer + count
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
 
-local TARGET = { Japan = true, Icons = true }
+local TARGET = { Japan = true }
 local enabled, busy, total = false, false, 0
 local sessionStart = 0
 
@@ -90,14 +90,13 @@ local function findBlock()
         if m:IsA("Model") and not m:GetAttribute("Carrying") then
             local name = m.Name
             local rarity
-            if name:find("Japan", 1, true) then rarity = "Japan"
-            elseif name:find("Icons", 1, true) then rarity = "Icons" end
+            if name:find("Japan", 1, true) then rarity = "Japan" end
             if rarity and TARGET[rarity] then
                 local part = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
                 if part then
                     local v = tonumber(m:GetAttribute("Value"))
                         or tonumber(m:GetAttribute("MoneyPerSecond"))
-                        or (rarity == "Japan" and 7e6 or 5e6)
+                        or 7e6
                     if not bestV or v > bestV then
                         local prompt
                         for _, d in ipairs(m:GetDescendants()) do
@@ -135,12 +134,12 @@ end
 
 -- GUI
 pcall(function()
-    local o = PG:FindFirstChild("JIStealer")
+    local o = PG:FindFirstChild("JapanStealer") or PG:FindFirstChild("JIStealer")
     if o then o:Destroy() end
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "JIStealer"
+gui.Name = "JapanStealer"
 gui.ResetOnSpawn = false
 gui.Parent = PG
 
