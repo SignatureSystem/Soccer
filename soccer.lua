@@ -2,6 +2,7 @@
 -- + selected-type Lucky Block Place + OPEN ALL active boxes + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
+-- + UPDATED: Japan Lucky Block support, full mutation list, latest rarity values
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -36,24 +37,35 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2 }
-local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true }
+local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2, ["Japan"] = 3 }
+local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true, ["Japan"] = true }
 
+-- UPDATED: Full rarity values matching the game
 local RARITY_VALUE = {
-    ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
-    ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
-    ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
-    ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
-    ["Rare"] = 100, ["Common"] = 25,
+    ["Japan"] = 7000000,
+    ["Icons"] = 5000000,
+    ["Spain"] = 2500000,
+    ["Champions"] = 1000000,
+    ["OG"] = 500000,
+    ["Exclusive"] = 75000,
+    ["LIMITED"] = 75000,
+    ["Divine"] = 50000,
+    ["Slime God"] = 30000,
+    ["Secret"] = 10000,
+    ["Mythic"] = 2500,
+    ["Legendary"] = 750,
+    ["Epic"] = 250,
+    ["Rare"] = 100,
+    ["Common"] = 25,
 }
 
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
--- Latest live mutation table includes Divine + Fallen at 5x.
+-- UPDATED: Full mutation list including all game mutations
 local ALL_MUTATIONS = {
     "Golden", "Diamond", "Rainbow", "Cursed", "Divine", "Fallen",
     "Volcanic", "Toxic", "Taco", "Cosmic", "Slimey",
@@ -68,7 +80,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 local selectedUpgradeRarity = "All"
@@ -84,9 +96,7 @@ end
 
 local selectedUpgradeMutation = "All"
 
--- Exact Lucky Block types found in the latest game slime registry.
--- New live entry: Icons Lucky Block (ID 1112, rarity Icons).
--- The dropdown uses display labels; matching uses exact live model names.
+-- UPDATED: Full Lucky Block types including Japan
 local LUCKY_BLOCK_OPTIONS = {
     "All",
     "Common",
@@ -109,8 +119,10 @@ local LUCKY_BLOCK_OPTIONS = {
     "Champions",
     "Spain",
     "Icons",
+    "Japan",
 }
 
+-- UPDATED: Full Lucky Block model name mappings including Japan
 local LUCKY_BLOCK_MODEL_NAMES = {
     ["Common"] = { ["Common Lucky Block"] = true },
     ["Water"] = { ["Water Lucky Block"] = true },
@@ -136,6 +148,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Champions"] = { ["Champions Lucky Block"] = true },
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
+    ["Japan"] = { ["Japan Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
@@ -2662,7 +2675,7 @@ local function isLuckyBlock(tool)
     if typ and tostring(typ):lower():find("lucky") then return true end
     local name = tostring(tool.Name):lower()
     if name:find("lucky") or name:find("box") or name:find("crate") then return true end
-    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret"}) do
+    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret", "japan"}) do
         if name:find(n) then return true end
     end
     return false
