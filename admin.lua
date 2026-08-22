@@ -1,4 +1,6 @@
 -- Slime Value Browser - LIVE CURRENT VALUE + Multi Select + Auto Equip + JAPAN
+-- Batch pick/place/sell: parallel remote spam (not sequential)
+-- Sell = inventory only (Sell Button per INV row + Sell Selected). Never sells placed.
 -- Inventory + Placed slimes using the same CURRENT FINAL cash/s calculation
 -- as the existing Place Slimes feature.
 -- Added / fixed:
@@ -39,6 +41,7 @@ local state = {
     modulesReady = false,
     pickupRemote = nil,
     placeRemote = nil,
+    sellRemote = nil,
     sortMode = "Highest First",
     rarity = "All",
     mutation = "All",
@@ -974,9 +977,9 @@ local function makeDropButton(x, width, text)
     return b
 end
 
-local SortBtn = makeDropButton(14, 104, "Sort: High â–¼")
-local RarityBtn = makeDropButton(124, 104, "Rarity: All â–¼")
-local MutationBtn = makeDropButton(234, 120, "Mutation: All â–¼")
+local SortBtn = makeDropButton(14, 104, "Sort: High v")
+local RarityBtn = makeDropButton(124, 104, "Rarity: All v")
+local MutationBtn = makeDropButton(234, 120, "Mutation: All v")
 
 -- NEW: quick checkbox beside Mutation filter.
 -- When enabled, slimes whose mutation is None are hidden.
@@ -985,14 +988,14 @@ ExcludeNoneBtn.Size = UDim2.new(0, 92, 0, 28)
 ExcludeNoneBtn.Position = UDim2.new(0, 360, 0, 46)
 ExcludeNoneBtn.BackgroundColor3 = Color3.fromRGB(36, 36, 47)
 ExcludeNoneBtn.BorderSizePixel = 0
-ExcludeNoneBtn.Text = "â–¡ Exclude None"
+ExcludeNoneBtn.Text = "[ ] Exclude None"
 ExcludeNoneBtn.TextColor3 = Color3.fromRGB(225, 225, 235)
 ExcludeNoneBtn.TextSize = 9
 ExcludeNoneBtn.Font = Enum.Font.GothamBold
 ExcludeNoneBtn.Parent = Main
 Instance.new("UICorner", ExcludeNoneBtn).CornerRadius = UDim.new(0, 6)
 
-local SourceBtn = makeDropButton(458, 88, "Source: All â–¼")
+local SourceBtn = makeDropButton(458, 88, "Source: All v")
 
 local SearchBox = Instance.new("TextBox")
 SearchBox.Size = UDim2.new(0, 100, 0, 28)
@@ -1035,7 +1038,7 @@ SelectAllBtn.Size = UDim2.new(0, 24, 0, 20)
 SelectAllBtn.Position = UDim2.new(0, 4, 0, 3)
 SelectAllBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 57)
 SelectAllBtn.BorderSizePixel = 0
-SelectAllBtn.Text = "â–¡"
+SelectAllBtn.Text = "[ ]"
 SelectAllBtn.TextColor3 = Color3.fromRGB(210, 210, 225)
 SelectAllBtn.TextSize = 15
 SelectAllBtn.Font = Enum.Font.GothamBold
@@ -1141,7 +1144,7 @@ Instance.new("UICorner", SecondaryAction).CornerRadius = UDim.new(0, 7)
 
 -- NEW: batch pickup button.
 local PickupSelectedBtn = Instance.new("TextButton")
-PickupSelectedBtn.Size = UDim2.new(0, 160, 0, 24)
+PickupSelectedBtn.Size = UDim2.new(0, 120, 0, 24)
 PickupSelectedBtn.Position = UDim2.new(0, 14, 0, 486)
 PickupSelectedBtn.BackgroundColor3 = Color3.fromRGB(35, 57, 43)
 PickupSelectedBtn.BorderSizePixel = 0
@@ -1151,6 +1154,30 @@ PickupSelectedBtn.TextSize = 9
 PickupSelectedBtn.Font = Enum.Font.GothamBold
 PickupSelectedBtn.Parent = Main
 Instance.new("UICorner", PickupSelectedBtn).CornerRadius = UDim.new(0, 6)
+
+local PlaceSelectedBtn = Instance.new("TextButton")
+PlaceSelectedBtn.Size = UDim2.new(0, 120, 0, 24)
+PlaceSelectedBtn.Position = UDim2.new(0, 172, 0, 486)
+PlaceSelectedBtn.BackgroundColor3 = Color3.fromRGB(37, 47, 62)
+PlaceSelectedBtn.BorderSizePixel = 0
+PlaceSelectedBtn.Text = "Place Selected"
+PlaceSelectedBtn.TextColor3 = Color3.fromRGB(160, 205, 255)
+PlaceSelectedBtn.TextSize = 9
+PlaceSelectedBtn.Font = Enum.Font.GothamBold
+PlaceSelectedBtn.Parent = Main
+Instance.new("UICorner", PlaceSelectedBtn).CornerRadius = UDim.new(0, 6)
+
+local SellSelectedBtn = Instance.new("TextButton")
+SellSelectedBtn.Size = UDim2.new(0, 120, 0, 24)
+SellSelectedBtn.Position = UDim2.new(0, 300, 0, 486)
+SellSelectedBtn.BackgroundColor3 = Color3.fromRGB(62, 38, 38)
+SellSelectedBtn.BorderSizePixel = 0
+SellSelectedBtn.Text = "Sell Selected"
+SellSelectedBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+SellSelectedBtn.TextSize = 9
+SellSelectedBtn.Font = Enum.Font.GothamBold
+SellSelectedBtn.Parent = Main
+Instance.new("UICorner", SellSelectedBtn).CornerRadius = UDim.new(0, 6)
 
 local Summary = Instance.new("TextLabel")
 Summary.Size = UDim2.new(0, 360, 0, 24)
@@ -1245,19 +1272,19 @@ local sourceOptions = {"All", "Placed", "Inventory"}
 
 createDropdown(SortBtn, sortOptions, function(value)
     state.sortMode = value
-    SortBtn.Text = value == "Highest First" and "Sort: High â–¼" or "Sort: Low â–¼"
+    SortBtn.Text = value == "Highest First" and "Sort: High v" or "Sort: Low v"
     if refreshList then refreshList() end
 end)
 
 createDropdown(RarityBtn, rarityOptions, function(value)
     state.rarity = value
-    RarityBtn.Text = "Rarity: " .. tostring(value) .. " â–¼"
+    RarityBtn.Text = "Rarity: " .. tostring(value) .. " v"
     if refreshList then refreshList() end
 end)
 
 createDropdown(MutationBtn, mutationOptions, function(value)
     state.mutation = value
-    MutationBtn.Text = "Mutation: " .. tostring(value) .. " â–¼"
+    MutationBtn.Text = "Mutation: " .. tostring(value) .. " v"
     if refreshList then refreshList() end
 end)
 
@@ -1265,11 +1292,11 @@ ExcludeNoneBtn.MouseButton1Click:Connect(function()
     state.excludeNone = not state.excludeNone
 
     if state.excludeNone then
-        ExcludeNoneBtn.Text = "âœ“ Exclude None"
+        ExcludeNoneBtn.Text = "[X] Exclude None"
         ExcludeNoneBtn.BackgroundColor3 = Color3.fromRGB(35, 74, 49)
         ExcludeNoneBtn.TextColor3 = Color3.fromRGB(125, 255, 160)
     else
-        ExcludeNoneBtn.Text = "â–¡ Exclude None"
+        ExcludeNoneBtn.Text = "[ ] Exclude None"
         ExcludeNoneBtn.BackgroundColor3 = Color3.fromRGB(36, 36, 47)
         ExcludeNoneBtn.TextColor3 = Color3.fromRGB(225, 225, 235)
     end
@@ -1281,7 +1308,7 @@ end)
 
 createDropdown(SourceBtn, sourceOptions, function(value)
     state.source = value
-    SourceBtn.Text = "Source: " .. tostring(value) .. " â–¼"
+    SourceBtn.Text = "Source: " .. tostring(value) .. " v"
     if refreshList then refreshList() end
 end)
 
@@ -1353,13 +1380,13 @@ local function updateSelectAllVisual()
     local checked = countVisibleSelected()
 
     if total > 0 and checked == total then
-        SelectAllBtn.Text = "âœ“"
+        SelectAllBtn.Text = "[X]"
         SelectAllBtn.BackgroundColor3 = Color3.fromRGB(35, 74, 49)
     elseif checked > 0 then
-        SelectAllBtn.Text = "âˆ’"
+        SelectAllBtn.Text = "-"
         SelectAllBtn.BackgroundColor3 = Color3.fromRGB(65, 58, 38)
     else
-        SelectAllBtn.Text = "â–¡"
+        SelectAllBtn.Text = "[ ]"
         SelectAllBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 57)
     end
 end
@@ -1392,7 +1419,7 @@ local function createRow(item, order)
 
     local function updateCheck()
         local selected = state.selectedChecks[key] == true
-        Check.Text = selected and "âœ“" or ""
+        Check.Text = selected and "[X]" or ""
         Check.BackgroundColor3 = selected
             and Color3.fromRGB(35, 74, 49)
             or Color3.fromRGB(46, 46, 59)
@@ -1433,12 +1460,45 @@ local function createRow(item, order)
     cell(
         item.sourceLabel,
         454,
-        62,
+        48,
         Enum.TextXAlignment.Left,
         item.source == "Placed"
             and Color3.fromRGB(255, 205, 125)
             or Color3.fromRGB(160, 205, 255)
     )
+
+    -- Sell is inventory-only. Placed rows never get a sell button.
+    if item.source == "Inventory" and item.uid ~= nil then
+        local SellBtn = Instance.new("TextButton")
+        SellBtn.Size = UDim2.new(0, 36, 0, 20)
+        SellBtn.Position = UDim2.new(0, 504, 0.5, -10)
+        SellBtn.BackgroundColor3 = Color3.fromRGB(70, 40, 42)
+        SellBtn.BorderSizePixel = 0
+        SellBtn.Text = "Sell"
+        SellBtn.TextColor3 = Color3.fromRGB(255, 160, 160)
+        SellBtn.TextSize = 9
+        SellBtn.Font = Enum.Font.GothamBold
+        SellBtn.ZIndex = 6
+        SellBtn.Parent = row
+        Instance.new("UICorner", SellBtn).CornerRadius = UDim.new(0, 4)
+
+        SellBtn.MouseButton1Click:Connect(function()
+            if state.batchBusy then
+                return
+            end
+
+            SellBtn.Text = "..."
+            task.spawn(function()
+                local ok, message = sellOneInventory(item)
+                if SellBtn and SellBtn.Parent then
+                    SellBtn.Text = ok and "OK" or "Sell"
+                end
+                if type(message) == "string" and message ~= "Started" and Summary then
+                    Summary.Text = tostring(message)
+                end
+            end)
+        end)
+    end
 
     row.MouseEnter:Connect(function()
         row.BackgroundColor3 = Color3.fromRGB(42, 42, 54)
@@ -1741,9 +1801,34 @@ local function getCheckedPlacedSnapshot()
     return selectedPlaced
 end
 
+local function getCheckedInventorySnapshot()
+    local currentItems = collectSlimes()
+    local selectedInv = {}
+
+    for _, current in ipairs(currentItems) do
+        if current.source == "Inventory"
+            and state.selectedChecks[getItemKey(current)]
+            and current.uid ~= nil
+        then
+            table.insert(selectedInv, current)
+        end
+    end
+
+    sortItems(selectedInv)
+    return selectedInv
+end
+
 local function setBatchButtonText(text)
     if PickupSelectedBtn and PickupSelectedBtn.Parent then
         PickupSelectedBtn.Text = text
+    end
+
+    if PlaceSelectedBtn and PlaceSelectedBtn.Parent then
+        PlaceSelectedBtn.Text = text
+    end
+
+    if SellSelectedBtn and SellSelectedBtn.Parent then
+        SellSelectedBtn.Text = text
     end
 
     if PrimaryAction and PrimaryAction.Parent and Detail.Visible then
@@ -1754,6 +1839,8 @@ local function setBatchButtonText(text)
     end
 end
 
+-- Parallel spam pickup: fire Pickup Slime for every checked slot repeatedly
+-- until each UID is no longer placed (or timeout). Not sequential.
 local function startBatchPickup(selectedPlaced)
     if state.batchBusy then
         return false, "Batch already running"
@@ -1770,62 +1857,81 @@ local function startBatchPickup(selectedPlaced)
         return false, "Pickup Remote Missing"
     end
 
-    -- Snapshot BEFORE the first pickup so live refresh/source transitions
-    -- cannot delete the remaining work list.
-    local queue = {}
+    local targets = {}
     for _, item in ipairs(selectedPlaced) do
-        table.insert(queue, item)
+        table.insert(targets, {
+            uid = item.uid,
+            slot = item.slot,
+            key = getItemKey(item),
+            done = false,
+        })
     end
 
     state.batchBusy = true
+    unequipAllTools()
 
     task.spawn(function()
-        local picked = 0
-        local lastPickedUID = nil
+        local remote = state.pickupRemote
+        local deadline = os.clock() + 12
+        local lastFire = 0
 
-        for i, item in ipairs(queue) do
-            if not Gui.Parent then
+        while Gui.Parent and os.clock() < deadline do
+            local remaining = 0
+            local data = getData()
+
+            for _, t in ipairs(targets) do
+                if not t.done then
+                    local liveSlot = findPlacedEntryByUID(data, t.uid)
+                    if not liveSlot then
+                        t.done = true
+                        state.selectedChecks[t.key] = nil
+                    else
+                        remaining += 1
+                        t.slot = liveSlot
+                    end
+                end
+            end
+
+            if remaining == 0 then
                 break
             end
 
-            setBatchButtonText(string.format("Picking %d/%d", i, #queue))
-
-            local ok, message = pickupOnePlaced(item)
-
-            if ok then
-                picked += 1
-                lastPickedUID = item.uid
-            else
-                warn(
-                    "[SlimeBrowser] Batch pickup failed for UID/slot:",
-                    tostring(item.uid),
-                    tostring(item.slot),
-                    tostring(message)
-                )
+            -- Spam all remaining slots every ~0.05s
+            if os.clock() - lastFire >= 0.05 then
+                lastFire = os.clock()
+                for _, t in ipairs(targets) do
+                    if not t.done and t.slot then
+                        pcall(function()
+                            remote:FireServer(tostring(t.slot))
+                        end)
+                    end
+                end
             end
 
-            -- Give the game's PlotSlimes/Backpack replication time to settle
-            -- before touching the next stand.
-            task.wait(0.22)
+            setBatchButtonText(string.format("Spam pick %d left", remaining))
+            task.wait(0.03)
         end
 
-        -- Multiple tools cannot all remain equipped. Keep the LAST successfully
-        -- picked slime equipped, which is the useful batch equivalent of auto-equip.
-        if lastPickedUID ~= nil then
-            unequipAllTools()
-            task.wait(0.08)
-            equipToolByUID(lastPickedUID, 2.5)
+        local picked = 0
+        for _, t in ipairs(targets) do
+            if t.done then
+                picked += 1
+            end
         end
 
-        setBatchButtonText("Picked " .. tostring(picked) .. "/" .. tostring(#queue))
+        setBatchButtonText("Picked " .. tostring(picked) .. "/" .. tostring(#targets))
         refreshList()
-
-        task.wait(0.9)
+        task.wait(0.7)
 
         if PickupSelectedBtn and PickupSelectedBtn.Parent then
             PickupSelectedBtn.Text = "Pick Up Selected"
         end
-
+        if PlaceSelectedBtn and PlaceSelectedBtn.Parent then
+            PlaceSelectedBtn.Text = "Place Selected"
+        end
+        if SellSelectedBtn and SellSelectedBtn.Parent then
+            SellSelectedBtn.Text = "Sell Selected"
+        end
         if PrimaryAction and PrimaryAction.Parent and Detail.Visible then
             local selected = state.selected
             if selected and selected.source == "Placed" then
@@ -1837,6 +1943,289 @@ local function startBatchPickup(selectedPlaced)
     end)
 
     return true, "Started"
+end
+
+-- Parallel spam place: assign free slots to checked inventory UIDs and
+-- fire Place Slime repeatedly until each UID appears in PlotSlimes.
+local function startBatchPlace(selectedInv)
+    if state.batchBusy then
+        return false, "Batch already running"
+    end
+
+    selectedInv = selectedInv or getCheckedInventorySnapshot()
+
+    if #selectedInv == 0 then
+        return false, "No inventory selected"
+    end
+
+    state.placeRemote = state.placeRemote or resolveExactRemoteEvent("Place Slime")
+    if not state.placeRemote then
+        return false, 'RemoteEvent "Place Slime" missing'
+    end
+
+    local freeSlots = getAvailableSlots()
+    if #freeSlots == 0 then
+        return false, "No free unlocked slot"
+    end
+
+    local targets = {}
+    local count = math.min(#selectedInv, #freeSlots)
+    for i = 1, count do
+        local item = selectedInv[i]
+        table.insert(targets, {
+            uid = item.uid,
+            slot = freeSlots[i].name,
+            key = getItemKey(item),
+            done = false,
+        })
+    end
+
+    state.batchBusy = true
+
+    task.spawn(function()
+        local remote = state.placeRemote
+        local deadline = os.clock() + 12
+        local lastFire = 0
+
+        while Gui.Parent and os.clock() < deadline do
+            local remaining = 0
+            local data = getData()
+
+            for _, t in ipairs(targets) do
+                if not t.done then
+                    local placedSlot = findPlacedEntryByUID(data, t.uid)
+                    if placedSlot then
+                        t.done = true
+                        state.selectedChecks[t.key] = nil
+                    else
+                        remaining += 1
+                    end
+                end
+            end
+
+            if remaining == 0 then
+                break
+            end
+
+            if os.clock() - lastFire >= 0.05 then
+                lastFire = os.clock()
+                for _, t in ipairs(targets) do
+                    if not t.done then
+                        pcall(function()
+                            remote:FireServer(tostring(t.slot), t.uid)
+                        end)
+                    end
+                end
+            end
+
+            setBatchButtonText(string.format("Spam place %d left", remaining))
+            task.wait(0.03)
+        end
+
+        local placed = 0
+        for _, t in ipairs(targets) do
+            if t.done then
+                placed += 1
+            end
+        end
+
+        setBatchButtonText("Placed " .. tostring(placed) .. "/" .. tostring(#targets))
+        refreshList()
+        task.wait(0.7)
+
+        if PickupSelectedBtn and PickupSelectedBtn.Parent then
+            PickupSelectedBtn.Text = "Pick Up Selected"
+        end
+        if PlaceSelectedBtn and PlaceSelectedBtn.Parent then
+            PlaceSelectedBtn.Text = "Place Selected"
+        end
+        if SellSelectedBtn and SellSelectedBtn.Parent then
+            SellSelectedBtn.Text = "Sell Selected"
+        end
+        if SecondaryAction and SecondaryAction.Parent and Detail.Visible then
+            local selected = state.selected
+            if selected and selected.source == "Inventory" then
+                SecondaryAction.Text = "Place in Free Slot"
+            end
+        end
+
+        state.batchBusy = false
+    end)
+
+    return true, "Started"
+end
+
+local function findInventoryEntryByUID(playerData, uid)
+    if uid == nil or not playerData or type(playerData.Inventory) ~= "table" then
+        return nil
+    end
+
+    local wanted = tostring(uid)
+    for _, entry in pairs(playerData.Inventory) do
+        if type(entry) == "table" then
+            local entryUID = getEntryUID(entry)
+            if entryUID ~= nil and tostring(entryUID) == wanted then
+                return entry
+            end
+        end
+    end
+    return nil
+end
+
+-- Inventory-only sell. Never uses placed/stand sell remotes.
+local function startBatchSell(selectedInv)
+    if state.batchBusy then
+        return false, "Batch already running"
+    end
+
+    selectedInv = selectedInv or getCheckedInventorySnapshot()
+
+    if #selectedInv == 0 then
+        return false, "No inventory selected"
+    end
+
+    -- Strict filter: inventory only
+    local filtered = {}
+    for _, item in ipairs(selectedInv) do
+        if item.source == "Inventory" and item.uid ~= nil then
+            table.insert(filtered, item)
+        end
+    end
+
+    if #filtered == 0 then
+        return false, "No inventory selected"
+    end
+
+    state.sellRemote = state.sellRemote or resolveExactRemoteEvent("Sell Slime From Inventory")
+    if not state.sellRemote then
+        return false, 'RemoteEvent "Sell Slime From Inventory" missing'
+    end
+
+    local targets = {}
+    for _, item in ipairs(filtered) do
+        table.insert(targets, {
+            uid = item.uid,
+            key = getItemKey(item),
+            done = false,
+        })
+    end
+
+    state.batchBusy = true
+
+    task.spawn(function()
+        local remote = state.sellRemote
+        local deadline = os.clock() + 12
+        local lastFire = 0
+
+        while Gui.Parent and os.clock() < deadline do
+            local remaining = 0
+            local data = getData()
+
+            for _, t in ipairs(targets) do
+                if not t.done then
+                    local stillThere = findInventoryEntryByUID(data, t.uid)
+                    if not stillThere then
+                        t.done = true
+                        state.selectedChecks[t.key] = nil
+                    else
+                        remaining += 1
+                    end
+                end
+            end
+
+            if remaining == 0 then
+                break
+            end
+
+            if os.clock() - lastFire >= 0.05 then
+                lastFire = os.clock()
+                for _, t in ipairs(targets) do
+                    if not t.done then
+                        pcall(function()
+                            remote:FireServer(t.uid)
+                        end)
+                    end
+                end
+            end
+
+            setBatchButtonText(string.format("Spam sell %d left", remaining))
+            task.wait(0.03)
+        end
+
+        local sold = 0
+        for _, t in ipairs(targets) do
+            if t.done then
+                sold += 1
+            end
+        end
+
+        setBatchButtonText("Sold " .. tostring(sold) .. "/" .. tostring(#targets))
+        refreshList()
+        task.wait(0.7)
+
+        if PickupSelectedBtn and PickupSelectedBtn.Parent then
+            PickupSelectedBtn.Text = "Pick Up Selected"
+        end
+        if PlaceSelectedBtn and PlaceSelectedBtn.Parent then
+            PlaceSelectedBtn.Text = "Place Selected"
+        end
+        if SellSelectedBtn and SellSelectedBtn.Parent then
+            SellSelectedBtn.Text = "Sell Selected"
+        end
+
+        state.batchBusy = false
+    end)
+
+    return true, "Started"
+end
+
+local function sellOneInventory(item)
+    if not item or item.source ~= "Inventory" or item.uid == nil then
+        return false, "Inventory only"
+    end
+
+    -- If multiple inventory rows are checked, sell ALL of them via spam.
+    local checked = getCheckedInventorySnapshot()
+    if #checked > 0 then
+        return startBatchSell(checked)
+    end
+
+    state.sellRemote = state.sellRemote or resolveExactRemoteEvent("Sell Slime From Inventory")
+    if not state.sellRemote then
+        return false, 'RemoteEvent "Sell Slime From Inventory" missing'
+    end
+
+    state.batchBusy = true
+    local remote = state.sellRemote
+    local uid = item.uid
+    local key = getItemKey(item)
+    local deadline = os.clock() + 5
+    local lastFire = 0
+    local sold = false
+
+    while os.clock() < deadline do
+        local data = getData()
+        if not findInventoryEntryByUID(data, uid) then
+            sold = true
+            break
+        end
+
+        if os.clock() - lastFire >= 0.05 then
+            lastFire = os.clock()
+            pcall(function()
+                remote:FireServer(uid)
+            end)
+        end
+        task.wait(0.03)
+    end
+
+    if sold then
+        state.selectedChecks[key] = nil
+    end
+
+    state.batchBusy = false
+    refreshList()
+    return sold, sold and "Sold" or "Sell not confirmed"
 end
 
 local function placeInventoryItem(item)
@@ -1902,7 +2291,7 @@ PrimaryAction.MouseButton1Click:Connect(function()
 
     if item.source == "Placed" then
         -- IMPORTANT: if any placed rows are checked, Pick Up Remote now acts
-        -- on ALL checked rows one-by-one. This matches the user's marked-row flow.
+        -- on ALL checked rows via parallel remote spam.
         local checked = getCheckedPlacedSnapshot()
 
         if #checked > 0 then
@@ -1930,7 +2319,7 @@ PrimaryAction.MouseButton1Click:Connect(function()
                 local equipped, equipMessage = equipToolByUID(item.uid, 2.5)
 
                 if equipped then
-                    PrimaryAction.Text = "Picked + Equipped âœ“"
+                    PrimaryAction.Text = "Picked + Equipped [X]"
                 else
                     PrimaryAction.Text = "Picked | " .. tostring(equipMessage)
                 end
@@ -1950,7 +2339,7 @@ PrimaryAction.MouseButton1Click:Connect(function()
     else
         PrimaryAction.Text = "Selecting..."
         local ok, message = equipInventoryItem(item)
-        PrimaryAction.Text = ok and "Selected âœ“" or tostring(message)
+        PrimaryAction.Text = ok and "Selected [X]" or tostring(message)
 
         task.delay(0.8, function()
             if PrimaryAction and PrimaryAction.Parent and state.selected == item then
@@ -1972,7 +2361,7 @@ SecondaryAction.MouseButton1Click:Connect(function()
 
     if item.source == "Placed" then
         local ok, message = teleportToPlacedItem(item)
-        SecondaryAction.Text = ok and "Teleported âœ“" or tostring(message)
+        SecondaryAction.Text = ok and "Teleported [X]" or tostring(message)
 
         task.delay(0.8, function()
             if SecondaryAction and SecondaryAction.Parent and state.selected == item then
@@ -1980,11 +2369,26 @@ SecondaryAction.MouseButton1Click:Connect(function()
             end
         end)
     else
+        -- If any inventory rows are checked, place ALL of them via parallel spam.
+        local checked = getCheckedInventorySnapshot()
+        if #checked > 0 then
+            local started, message = startBatchPlace(checked)
+            if not started then
+                SecondaryAction.Text = tostring(message)
+                task.delay(1, function()
+                    if SecondaryAction.Parent and state.selected == item then
+                        SecondaryAction.Text = "Place in Free Slot"
+                    end
+                end)
+            end
+            return
+        end
+
         SecondaryAction.Text = "Finding free slot..."
 
         task.spawn(function()
             local ok, message = placeInventoryItem(item)
-            SecondaryAction.Text = ok and (tostring(message) .. " âœ“") or tostring(message)
+            SecondaryAction.Text = ok and (tostring(message) .. " [X]") or tostring(message)
 
             if ok then
                 state.selectedChecks[getItemKey(item)] = nil
@@ -2023,6 +2427,43 @@ PickupSelectedBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+PlaceSelectedBtn.MouseButton1Click:Connect(function()
+    if state.batchBusy then
+        return
+    end
+
+    local selectedInv = getCheckedInventorySnapshot()
+    local started, message = startBatchPlace(selectedInv)
+
+    if not started then
+        PlaceSelectedBtn.Text = tostring(message)
+        task.delay(1, function()
+            if PlaceSelectedBtn.Parent then
+                PlaceSelectedBtn.Text = "Place Selected"
+            end
+        end)
+    end
+end)
+
+SellSelectedBtn.MouseButton1Click:Connect(function()
+    if state.batchBusy then
+        return
+    end
+
+    -- Inventory only — never placed.
+    local selectedInv = getCheckedInventorySnapshot()
+    local started, message = startBatchSell(selectedInv)
+
+    if not started then
+        SellSelectedBtn.Text = tostring(message)
+        task.delay(1, function()
+            if SellSelectedBtn.Parent then
+                SellSelectedBtn.Text = "Sell Selected"
+            end
+        end)
+    end
+end)
+
 -- ============================================================
 -- INITIALIZE
 -- ============================================================
@@ -2044,6 +2485,7 @@ task.spawn(function()
     state.lib = _G._Lib or state.lib
     state.pickupRemote = resolveExactRemoteEvent("Pickup Slime")
     state.placeRemote = resolveExactRemoteEvent("Place Slime")
+    state.sellRemote = resolveExactRemoteEvent("Sell Slime From Inventory")
     refreshList()
 end)
 
@@ -2056,4 +2498,4 @@ task.spawn(function()
     end
 end)
 
-print("[SlimeValueBrowser] Loaded - JAPAN + LIVE current cash/s | checkboxes | select all | batch pickup | auto equip")
+print("[SlimeValueBrowser] Loaded - JAPAN | spam pick/place/sell inventory-only | ASCII UI")
