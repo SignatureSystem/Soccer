@@ -1,8 +1,7 @@
 -- Combined Script: ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
 -- + selected-type Lucky Block Place + OPEN ALL active boxes + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
--- + expandable right-side Gift All inventory panel + Auto Accept Gifts + Pick Lowest Profit by count
+-- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
--- + UPDATED: Japan Lucky Block support, full mutation list, latest rarity values
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -37,35 +36,24 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2, ["Japan"] = 3 }
-local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true, ["Japan"] = true }
+local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2 }
+local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true }
 
--- UPDATED: Full rarity values matching the game
 local RARITY_VALUE = {
-    ["Japan"] = 7000000,
-    ["Icons"] = 5000000,
-    ["Spain"] = 2500000,
-    ["Champions"] = 1000000,
-    ["OG"] = 500000,
-    ["Exclusive"] = 75000,
-    ["LIMITED"] = 75000,
-    ["Divine"] = 50000,
-    ["Slime God"] = 30000,
-    ["Secret"] = 10000,
-    ["Mythic"] = 2500,
-    ["Legendary"] = 750,
-    ["Epic"] = 250,
-    ["Rare"] = 100,
-    ["Common"] = 25,
+    ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
+    ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
+    ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
+    ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
+    ["Rare"] = 100, ["Common"] = 25,
 }
 
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan",
+    "Spain", "Icons",
 }
 
--- UPDATED: Full mutation list including all game mutations
+-- Latest live mutation table includes Divine + Fallen at 5x.
 local ALL_MUTATIONS = {
     "Golden", "Diamond", "Rainbow", "Cursed", "Divine", "Fallen",
     "Volcanic", "Toxic", "Taco", "Cosmic", "Slimey",
@@ -80,7 +68,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan",
+    "Spain", "Icons",
 }
 
 local selectedUpgradeRarity = "All"
@@ -96,7 +84,9 @@ end
 
 local selectedUpgradeMutation = "All"
 
--- UPDATED: Full Lucky Block types including Japan
+-- Exact Lucky Block types found in the latest game slime registry.
+-- New live entry: Icons Lucky Block (ID 1112, rarity Icons).
+-- The dropdown uses display labels; matching uses exact live model names.
 local LUCKY_BLOCK_OPTIONS = {
     "All",
     "Common",
@@ -119,10 +109,8 @@ local LUCKY_BLOCK_OPTIONS = {
     "Champions",
     "Spain",
     "Icons",
-    "Japan",
 }
 
--- UPDATED: Full Lucky Block model name mappings including Japan
 local LUCKY_BLOCK_MODEL_NAMES = {
     ["Common"] = { ["Common Lucky Block"] = true },
     ["Water"] = { ["Water Lucky Block"] = true },
@@ -148,7 +136,6 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Champions"] = { ["Champions Lucky Block"] = true },
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
-    ["Japan"] = { ["Japan Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
@@ -229,7 +216,7 @@ sideArrowStroke.Thickness = 1.5
 
 local GiftPanel = Instance.new("Frame")
 GiftPanel.Name = "GiftPanel"
-GiftPanel.Size = UDim2.new(0, 220, 0, 286)
+GiftPanel.Size = UDim2.new(0, 220, 0, 326)
 GiftPanel.Position = UDim2.new(1, 32, 0, 36)
 GiftPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 31)
 GiftPanel.BackgroundTransparency = 0.03
@@ -285,9 +272,58 @@ GiftAllBtn.ZIndex = 116
 GiftAllBtn.Parent = GiftPanel
 Instance.new("UICorner", GiftAllBtn).CornerRadius = UDim.new(0, 7)
 
+-- Gift run controls. Kept inside a scope so this very large script does not
+-- add more long-lived top-level locals. The worker resolves them by Name.
+do
+    local countBox = Instance.new("TextBox")
+    countBox.Name = "GiftCount"
+    countBox.Size = UDim2.new(0, 94, 0, 30)
+    countBox.Position = UDim2.new(0, 10, 0, 113)
+    countBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
+    countBox.BorderSizePixel = 0
+    countBox.PlaceholderText = "Gift Count"
+    countBox.Text = "10"
+    countBox.ClearTextOnFocus = false
+    countBox.TextColor3 = Color3.fromRGB(245, 245, 250)
+    countBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 155)
+    countBox.TextSize = 11
+    countBox.Font = Enum.Font.GothamBold
+    countBox.ZIndex = 116
+    countBox.Parent = GiftPanel
+    Instance.new("UICorner", countBox).CornerRadius = UDim.new(0, 7)
+
+    local delayBox = Instance.new("TextBox")
+    delayBox.Name = "GiftDelay"
+    delayBox.Size = UDim2.new(0, 100, 0, 30)
+    delayBox.Position = UDim2.new(0, 110, 0, 113)
+    delayBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
+    delayBox.BorderSizePixel = 0
+    delayBox.PlaceholderText = "Delay sec"
+    delayBox.Text = "1.25"
+    delayBox.ClearTextOnFocus = false
+    delayBox.TextColor3 = Color3.fromRGB(245, 245, 250)
+    delayBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 155)
+    delayBox.TextSize = 11
+    delayBox.Font = Enum.Font.GothamBold
+    delayBox.ZIndex = 116
+    delayBox.Parent = GiftPanel
+    Instance.new("UICorner", delayBox).CornerRadius = UDim.new(0, 7)
+
+    countBox.FocusLost:Connect(function()
+        local count = math.floor(tonumber(countBox.Text) or 10)
+        countBox.Text = tostring(math.max(1, count))
+    end)
+
+    delayBox.FocusLost:Connect(function()
+        local delay = tonumber(delayBox.Text) or 1.25
+        delay = math.max(0, delay)
+        delayBox.Text = string.format("%.2f", delay)
+    end)
+end
+
 local GiftStatus = Instance.new("TextLabel")
 GiftStatus.Size = UDim2.new(1, -20, 0, 42)
-GiftStatus.Position = UDim2.new(0, 10, 0, 113)
+GiftStatus.Position = UDim2.new(0, 10, 0, 149)
 GiftStatus.BackgroundTransparency = 1
 GiftStatus.Text = "Enter a player in this server."
 GiftStatus.TextColor3 = Color3.fromRGB(185, 185, 200)
@@ -307,7 +343,7 @@ GiftStatus.Parent = GiftPanel
 local LowestProfitLabel = Instance.new("TextLabel")
 LowestProfitLabel.Name = "LowestProfitLabel"
 LowestProfitLabel.Size = UDim2.new(1, -20, 0, 16)
-LowestProfitLabel.Position = UDim2.new(0, 10, 0, 157)
+LowestProfitLabel.Position = UDim2.new(0, 10, 0, 190)
 LowestProfitLabel.BackgroundTransparency = 1
 LowestProfitLabel.Text = "Pick lowest-profit players:"
 LowestProfitLabel.TextColor3 = Color3.fromRGB(200, 200, 215)
@@ -320,7 +356,7 @@ LowestProfitLabel.Parent = GiftPanel
 local LowestProfitCountBox = Instance.new("TextBox")
 LowestProfitCountBox.Name = "LowestProfitCount"
 LowestProfitCountBox.Size = UDim2.new(0, 54, 0, 30)
-LowestProfitCountBox.Position = UDim2.new(0, 10, 0, 176)
+LowestProfitCountBox.Position = UDim2.new(0, 10, 0, 209)
 LowestProfitCountBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
 LowestProfitCountBox.BorderSizePixel = 0
 LowestProfitCountBox.PlaceholderText = "Count"
@@ -337,7 +373,7 @@ Instance.new("UICorner", LowestProfitCountBox).CornerRadius = UDim.new(0, 7)
 local PickLowestProfitBtn = Instance.new("TextButton")
 PickLowestProfitBtn.Name = "PickLowestProfitBtn"
 PickLowestProfitBtn.Size = UDim2.new(0, 140, 0, 30)
-PickLowestProfitBtn.Position = UDim2.new(0, 70, 0, 176)
+PickLowestProfitBtn.Position = UDim2.new(0, 70, 0, 209)
 PickLowestProfitBtn.BackgroundColor3 = Color3.fromRGB(38, 48, 62)
 PickLowestProfitBtn.BorderSizePixel = 0
 PickLowestProfitBtn.Text = "Pick Lowest Profit"
@@ -351,7 +387,7 @@ Instance.new("UICorner", PickLowestProfitBtn).CornerRadius = UDim.new(0, 7)
 local LowestProfitStatus = Instance.new("TextLabel")
 LowestProfitStatus.Name = "LowestProfitStatus"
 LowestProfitStatus.Size = UDim2.new(1, -20, 0, 30)
-LowestProfitStatus.Position = UDim2.new(0, 10, 0, 211)
+LowestProfitStatus.Position = UDim2.new(0, 10, 0, 244)
 LowestProfitStatus.BackgroundTransparency = 1
 LowestProfitStatus.Text = "Lowest cash/s first."
 LowestProfitStatus.TextColor3 = Color3.fromRGB(165, 165, 180)
@@ -371,7 +407,7 @@ LowestProfitStatus.Parent = GiftPanel
 local AutoAcceptGiftBtn = Instance.new("TextButton")
 AutoAcceptGiftBtn.Name = "AutoAcceptGiftToggle"
 AutoAcceptGiftBtn.Size = UDim2.new(1, -20, 0, 30)
-AutoAcceptGiftBtn.Position = UDim2.new(0, 10, 0, 248)
+AutoAcceptGiftBtn.Position = UDim2.new(0, 10, 0, 282)
 AutoAcceptGiftBtn.BackgroundColor3 = Color3.fromRGB(52, 38, 42)
 AutoAcceptGiftBtn.BorderSizePixel = 0
 AutoAcceptGiftBtn.Text = "Auto Accept Gifts: OFF"
@@ -824,193 +860,207 @@ OpenBoxesBtn.Font = Enum.Font.GothamBold
 OpenBoxesBtn.Parent = MainFrame
 Instance.new("UICorner", OpenBoxesBtn).CornerRadius = UDim.new(0, 8)
 
-local RarityLabel = Instance.new("TextLabel")
-RarityLabel.Size = UDim2.new(0, 220, 0, 16)
-RarityLabel.Position = UDim2.new(0, 15, 0, 518)
-RarityLabel.BackgroundTransparency = 1
-RarityLabel.Text = "Pick by Rarity / Mutation (Common = None):"
-RarityLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
-RarityLabel.TextSize = 11
-RarityLabel.Font = Enum.Font.Gotham
-RarityLabel.TextXAlignment = Enum.TextXAlignment.Left
-RarityLabel.Parent = MainFrame
-
-local selectedPickOption = "Icons"
-local DropBtn = Instance.new("TextButton")
-DropBtn.Name = "RarityDrop"
-DropBtn.Size = UDim2.new(0, 140, 0, 28)
-DropBtn.Position = UDim2.new(0, 15, 0, 536)
-DropBtn.BackgroundColor3 = Color3.fromRGB(35, 40, 55)
-DropBtn.BorderSizePixel = 0
-DropBtn.Text = "▼  " .. selectedPickOption
-DropBtn.TextColor3 = Color3.fromRGB(220, 220, 255)
-DropBtn.TextSize = 12
-DropBtn.Font = Enum.Font.GothamBold
-DropBtn.Parent = MainFrame
-Instance.new("UICorner", DropBtn).CornerRadius = UDim.new(0, 6)
-
-local PickRarityBtn = Instance.new("TextButton")
-PickRarityBtn.Name = "PickRarityBtn"
-PickRarityBtn.Size = UDim2.new(0, 72, 0, 28)
-PickRarityBtn.Position = UDim2.new(0, 163, 0, 536)
-PickRarityBtn.BackgroundColor3 = Color3.fromRGB(50, 40, 80)
-PickRarityBtn.BorderSizePixel = 0
-PickRarityBtn.Text = "Pick"
-PickRarityBtn.TextColor3 = Color3.fromRGB(200, 170, 255)
-PickRarityBtn.TextSize = 12
-PickRarityBtn.Font = Enum.Font.GothamBold
-PickRarityBtn.Parent = MainFrame
-Instance.new("UICorner", PickRarityBtn).CornerRadius = UDim.new(0, 6)
-
-local DropList = Instance.new("ScrollingFrame")
-DropList.Name = "DropList"
-DropList.Size = UDim2.new(0, 220, 0, 140)
-DropList.Position = UDim2.new(0, 15, 0, 568)
-DropList.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
-DropList.BorderSizePixel = 0
-DropList.Visible = false
-DropList.ScrollBarThickness = 4
-DropList.CanvasSize = UDim2.new(0, 0, 0, #PICK_OPTIONS * 26)
-DropList.ZIndex = 20
-DropList.Parent = MainFrame
-Instance.new("UICorner", DropList).CornerRadius = UDim.new(0, 6)
-
-local listLayout = Instance.new("UIListLayout")
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Parent = DropList
-
-for i, opt in ipairs(PICK_OPTIONS) do
-    local item = Instance.new("TextButton")
-    item.Size = UDim2.new(1, -4, 0, 24)
-    item.BackgroundColor3 = Color3.fromRGB(35, 38, 50)
-    item.BorderSizePixel = 0
-    item.Text = (opt == "Common") and "  Common (No Mutation)" or ("  " .. opt)
-    item.TextColor3 = Color3.fromRGB(220, 220, 230)
-    item.TextSize = 12
-    item.Font = Enum.Font.Gotham
-    item.TextXAlignment = Enum.TextXAlignment.Left
-    item.LayoutOrder = i
-    item.ZIndex = 21
-    item.Parent = DropList
-    item.MouseButton1Click:Connect(function()
-        selectedPickOption = opt
-        DropBtn.Text = "▼  " .. opt
-        DropList.Visible = false
-    end)
-end
-
-local MutationDropList
-
-DropBtn.MouseButton1Click:Connect(function()
-    if PickupRangeDropList then
-        PickupRangeDropList.Visible = false
-    end
-    if MutationDropList then
-        MutationDropList.Visible = false
-    end
-    if UpgradeRarityDropList then
-        UpgradeRarityDropList.Visible = false
-    end
-    if UpgradeMutationDropList then
-        UpgradeMutationDropList.Visible = false
-    end
-    LuckyTypeDropList.Visible = false
-    DropList.Visible = not DropList.Visible
-end)
-
 -- ============================================
--- DEDICATED PICK BY MUTATION
--- Example: select Cursed -> Pick Up
---          picks every currently placed Cursed slime on all floors.
+-- MANUAL PICK / PLACE DUAL FILTERS
+-- Rarity and Mutation are independent.
+-- A slime must match BOTH selected filters.
+-- "All" is available for each filter.
+-- Mutation "None" means no base mutation AND no event mutation.
 -- ============================================
+local ManualFilters = {
+    pickRarity = "All",
+    pickMutation = "All",
+    placeRarity = "All",
+    placeMutation = "All",
+}
 
-local MutationLabel = Instance.new("TextLabel")
-MutationLabel.Size = UDim2.new(0, 220, 0, 16)
-MutationLabel.Position = UDim2.new(0, 15, 0, 574)
-MutationLabel.BackgroundTransparency = 1
-MutationLabel.Text = "Place by Mutation:"
-MutationLabel.TextColor3 = Color3.fromRGB(210, 180, 255)
-MutationLabel.TextSize = 11
-MutationLabel.Font = Enum.Font.Gotham
-MutationLabel.TextXAlignment = Enum.TextXAlignment.Left
-MutationLabel.Parent = MainFrame
-
-local selectedMutation = "Cursed"
-
-local MutationDropBtn = Instance.new("TextButton")
-MutationDropBtn.Name = "MutationDrop"
-MutationDropBtn.Size = UDim2.new(0, 140, 0, 28)
-MutationDropBtn.Position = UDim2.new(0, 15, 0, 592)
-MutationDropBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 65)
-MutationDropBtn.BorderSizePixel = 0
-MutationDropBtn.Text = "▼  " .. selectedMutation
-MutationDropBtn.TextColor3 = Color3.fromRGB(225, 205, 255)
-MutationDropBtn.TextSize = 12
-MutationDropBtn.Font = Enum.Font.GothamBold
-MutationDropBtn.Parent = MainFrame
-Instance.new("UICorner", MutationDropBtn).CornerRadius = UDim.new(0, 6)
-
-local MutationPickBtn = Instance.new("TextButton")
-MutationPickBtn.Name = "MutationPlaceBtn"
-MutationPickBtn.Size = UDim2.new(0, 72, 0, 28)
-MutationPickBtn.Position = UDim2.new(0, 163, 0, 592)
-MutationPickBtn.BackgroundColor3 = Color3.fromRGB(65, 35, 85)
-MutationPickBtn.BorderSizePixel = 0
-MutationPickBtn.Text = "Place"
-MutationPickBtn.TextColor3 = Color3.fromRGB(225, 180, 255)
-MutationPickBtn.TextSize = 12
-MutationPickBtn.Font = Enum.Font.GothamBold
-MutationPickBtn.Parent = MainFrame
-Instance.new("UICorner", MutationPickBtn).CornerRadius = UDim.new(0, 6)
-
-MutationDropList = Instance.new("ScrollingFrame")
-MutationDropList.Name = "MutationDropList"
-MutationDropList.Size = UDim2.new(0, 220, 0, 140)
-MutationDropList.Position = UDim2.new(0, 15, 0, 624)
-MutationDropList.BackgroundColor3 = Color3.fromRGB(25, 20, 35)
-MutationDropList.BorderSizePixel = 0
-MutationDropList.Visible = false
-MutationDropList.ScrollBarThickness = 4
-MutationDropList.CanvasSize = UDim2.new(0, 0, 0, #ALL_MUTATIONS * 26)
-MutationDropList.ZIndex = 40
-MutationDropList.Parent = MainFrame
-Instance.new("UICorner", MutationDropList).CornerRadius = UDim.new(0, 6)
-
-local mutationListLayout = Instance.new("UIListLayout")
-mutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-mutationListLayout.Parent = MutationDropList
-
-for i, mutationName in ipairs(ALL_MUTATIONS) do
-    local item = Instance.new("TextButton")
-    item.Size = UDim2.new(1, -4, 0, 24)
-    item.BackgroundColor3 = Color3.fromRGB(42, 32, 55)
-    item.BorderSizePixel = 0
-    item.Text = "  " .. mutationName
-    item.TextColor3 = Color3.fromRGB(230, 220, 240)
-    item.TextSize = 12
-    item.Font = Enum.Font.Gotham
-    item.TextXAlignment = Enum.TextXAlignment.Left
-    item.LayoutOrder = i
-    item.ZIndex = 41
-    item.Parent = MutationDropList
-
-    item.MouseButton1Click:Connect(function()
-        selectedMutation = mutationName
-        MutationDropBtn.Text = "▼  " .. mutationName
-        MutationDropList.Visible = false
-    end)
-end
-
-MutationDropBtn.MouseButton1Click:Connect(function()
-    if PickupRangeDropList then
-        PickupRangeDropList.Visible = false
+do
+    local rarityOptions = {"All"}
+    for _, rarityName in ipairs(ALL_RARITIES) do
+        table.insert(rarityOptions, rarityName)
     end
-    DropList.Visible = false
-    UpgradeRarityDropList.Visible = false
-    UpgradeMutationDropList.Visible = false
-    LuckyTypeDropList.Visible = false
-    MutationDropList.Visible = not MutationDropList.Visible
-end)
+
+    local mutationOptions = {"All", "None"}
+    for _, mutationName in ipairs(ALL_MUTATIONS) do
+        table.insert(mutationOptions, mutationName)
+    end
+
+    local PickFilterLabel = Instance.new("TextLabel")
+    PickFilterLabel.Size = UDim2.new(0, 220, 0, 16)
+    PickFilterLabel.Position = UDim2.new(0, 15, 0, 518)
+    PickFilterLabel.BackgroundTransparency = 1
+    PickFilterLabel.Text = "Pick Up by Rarity + Mutation:"
+    PickFilterLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+    PickFilterLabel.TextSize = 11
+    PickFilterLabel.Font = Enum.Font.Gotham
+    PickFilterLabel.TextXAlignment = Enum.TextXAlignment.Left
+    PickFilterLabel.Parent = MainFrame
+
+    local PlaceFilterLabel = Instance.new("TextLabel")
+    PlaceFilterLabel.Size = UDim2.new(0, 220, 0, 16)
+    PlaceFilterLabel.Position = UDim2.new(0, 15, 0, 606)
+    PlaceFilterLabel.BackgroundTransparency = 1
+    PlaceFilterLabel.Text = "Place by Rarity + Mutation:"
+    PlaceFilterLabel.TextColor3 = Color3.fromRGB(210, 180, 255)
+    PlaceFilterLabel.TextSize = 11
+    PlaceFilterLabel.Font = Enum.Font.Gotham
+    PlaceFilterLabel.TextXAlignment = Enum.TextXAlignment.Left
+    PlaceFilterLabel.Parent = MainFrame
+
+    local function closeManualLists(except)
+        for _, list in ipairs({
+            ManualFilters.pickRarityList,
+            ManualFilters.pickMutationList,
+            ManualFilters.placeRarityList,
+            ManualFilters.placeMutationList,
+        }) do
+            if list and list ~= except then
+                list.Visible = false
+            end
+        end
+
+        if PickupRangeDropList then PickupRangeDropList.Visible = false end
+        if UpgradeRarityDropList then UpgradeRarityDropList.Visible = false end
+        if UpgradeMutationDropList then UpgradeMutationDropList.Visible = false end
+        if LuckyTypeDropList then LuckyTypeDropList.Visible = false end
+    end
+
+    local function makeFilterDropdown(name, x, y, listY, labelPrefix, options, stateKey, bg, fg, listBg, itemBg, z)
+        local btn = Instance.new("TextButton")
+        btn.Name = name .. "Button"
+        btn.Size = UDim2.new(0, 106, 0, 28)
+        btn.Position = UDim2.new(0, x, 0, y)
+        btn.BackgroundColor3 = bg
+        btn.BorderSizePixel = 0
+        btn.Text = labelPrefix .. ": ▼ All"
+        btn.TextColor3 = fg
+        btn.TextSize = 10
+        btn.Font = Enum.Font.GothamBold
+        btn.ZIndex = z
+        btn.Parent = MainFrame
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+        local list = Instance.new("ScrollingFrame")
+        list.Name = name .. "List"
+        list.Size = UDim2.new(0, 220, 0, 168)
+        list.Position = UDim2.new(0, 15, 0, listY)
+        list.BackgroundColor3 = listBg
+        list.BorderSizePixel = 0
+        list.Visible = false
+        list.ScrollBarThickness = 4
+        list.CanvasSize = UDim2.new(0, 0, 0, #options * 26)
+        list.ZIndex = z + 10
+        list.Parent = MainFrame
+        Instance.new("UICorner", list).CornerRadius = UDim.new(0, 6)
+        Instance.new("UIListLayout", list).SortOrder = Enum.SortOrder.LayoutOrder
+
+        for i, option in ipairs(options) do
+            local item = Instance.new("TextButton")
+            item.Size = UDim2.new(1, -4, 0, 24)
+            item.BackgroundColor3 = itemBg
+            item.BorderSizePixel = 0
+            item.Text = "  " .. tostring(option)
+            item.TextColor3 = Color3.fromRGB(230, 230, 240)
+            item.TextSize = 11
+            item.Font = Enum.Font.Gotham
+            item.TextXAlignment = Enum.TextXAlignment.Left
+            item.LayoutOrder = i
+            item.ZIndex = z + 11
+            item.Parent = list
+
+            item.MouseButton1Click:Connect(function()
+                ManualFilters[stateKey] = option
+                btn.Text = labelPrefix .. ": ▼ " .. tostring(option)
+                list.Visible = false
+                StatusLabel.Text = string.format(
+                    "%s filter = %s",
+                    labelPrefix == "R" and "Rarity" or "Mutation",
+                    tostring(option)
+                )
+            end)
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            closeManualLists(list)
+            list.Visible = not list.Visible
+            btn.Text = labelPrefix
+                .. (list.Visible and ": ▲ " or ": ▼ ")
+                .. tostring(ManualFilters[stateKey])
+        end)
+
+        return btn, list
+    end
+
+    ManualFilters.pickRarityButton, ManualFilters.pickRarityList =
+        makeFilterDropdown(
+            "PickRarityFilter", 15, 536, 566, "R",
+            rarityOptions, "pickRarity",
+            Color3.fromRGB(35, 40, 55),
+            Color3.fromRGB(185, 210, 255),
+            Color3.fromRGB(20, 24, 34),
+            Color3.fromRGB(35, 40, 50),
+            120
+        )
+
+    ManualFilters.pickMutationButton, ManualFilters.pickMutationList =
+        makeFilterDropdown(
+            "PickMutationFilter", 129, 536, 566, "M",
+            mutationOptions, "pickMutation",
+            Color3.fromRGB(48, 34, 62),
+            Color3.fromRGB(225, 195, 255),
+            Color3.fromRGB(31, 22, 40),
+            Color3.fromRGB(45, 31, 58),
+            125
+        )
+
+    ManualFilters.pickButton = Instance.new("TextButton")
+    ManualFilters.pickButton.Name = "PickDualFilterBtn"
+    ManualFilters.pickButton.Size = UDim2.new(0, 220, 0, 28)
+    ManualFilters.pickButton.Position = UDim2.new(0, 15, 0, 570)
+    ManualFilters.pickButton.BackgroundColor3 = Color3.fromRGB(50, 40, 80)
+    ManualFilters.pickButton.BorderSizePixel = 0
+    ManualFilters.pickButton.Text = "Pick Matching Players"
+    ManualFilters.pickButton.TextColor3 = Color3.fromRGB(205, 180, 255)
+    ManualFilters.pickButton.TextSize = 11
+    ManualFilters.pickButton.Font = Enum.Font.GothamBold
+    ManualFilters.pickButton.Parent = MainFrame
+    Instance.new("UICorner", ManualFilters.pickButton).CornerRadius = UDim.new(0, 6)
+
+    ManualFilters.placeRarityButton, ManualFilters.placeRarityList =
+        makeFilterDropdown(
+            "PlaceRarityFilter", 15, 624, 654, "R",
+            rarityOptions, "placeRarity",
+            Color3.fromRGB(35, 48, 44),
+            Color3.fromRGB(175, 230, 195),
+            Color3.fromRGB(22, 34, 30),
+            Color3.fromRGB(34, 48, 42),
+            130
+        )
+
+    ManualFilters.placeMutationButton, ManualFilters.placeMutationList =
+        makeFilterDropdown(
+            "PlaceMutationFilter", 129, 624, 654, "M",
+            mutationOptions, "placeMutation",
+            Color3.fromRGB(45, 35, 65),
+            Color3.fromRGB(225, 205, 255),
+            Color3.fromRGB(25, 20, 35),
+            Color3.fromRGB(42, 32, 55),
+            135
+        )
+
+    ManualFilters.placeButton = Instance.new("TextButton")
+    ManualFilters.placeButton.Name = "PlaceDualFilterBtn"
+    ManualFilters.placeButton.Size = UDim2.new(0, 220, 0, 28)
+    ManualFilters.placeButton.Position = UDim2.new(0, 15, 0, 658)
+    ManualFilters.placeButton.BackgroundColor3 = Color3.fromRGB(48, 38, 68)
+    ManualFilters.placeButton.BorderSizePixel = 0
+    ManualFilters.placeButton.Text = "Place Matching Players"
+    ManualFilters.placeButton.TextColor3 = Color3.fromRGB(220, 195, 255)
+    ManualFilters.placeButton.TextSize = 11
+    ManualFilters.placeButton.Font = Enum.Font.GothamBold
+    ManualFilters.placeButton.Parent = MainFrame
+    Instance.new("UICorner", ManualFilters.placeButton).CornerRadius = UDim.new(0, 6)
+end
 
 PickupAllBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
 PickupAllBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 70)
@@ -1020,6 +1070,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[LuckyCollector] NO INVISIBILITY GATE BUILD")
 
 -- ============================================
 -- STATE
@@ -1661,28 +1712,6 @@ local function resolveGiftTarget(input)
     return nil, "Player not found in this server"
 end
 
-local function getGiftableInventoryUIDs()
-    local data = getData()
-    local inventory = data and data.Inventory
-    local list, seen = {}, {}
-
-    if type(inventory) ~= "table" then
-        return list
-    end
-
-    for _, entry in pairs(inventory) do
-        if type(entry) == "table" and entry.uid ~= nil then
-            local key = tostring(entry.uid)
-            if not seen[key] then
-                seen[key] = true
-                table.insert(list, entry.uid)
-            end
-        end
-    end
-
-    return list
-end
-
 local function setAutoAcceptGiftsState(on)
     autoAcceptGiftsEnabled = on == true
 
@@ -1717,7 +1746,7 @@ local function setGiftAllState(on, resolvedPlayer)
         GiftAllBtn.TextColor3 = Color3.fromRGB(105, 255, 145)
         GiftAllBtn.BackgroundColor3 = Color3.fromRGB(30, 62, 43)
         GiftNameBox.TextEditable = false
-        GiftStatus.Text = "Target: " .. tostring(giftTargetName) .. " | sending inventory..."
+        GiftStatus.Text = "Target: " .. tostring(giftTargetName) .. " | highest cash/s first..."
     else
         GiftAllBtn.Text = "Gift All: OFF"
         GiftAllBtn.TextColor3 = Color3.fromRGB(255, 105, 115)
@@ -1941,7 +1970,31 @@ local function getSlotRarityAndMutation(slotName, stand, plotSlimes, liveFolder)
     return rarity, mutation, hasEventMutation, eventMutationNames
 end
 
-local function getOccupiedSlotsByFilter(filterName)
+local function manualMutationMatches(selectedMutation, mutation, hasEventMutation, eventMutationNames)
+    local wanted = string.lower(tostring(selectedMutation or "All"))
+
+    if wanted == "all" then
+        return true
+    end
+
+    if wanted == "none"
+        or wanted == "no mutation"
+        or wanted == "normal"
+    then
+        return mutation == nil and not hasEventMutation
+    end
+
+    if mutation ~= nil
+        and string.lower(tostring(mutation)) == wanted
+    then
+        return true
+    end
+
+    return type(eventMutationNames) == "table"
+        and eventMutationNames[wanted] == true
+end
+
+local function getOccupiedSlotsByDualFilter(rarityFilter, mutationFilter)
     local data = getData()
     local plotSlimes = (data and data.PlotSlimes) or {}
     local plot = getMyPlot()
@@ -1953,63 +2006,43 @@ local function getOccupiedSlotsByFilter(filterName)
     local stands = plot:FindFirstChild("Stands")
     if not stands then return list end
 
-    local filterLower = string.lower(tostring(filterName or ""))
-
-    -- IMPORTANT FOR THIS GUI:
-    -- "Common" means a NORMAL slime with NO mutation.
-    -- It does NOT mean the database rarity named Common.
-    local wantsNoMutation =
-        filterLower == "common"
-        or filterLower == "none"
-        or filterLower == "normal"
-        or filterLower == "no mutation"
-
-    local isMutation = wantsNoMutation
-
-    if not isMutation then
-        for _, m in ipairs(ALL_MUTATIONS) do
-            if string.lower(m) == filterLower then
-                isMutation = true
-                break
-            end
-        end
-    end
+    local wantedRarity = string.lower(tostring(rarityFilter or "All"))
 
     for _, stand in ipairs(stands:GetChildren()) do
-        local name = stand.Name
+        local slotName = tostring(stand.Name)
 
-        if isOccupied(name, plotSlimes, liveFolder, stand) then
-            local rarity, mutation, hasEventMutation =
-                getSlotRarityAndMutation(name, stand, plotSlimes, liveFolder)
+        if isOccupied(slotName, plotSlimes, liveFolder, stand) then
+            local rarity, mutation, hasEventMutation, eventMutationNames =
+                getSlotRarityAndMutation(
+                    slotName,
+                    stand,
+                    plotSlimes,
+                    liveFolder
+                )
 
-            local match = false
-
-            if wantsNoMutation then
-                -- Common / Normal = no base mutation AND no event mutation.
-                match = mutation == nil and not hasEventMutation
-
-            elseif isMutation then
-                if mutation and string.lower(tostring(mutation)) == filterLower then
-                    match = true
-                end
-
-            else
-                -- Other dropdown entries continue to work as rarities.
-                if rarity then
-                    local r = tostring(rarity)
-                    if r == "Player God" then r = "Slime God" end
-
-                    if string.lower(r) == filterLower then
-                        match = true
-                    end
-                end
+            local normalizedRarity = tostring(rarity or "")
+            if normalizedRarity == "Player God" then
+                normalizedRarity = "Slime God"
             end
 
-            if match then
+            local rarityMatches =
+                wantedRarity == "all"
+                or string.lower(normalizedRarity) == wantedRarity
+
+            local mutationMatches = manualMutationMatches(
+                mutationFilter,
+                mutation,
+                hasEventMutation,
+                eventMutationNames
+            )
+
+            if rarityMatches and mutationMatches then
                 table.insert(list, {
-                    name = name,
-                    num = tonumber(name) or 9999,
+                    name = slotName,
+                    num = tonumber(slotName) or 9999,
                     stand = stand,
+                    rarity = normalizedRarity,
+                    mutation = mutation or "None",
                 })
             end
         end
@@ -2437,6 +2470,69 @@ local function calculateOwnedSlimeEarnings(inventoryEntry, def, playerData)
     return math.max(0, earnings)
 end
 
+-- Gift queue ordered by the EXACT same final CURRENT cash/s used by Place Slimes.
+-- This means level + rebirth + base production + mutation/event mutation +
+-- invite/friend/admin production multipliers are already included.
+local function getGiftableInventoryUIDs()
+    local data = getData()
+    local inventory = data and data.Inventory
+    local list, seen = {}, {}
+
+    if type(inventory) ~= "table" then
+        return list
+    end
+
+    for _, entry in pairs(inventory) do
+        if type(entry) == "table" and entry.uid ~= nil then
+            local key = tostring(entry.uid)
+
+            if not seen[key] then
+                seen[key] = true
+
+                local def = resolveSlimeDefinition(entry)
+                local earnings = calculateOwnedSlimeEarnings(entry, def, data)
+                local rarity =
+                    (def and (def.Rarity or def.rarity))
+                    or entry.Rarity
+                    or entry.rarity
+                    or "Unknown"
+
+                if tostring(rarity) == "Player God" then
+                    rarity = "Slime God"
+                end
+
+                table.insert(list, {
+                    uid = entry.uid,
+                    value = tonumber(earnings) or 0,
+                    level = math.max(1, tonumber(entry.level) or 1),
+                    mutation = entry.mutation or entry.Mutation or "None",
+                    rarity = tostring(rarity),
+                    displayName =
+                        (def and def.Name)
+                        or tostring(entry.Name or entry.name or entry.id or entry.uid),
+                })
+            end
+        end
+    end
+
+    table.sort(list, function(a, b)
+        local av = tonumber(a.value) or 0
+        local bv = tonumber(b.value) or 0
+
+        if av ~= bv then
+            return av > bv
+        end
+
+        if (a.level or 1) ~= (b.level or 1) then
+            return (a.level or 1) > (b.level or 1)
+        end
+
+        return tostring(a.uid) < tostring(b.uid)
+    end)
+
+    return list
+end
+
 -- Return currently PLACED normal players ordered by CURRENT cash/s ASCENDING.
 -- This intentionally mirrors the same earnings calculation used by
 -- "Place Slimes (CURRENT CASH first)", then reverses the priority.
@@ -2591,6 +2687,11 @@ local function getSlimeTools()
                             1,
                             tonumber(inventoryEntry.level) or 1
                         ),
+                        rarity =
+                            (def and (def.Rarity or def.rarity))
+                            or inventoryEntry.Rarity
+                            or inventoryEntry.rarity
+                            or "Unknown",
                         mutation = inventoryEntry.mutation or "None",
                         eventMutations = inventoryEntry.event_mutations or {},
                         displayName =
@@ -2632,29 +2733,117 @@ end
 
 local function normalizeMutationName(mutation)
     mutation = tostring(mutation or "None")
-    if mutation == "" then
-        mutation = "None"
+    mutation = string.lower(mutation)
+    if mutation == "" or mutation == "nil" or mutation == "none" or mutation == "normal" or mutation == "no mutation" then
+        return "None"
     end
     return mutation
 end
 
-local function getHeldSlimeToolsByMutation(filterMutation)
+-- Robust rarity resolver for held tools. Some live items store rarity in
+-- different fields (rarity, Rarity, tier, Attributes, or display names).
+local function resolveHeldToolRarity(entry)
+    local candidates = {
+        entry.rarity,
+        entry.Rarity,
+        entry.tier,
+        entry.Tier,
+        entry.displayRarity,
+        entry.displayName,
+        entry.name,
+        entry.id,
+    }
+
+    for _, value in ipairs(candidates) do
+        if value ~= nil then
+            local text = tostring(value)
+            local lower = string.lower(text)
+
+            if lower:find("icons") then return "Icons" end
+            if lower:find("spain") then return "Spain" end
+            if lower:find("champion") then return "Champions" end
+            if lower:find("exclusive") then return "Exclusive" end
+            if lower:find("legendary") then return "Legendary" end
+            if lower:find("mythic") then return "Mythic" end
+            if lower:find("secret") then return "Secret" end
+            if lower:find("divine") then return "Divine" end
+            if lower:find("rare") then return "Rare" end
+            if lower:find("epic") then return "Epic" end
+            if lower:find("common") then return "Common" end
+        end
+    end
+
+    return tostring(entry.rarity or "")
+end
+
+local function getHeldSlimeToolsByDualFilter(rarityFilter, mutationFilter)
     local allTools = getSlimeTools()
     local filtered = {}
-    local wanted = string.lower(normalizeMutationName(filterMutation))
+    local wantedRarity = string.lower(tostring(rarityFilter or "All"))
 
     for _, entry in ipairs(allTools) do
-        local mutation = string.lower(
-            normalizeMutationName(entry.mutation)
+        local entryRarity = resolveHeldToolRarity(entry)
+        if entryRarity == "Player God" then
+            entryRarity = "Slime God"
+        end
+
+        local rarityMatches =
+            wantedRarity == "all"
+            or string.lower(entryRarity) == wantedRarity
+
+        local eventNames = {}
+        local hasEventMutation = false
+        local eventMutations = entry.eventMutations
+
+        if type(eventMutations) == "table" then
+            for k, v in pairs(eventMutations) do
+                local name = nil
+
+                if type(k) == "string" and v == true then
+                    name = k
+                elseif type(v) == "string" then
+                    name = v
+                elseif type(k) == "string" then
+                    name = k
+                end
+
+                if name then
+                    local lower = string.lower(tostring(name))
+                    if lower ~= "" and lower ~= "none" then
+                        eventNames[lower] = true
+                        hasEventMutation = true
+                    end
+                end
+            end
+        elseif eventMutations ~= nil then
+            local lower = string.lower(tostring(eventMutations))
+            if lower ~= "" and lower ~= "none" then
+                eventNames[lower] = true
+                hasEventMutation = true
+            end
+        end
+
+        local baseMutation = entry.mutation
+        if baseMutation ~= nil then
+            local lower = string.lower(tostring(baseMutation))
+            if lower == "" or lower == "none" or lower == "normal" or lower == "no mutation" then
+                baseMutation = nil
+            end
+        end
+
+        local mutationMatches = manualMutationMatches(
+            mutationFilter,
+            baseMutation,
+            hasEventMutation,
+            eventNames
         )
 
-        if mutation == wanted then
+        if rarityMatches and mutationMatches then
             table.insert(filtered, entry)
         end
     end
 
-    -- STRICT: within the selected mutation, place the slime
-    -- with the highest CURRENT calculated cash/s first.
+    -- Keep the exact same CURRENT final cash/s placement priority.
     table.sort(filtered, function(a, b)
         local aCash = tonumber(a.value) or 0
         local bCash = tonumber(b.value) or 0
@@ -2675,7 +2864,7 @@ local function isLuckyBlock(tool)
     if typ and tostring(typ):lower():find("lucky") then return true end
     local name = tostring(tool.Name):lower()
     if name:find("lucky") or name:find("box") or name:find("crate") then return true end
-    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret", "japan"}) do
+    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret"}) do
         if name:find(n) then return true end
     end
     return false
@@ -3899,30 +4088,54 @@ PickupAllBtn.MouseButton1Click:Connect(function()
     actionBusy = false
 end)
 
-PickRarityBtn.MouseButton1Click:Connect(function()
+ManualFilters.pickButton.MouseButton1Click:Connect(function()
     if actionBusy or not PickupRemote then return end
+
     actionBusy = true
-    DropList.Visible = false
-    PickRarityBtn.Text = "..."
-    local filter = selectedPickOption
-    local slots = getOccupiedSlotsByFilter(filter)
+    ManualFilters.pickRarityList.Visible = false
+    ManualFilters.pickMutationList.Visible = false
+    ManualFilters.pickButton.Text = "Picking..."
+
+    local rarityFilter = ManualFilters.pickRarity
+    local mutationFilter = ManualFilters.pickMutation
+    local slots = getOccupiedSlotsByDualFilter(
+        rarityFilter,
+        mutationFilter
+    )
+
     if #slots == 0 then
-        StatusLabel.Text = string.format("No %s slimes on any floor", filter)
-        PickRarityBtn.Text = "Pick"
+        StatusLabel.Text = string.format(
+            "No placed players match R:%s + M:%s",
+            tostring(rarityFilter),
+            tostring(mutationFilter)
+        )
+        ManualFilters.pickButton.Text = "Pick Matching Players"
         actionBusy = false
         return
     end
+
     local n = 0
     for _, slot in ipairs(slots) do
-        if pcall(function() PickupRemote:FireServer(slot.name) end) then n += 1 end
+        if pcall(function()
+            PickupRemote:FireServer(slot.name)
+        end) then
+            n += 1
+        end
         task.wait(DELAY_PICK)
     end
-    StatusLabel.Text = string.format("Picked %d × %s (all floors)", n, filter)
-    PickRarityBtn.Text = "Pick"
+
+    StatusLabel.Text = string.format(
+        "Picked %d | R:%s + M:%s",
+        n,
+        tostring(rarityFilter),
+        tostring(mutationFilter)
+    )
+
+    ManualFilters.pickButton.Text = "Pick Matching Players"
     actionBusy = false
 end)
 
-MutationPickBtn.MouseButton1Click:Connect(function()
+ManualFilters.placeButton.MouseButton1Click:Connect(function()
     if actionBusy then
         StatusLabel.Text = "Another action is still running..."
         return
@@ -3936,23 +4149,28 @@ MutationPickBtn.MouseButton1Click:Connect(function()
     end
 
     actionBusy = true
-    MutationDropList.Visible = false
-    DropList.Visible = false
-    MutationPickBtn.Text = "Placing..."
+    ManualFilters.placeRarityList.Visible = false
+    ManualFilters.placeMutationList.Visible = false
+    ManualFilters.placeButton.Text = "Placing..."
 
     local ok, err = xpcall(function()
-        local mutationName = selectedMutation
+        local rarityFilter = ManualFilters.placeRarity
+        local mutationFilter = ManualFilters.placeMutation
 
-        -- Only CURRENTLY HELD normal slime tools with the selected mutation.
+        -- Only CURRENTLY HELD normal slime tools matching BOTH filters.
         -- Lucky Boxes are already excluded by getSlimeTools().
-        local tools = getHeldSlimeToolsByMutation(mutationName)
+        local tools = getHeldSlimeToolsByDualFilter(
+            rarityFilter,
+            mutationFilter
+        )
         local slots = getAvailableSlots()
 
         if #tools == 0 then
             error(
                 string.format(
-                    "No held %s mutation slimes found",
-                    mutationName
+                    "No held players match R:%s + M:%s",
+                    tostring(rarityFilter),
+                    tostring(mutationFilter)
                 )
             )
         end
@@ -3977,8 +4195,9 @@ MutationPickBtn.MouseButton1Click:Connect(function()
 
         print("====================================================")
         print(
-            "[PlaceMutation]",
-            mutationName,
+            "[PlaceDualFilter]",
+            "R=" .. tostring(rarityFilter),
+            "M=" .. tostring(mutationFilter),
             "- CURRENT CASH DESCENDING"
         )
         print("====================================================")
@@ -4037,15 +4256,16 @@ MutationPickBtn.MouseButton1Click:Connect(function()
                             placed += 1
 
                             StatusLabel.Text = string.format(
-                                "Placed %s %d/%d | %.2f cash/s",
-                                mutationName,
+                                "Placed %d/%d | R:%s M:%s | %.2f cash/s",
                                 placed,
                                 total,
+                                tostring(rarityFilter),
+                                tostring(mutationFilter),
                                 tonumber(rankedEntry.value) or 0
                             )
                         else
                             warn(
-                                "[PlaceMutation] Place failed UID",
+                                "[PlaceDualFilter] Place failed UID",
                                 tostring(rankedEntry.uid),
                                 fireErr
                             )
@@ -4056,7 +4276,7 @@ MutationPickBtn.MouseButton1Click:Connect(function()
                 end
             else
                 warn(
-                    "[PlaceMutation] Missing Tool UID",
+                    "[PlaceDualFilter] Missing Tool UID",
                     tostring(rankedEntry.uid)
                 )
             end
@@ -4072,20 +4292,21 @@ MutationPickBtn.MouseButton1Click:Connect(function()
         end
 
         StatusLabel.Text = string.format(
-            "Placed %d × %s mutation slimes",
+            "Placed %d | R:%s + M:%s",
             placed,
-            mutationName
+            tostring(rarityFilter),
+            tostring(mutationFilter)
         )
     end, debug.traceback)
 
     if not ok then
-        warn("[PlaceMutation] ERROR:", err)
+        warn("[PlaceDualFilter] ERROR:", err)
         StatusLabel.Text =
-            "Mutation place error: "
+            "Filtered place error: "
             .. tostring(err):match("^[^\n]+")
     end
 
-    MutationPickBtn.Text = "Place"
+    ManualFilters.placeButton.Text = "Place Matching Players"
     actionBusy = false
 end)
 
@@ -4512,7 +4733,7 @@ task.spawn(function()
             -- 6) ONLY THEN return to base
             -- ===================================================
 
-            StatusLabel.Text = "Lucky Block: firing invisibility..."
+            StatusLabel.Text = "Lucky Block: cloak fire (NON-BLOCKING) -> collecting..."
 
             -- Invisibility is best-effort only. It MUST be attempted, but a
             -- missing cloak / failed activation must never block collection.
@@ -4552,9 +4773,8 @@ task.spawn(function()
                     break
                 end
 
-                -- Best-effort invisibility fire before every retry; never block collection.
-                pcall(function() activateCloak() end)
-                task.wait(0.12)
+                -- Do NOT retry/verify invisibility here. Collection must proceed
+                -- regardless of cloak state once the initial fire was attempted.
 
                 -- Stay beside the same target while retrying.
                 if block.part and block.part.Parent then
@@ -4727,73 +4947,123 @@ task.spawn(function()
     end
 end)
 
--- Gift every UID currently in Data.Inventory in one burst, then re-read
--- inventory and repeat while the toggle remains ON. Server-side gift rules,
--- recipient acceptance, cooldowns and restrictions are left intact.
+-- Gift worker: highest FINAL current cash/s first.
+-- Gift Count = maximum number of DISTINCT inventory slimes attempted per run.
+-- Gift Delay = seconds between each request. The server remains authoritative
+-- for acceptance, restrictions, and any hidden rate limits.
 task.spawn(function()
     while true do
         if giftAllEnabled then
             local target = giftTargetName and Players:FindFirstChild(giftTargetName)
 
             if not target or target == LocalPlayer then
-                GiftStatus.Text = "Target left the server. Gift All is still ON."
-                task.wait(GIFT_REPEAT_INTERVAL)
+                GiftStatus.Text = "Target left the server. Gift All stopped."
+                setGiftAllState(false)
+                task.wait(0.20)
                 continue
             end
 
-            local uids = getGiftableInventoryUIDs()
+            local countBox = GiftPanel:FindFirstChild("GiftCount")
+            local delayBox = GiftPanel:FindFirstChild("GiftDelay")
+            local requestedCount = math.max(
+                1,
+                math.floor(tonumber(countBox and countBox.Text) or 10)
+            )
+            local giftDelay = math.max(
+                0,
+                tonumber(delayBox and delayBox.Text) or 1.25
+            )
 
-            if #uids == 0 then
-                GiftStatus.Text = "Inventory empty | Gift All remains ON"
-                task.wait(GIFT_REPEAT_INTERVAL)
+            if countBox then
+                countBox.Text = tostring(requestedCount)
+            end
+            if delayBox then
+                delayBox.Text = string.format("%.2f", giftDelay)
+            end
+
+            local ranked = getGiftableInventoryUIDs()
+
+            if #ranked == 0 then
+                GiftStatus.Text = "Inventory empty | Gift All stopped"
+                setGiftAllState(false)
+                task.wait(0.20)
                 continue
             end
 
-            local firedNow = 0
-            local total = #uids
+            local attempted = 0
+            local availableAtStart = #ranked
 
-            -- Launch all currently available UIDs concurrently: one normal
-            -- Gift Slime request per inventory item.
-            for _, uid in ipairs(uids) do
-                if not giftAllEnabled then
+            for _, gift in ipairs(ranked) do
+                if not giftAllEnabled or attempted >= requestedCount then
                     break
                 end
 
-                local key = tostring(uid)
+                local key = tostring(gift.uid)
+
+                -- Keep each UID unique for this Gift All run. setGiftAllState(false)
+                -- clears this table ready for the next run.
                 if not giftInFlight[key] then
                     giftInFlight[key] = true
-                    firedNow += 1
+                    attempted += 1
 
-                    task.spawn(function()
-                        local ok, message = FireGiftSlime(target.Name, uid)
-                        giftInFlight[key] = nil
+                    GiftStatus.Text = string.format(
+                        "%d/%d | %s | %.2f cash/s | %s | %s",
+                        attempted,
+                        math.min(requestedCount, availableAtStart),
+                        tostring(gift.displayName),
+                        tonumber(gift.value) or 0,
+                        tostring(gift.rarity),
+                        tostring(gift.mutation)
+                    )
 
-                        if not giftAllEnabled then
-                            return
-                        end
+                    print(string.format(
+                        "[GiftPriority] #%d UID=%s | %s | Cash/s=%.2f | Lv=%d | Rarity=%s | Mutation=%s",
+                        attempted,
+                        tostring(gift.uid),
+                        tostring(gift.displayName),
+                        tonumber(gift.value) or 0,
+                        tonumber(gift.level) or 1,
+                        tostring(gift.rarity),
+                        tostring(gift.mutation)
+                    ))
 
-                        if ok then
-                            if type(message) == "string" and message ~= "" then
-                                GiftStatus.Text = message
-                            end
-                        elseif type(message) == "string" and message ~= "" then
-                            -- Keep running; show the server's actual reason rather
-                            -- than trying to bypass its gifting restrictions.
-                            GiftStatus.Text = message
-                        end
-                    end)
+                    local ok, message = FireGiftSlime(target.Name, gift.uid)
+
+                    if type(message) == "string" and message ~= "" then
+                        GiftStatus.Text = string.format(
+                            "%d/%d | %.2f cash/s | %s",
+                            attempted,
+                            math.min(requestedCount, availableAtStart),
+                            tonumber(gift.value) or 0,
+                            message
+                        )
+                    elseif not ok then
+                        GiftStatus.Text = string.format(
+                            "%d/%d | request rejected | %.2f cash/s",
+                            attempted,
+                            math.min(requestedCount, availableAtStart),
+                            tonumber(gift.value) or 0
+                        )
+                    end
+
+                    if giftAllEnabled and attempted < requestedCount then
+                        task.wait(giftDelay)
+                    end
                 end
             end
 
+            local completed = attempted
+            local wanted = requestedCount
+            setGiftAllState(false)
             GiftStatus.Text = string.format(
-                "Target: %s | batch %d/%d sent",
-                target.Name,
-                firedNow,
-                total
+                "Gift run complete: %d/%d attempted | highest cash/s first | delay %.2fs",
+                completed,
+                wanted,
+                giftDelay
             )
         end
 
-        task.wait(GIFT_REPEAT_INTERVAL)
+        task.wait(0.10)
     end
 end)
 
@@ -4870,7 +5140,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS + upgrade + steal + selected-type place + OPEN ALL boxes + Gift All + Auto Accept Gifts + Lowest Profit pickup")
+print("[AutoFarm] ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
