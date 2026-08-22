@@ -40,11 +40,30 @@ local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
 local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
-    ["Japan"] = 7000000, ["Japan"] = 7000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
+    ["Japan"] = 7000000, ["Japan"] = 7000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000, ["Champions"] = 1000000,
     ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
     ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
     ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
     ["Rare"] = 100, ["Common"] = 25,
+}
+
+
+local RARITY_ORDER = {
+    "Japan",
+    "Icons",
+    "Spain",
+    "Champions",
+    "OG",
+    "Exclusive",
+    "LIMITED",
+    "Divine",
+    "Slime God",
+    "Secret",
+    "Mythic",
+    "Legendary",
+    "Epic",
+    "Rare",
+    "Common",
 }
 
 local ALL_RARITIES = {
@@ -658,7 +677,7 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
     item.Size = UDim2.new(1, -4, 0, 24)
     item.BackgroundColor3 = Color3.fromRGB(52, 40, 23)
     item.BorderSizePixel = 0
-    item.Text = "  " .. boxType
+    item.Text = ((selectedLuckyBlockTypes[boxType] and "☑ " or "☐ ") .. boxType)
     item.TextColor3 = Color3.fromRGB(244, 229, 195)
     item.TextSize = 11
     item.Font = Enum.Font.Gotham
@@ -682,6 +701,8 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
             if enabled then table.insert(selectedNames, name) end
         end
         table.sort(selectedNames)
+
+        item.Text = ((selectedLuckyBlockTypes[boxType] and "☑ " or "☐ ") .. boxType)
 
         LuckyTypeDropBtn.Text =
             "Lucky Types: " .. (#selectedNames > 0 and table.concat(selectedNames, ", ") or "None")
