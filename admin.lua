@@ -1,4 +1,4 @@
--- Slime Value Browser - LIVE CURRENT VALUE + Multi Select + Auto Equip
+-- Slime Value Browser - LIVE CURRENT VALUE + Multi Select + Auto Equip + JAPAN
 -- Inventory + Placed slimes using the same CURRENT FINAL cash/s calculation
 -- as the existing Place Slimes feature.
 -- Added / fixed:
@@ -24,7 +24,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 local ALL_MUTATIONS = {
@@ -950,7 +950,7 @@ Close.Size = UDim2.new(0, 30, 0, 30)
 Close.Position = UDim2.new(1, -38, 0, 8)
 Close.BackgroundColor3 = Color3.fromRGB(50, 35, 40)
 Close.BorderSizePixel = 0
-Close.Text = "×"
+Close.Text = "Ã—"
 Close.TextColor3 = Color3.fromRGB(255, 135, 145)
 Close.TextSize = 20
 Close.Font = Enum.Font.GothamBold
@@ -974,9 +974,9 @@ local function makeDropButton(x, width, text)
     return b
 end
 
-local SortBtn = makeDropButton(14, 104, "Sort: High ▼")
-local RarityBtn = makeDropButton(124, 104, "Rarity: All ▼")
-local MutationBtn = makeDropButton(234, 120, "Mutation: All ▼")
+local SortBtn = makeDropButton(14, 104, "Sort: High â–¼")
+local RarityBtn = makeDropButton(124, 104, "Rarity: All â–¼")
+local MutationBtn = makeDropButton(234, 120, "Mutation: All â–¼")
 
 -- NEW: quick checkbox beside Mutation filter.
 -- When enabled, slimes whose mutation is None are hidden.
@@ -985,14 +985,14 @@ ExcludeNoneBtn.Size = UDim2.new(0, 92, 0, 28)
 ExcludeNoneBtn.Position = UDim2.new(0, 360, 0, 46)
 ExcludeNoneBtn.BackgroundColor3 = Color3.fromRGB(36, 36, 47)
 ExcludeNoneBtn.BorderSizePixel = 0
-ExcludeNoneBtn.Text = "□ Exclude None"
+ExcludeNoneBtn.Text = "â–¡ Exclude None"
 ExcludeNoneBtn.TextColor3 = Color3.fromRGB(225, 225, 235)
 ExcludeNoneBtn.TextSize = 9
 ExcludeNoneBtn.Font = Enum.Font.GothamBold
 ExcludeNoneBtn.Parent = Main
 Instance.new("UICorner", ExcludeNoneBtn).CornerRadius = UDim.new(0, 6)
 
-local SourceBtn = makeDropButton(458, 88, "Source: All ▼")
+local SourceBtn = makeDropButton(458, 88, "Source: All â–¼")
 
 local SearchBox = Instance.new("TextBox")
 SearchBox.Size = UDim2.new(0, 100, 0, 28)
@@ -1035,7 +1035,7 @@ SelectAllBtn.Size = UDim2.new(0, 24, 0, 20)
 SelectAllBtn.Position = UDim2.new(0, 4, 0, 3)
 SelectAllBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 57)
 SelectAllBtn.BorderSizePixel = 0
-SelectAllBtn.Text = "□"
+SelectAllBtn.Text = "â–¡"
 SelectAllBtn.TextColor3 = Color3.fromRGB(210, 210, 225)
 SelectAllBtn.TextSize = 15
 SelectAllBtn.Font = Enum.Font.GothamBold
@@ -1245,19 +1245,19 @@ local sourceOptions = {"All", "Placed", "Inventory"}
 
 createDropdown(SortBtn, sortOptions, function(value)
     state.sortMode = value
-    SortBtn.Text = value == "Highest First" and "Sort: High ▼" or "Sort: Low ▼"
+    SortBtn.Text = value == "Highest First" and "Sort: High â–¼" or "Sort: Low â–¼"
     if refreshList then refreshList() end
 end)
 
 createDropdown(RarityBtn, rarityOptions, function(value)
     state.rarity = value
-    RarityBtn.Text = "Rarity: " .. tostring(value) .. " ▼"
+    RarityBtn.Text = "Rarity: " .. tostring(value) .. " â–¼"
     if refreshList then refreshList() end
 end)
 
 createDropdown(MutationBtn, mutationOptions, function(value)
     state.mutation = value
-    MutationBtn.Text = "Mutation: " .. tostring(value) .. " ▼"
+    MutationBtn.Text = "Mutation: " .. tostring(value) .. " â–¼"
     if refreshList then refreshList() end
 end)
 
@@ -1265,11 +1265,11 @@ ExcludeNoneBtn.MouseButton1Click:Connect(function()
     state.excludeNone = not state.excludeNone
 
     if state.excludeNone then
-        ExcludeNoneBtn.Text = "✓ Exclude None"
+        ExcludeNoneBtn.Text = "âœ“ Exclude None"
         ExcludeNoneBtn.BackgroundColor3 = Color3.fromRGB(35, 74, 49)
         ExcludeNoneBtn.TextColor3 = Color3.fromRGB(125, 255, 160)
     else
-        ExcludeNoneBtn.Text = "□ Exclude None"
+        ExcludeNoneBtn.Text = "â–¡ Exclude None"
         ExcludeNoneBtn.BackgroundColor3 = Color3.fromRGB(36, 36, 47)
         ExcludeNoneBtn.TextColor3 = Color3.fromRGB(225, 225, 235)
     end
@@ -1281,7 +1281,7 @@ end)
 
 createDropdown(SourceBtn, sourceOptions, function(value)
     state.source = value
-    SourceBtn.Text = "Source: " .. tostring(value) .. " ▼"
+    SourceBtn.Text = "Source: " .. tostring(value) .. " â–¼"
     if refreshList then refreshList() end
 end)
 
@@ -1353,13 +1353,13 @@ local function updateSelectAllVisual()
     local checked = countVisibleSelected()
 
     if total > 0 and checked == total then
-        SelectAllBtn.Text = "✓"
+        SelectAllBtn.Text = "âœ“"
         SelectAllBtn.BackgroundColor3 = Color3.fromRGB(35, 74, 49)
     elseif checked > 0 then
-        SelectAllBtn.Text = "−"
+        SelectAllBtn.Text = "âˆ’"
         SelectAllBtn.BackgroundColor3 = Color3.fromRGB(65, 58, 38)
     else
-        SelectAllBtn.Text = "□"
+        SelectAllBtn.Text = "â–¡"
         SelectAllBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 57)
     end
 end
@@ -1392,7 +1392,7 @@ local function createRow(item, order)
 
     local function updateCheck()
         local selected = state.selectedChecks[key] == true
-        Check.Text = selected and "✓" or ""
+        Check.Text = selected and "âœ“" or ""
         Check.BackgroundColor3 = selected
             and Color3.fromRGB(35, 74, 49)
             or Color3.fromRGB(46, 46, 59)
@@ -1930,7 +1930,7 @@ PrimaryAction.MouseButton1Click:Connect(function()
                 local equipped, equipMessage = equipToolByUID(item.uid, 2.5)
 
                 if equipped then
-                    PrimaryAction.Text = "Picked + Equipped ✓"
+                    PrimaryAction.Text = "Picked + Equipped âœ“"
                 else
                     PrimaryAction.Text = "Picked | " .. tostring(equipMessage)
                 end
@@ -1950,7 +1950,7 @@ PrimaryAction.MouseButton1Click:Connect(function()
     else
         PrimaryAction.Text = "Selecting..."
         local ok, message = equipInventoryItem(item)
-        PrimaryAction.Text = ok and "Selected ✓" or tostring(message)
+        PrimaryAction.Text = ok and "Selected âœ“" or tostring(message)
 
         task.delay(0.8, function()
             if PrimaryAction and PrimaryAction.Parent and state.selected == item then
@@ -1972,7 +1972,7 @@ SecondaryAction.MouseButton1Click:Connect(function()
 
     if item.source == "Placed" then
         local ok, message = teleportToPlacedItem(item)
-        SecondaryAction.Text = ok and "Teleported ✓" or tostring(message)
+        SecondaryAction.Text = ok and "Teleported âœ“" or tostring(message)
 
         task.delay(0.8, function()
             if SecondaryAction and SecondaryAction.Parent and state.selected == item then
@@ -1984,7 +1984,7 @@ SecondaryAction.MouseButton1Click:Connect(function()
 
         task.spawn(function()
             local ok, message = placeInventoryItem(item)
-            SecondaryAction.Text = ok and (tostring(message) .. " ✓") or tostring(message)
+            SecondaryAction.Text = ok and (tostring(message) .. " âœ“") or tostring(message)
 
             if ok then
                 state.selectedChecks[getItemKey(item)] = nil
@@ -2056,4 +2056,4 @@ task.spawn(function()
     end
 end)
 
-print("[SlimeValueBrowser] Loaded - LIVE current cash/s | checkboxes | select all | batch pickup | auto equip")
+print("[SlimeValueBrowser] Loaded - JAPAN + LIVE current cash/s | checkboxes | select all | batch pickup | auto equip")
