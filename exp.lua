@@ -283,4 +283,4 @@ allBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
-print("[AdminRemoteAudit] GUI ready — buttons are clickable TextButtons")
+print("[AdminRemoteAudit] GUI# ready — buttons are clickable TextButtons")
