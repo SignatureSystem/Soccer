@@ -1,28 +1,15 @@
 --[[
-  SECURITY AUDIT — Privileged remote probe
-  --------------------------------------
-  PURPOSE (owner / QA only):
-    Run on a NORMAL (non-admin) account and confirm every call is REJECTED
-    and that cash / jump / admin / VIP / mutations do NOT change.
-
-  If anything succeeds on a non-admin account, that remote is a real hole.
-
-  HOW TO USE:
-    1. Join the live game on an alt that is NOT in your admin group.
-    2. Execute this script.
-    3. Read the output table in the console / on-screen GUI.
-    4. Check your cash, jump, admin UI, inventory mutations, VIP.
-
-  This script does NOT bypass security. It only calls the same remotes
-  any executor could call, so you can see what your server allows.
+  SECURITY AUDIT — Privileged remote probe (clickable buttons)
+  Run on a NON-ADMIN account. Each button fires one remote.
+  PASS = nothing valuable changes. FAIL = cash/admin/jump/VIP/mutation applied.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LP = Players.LocalPlayer
+local PG = LP:WaitForChild("PlayerGui")
 
 local function findRemote(name)
-	-- Preferred path used by this game
 	local sm = ReplicatedStorage:FindFirstChild("SharedModules")
 	local net = sm and sm:FindFirstChild("Network")
 	local folder = net and net:FindFirstChild("Remotes")
@@ -32,7 +19,6 @@ local function findRemote(name)
 			return r
 		end
 	end
-	-- Fallback: deep search
 	for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
 		if obj.Name == name and (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) then
 			return obj
@@ -41,251 +27,260 @@ local function findRemote(name)
 	return nil
 end
 
-local function snapshot()
-	local cash = LP:GetAttribute("Cash") or LP:GetAttribute("cash")
-	-- try common leaderstats
-	local ls = LP:FindFirstChild("leaderstats")
-	if ls then
-		local c = ls:FindFirstChild("Cash") or ls:FindFirstChild("Money")
-		if c then cash = c.Value end
+local function registryRemote(name)
+	local ok, reg = pcall(function()
+		local sm = ReplicatedStorage:FindFirstChild("SharedModules")
+		if not sm then return nil end
+		local mod = sm:FindFirstChild("GameRemoteRegistry")
+		if not mod then return nil end
+		return require(mod)
+	end)
+	if not ok or type(reg) ~= "table" or type(reg.new) ~= "function" then
+		return nil
 	end
-	return {
-		cash = cash,
-		jump = LP:GetAttribute("Jump") or LP:GetAttribute("JumpPower"),
-		admin = LP:GetAttribute("IsAdmin") or LP:GetAttribute("Admin"),
-		base = LP:GetAttribute("BaseLevel"),
-	}
+	local r = reg.new(name, "RemoteEvent")
+	if r then return r end
+	return reg.new(name, "RemoteFunction")
 end
 
-local function fireRemote(remote, args)
+local function fireRemote(name, args)
+	args = args or {}
+	local remote = findRemote(name) or registryRemote(name)
 	if not remote then
 		return false, "NOT_FOUND"
 	end
-	local ok, err = pcall(function()
+	local ok, res = pcall(function()
 		if remote:IsA("RemoteFunction") then
 			if typeof(remote.InvokeServer) == "function" then
-				return remote:InvokeServer(table.unpack(args or {}))
+				return remote:InvokeServer(table.unpack(args))
 			end
-			-- some registry wrappers
 			if typeof(remote.Fire) == "function" then
-				return remote:Fire(table.unpack(args or {}))
+				return remote:Fire(table.unpack(args))
 			end
-		elseif remote:IsA("RemoteEvent") then
-			remote:FireServer(table.unpack(args or {}))
-			return "FIRED"
 		end
-		error("unknown remote type")
-	end)
-	if ok then
-		return true, err
-	end
-	return false, tostring(err)
-end
-
---[[
-  Targets: name, args to try, what a SUCCESS would mean (bad on non-admin)
-]]
-local TESTS = {
-	{
-		name = "Give Me Cash",
-		args = { 999999999 }, -- amount guess; server may ignore args
-		risk = "CRITICAL — direct economy break if accepted",
-		explain = "Should no-op unless caller is privileged. Success = free cash.",
-	},
-	{
-		name = "Give Me Admin",
-		args = {},
-		risk = "CRITICAL — privilege escalation if accepted",
-		explain = "Should never grant admin from a client fire alone.",
-	},
-	{
-		name = "Give Me Jump",
-		args = { 999 },
-		risk = "HIGH — progression skip if accepted",
-		explain = "Should no-op or only apply for admins/studio.",
-	},
-	{
-		name = "AdminCommand",
-		args = { "help" }, -- benign probe; try a second wave manually if needed
-		risk = "CRITICAL — full admin surface if accepted",
-		explain = "Any successful command on a non-admin account is a break.",
-	},
-	{
-		name = "AdminForceMutation",
-		args = { "Rainbow" }, -- common mutation name probe
-		risk = "CRITICAL — free high-value mutation if accepted",
-		explain = "Must require admin + valid target ownership checks.",
-	},
-	{
-		name = "Gift VIP To Player",
-		args = { LP.Name }, -- self-target probe
-		risk = "CRITICAL — free VIP / product grant if accepted",
-		explain = "Must require real purchase/receipt or admin; never free grant.",
-	},
-	{
-		name = "AdminGUIOpen",
-		args = {},
-		risk = "MEDIUM — usually opens UI only; still an admin channel",
-		explain = "Opening UI is minor; dangerous only if UI then fires privileged commands without re-checking admin.",
-	},
-	{
-		name = "AdminFeedback",
-		args = { "audit_ping" },
-		risk = "LOW–MEDIUM — feedback channel",
-		explain = "Should be server→client or admin-only. Client fire should not grant rewards.",
-	},
-	{
-		name = "AdminToast",
-		args = { "audit_toast" },
-		risk = "LOW — cosmetic toast",
-		explain = "Cosmetic if server ignores; ensure it cannot be used to spoof system messages for social engineering only.",
-	},
-}
-
--- Optional GameRemoteRegistry path used by this game
-local function registryFire(name, ...)
-	local ok, reg = pcall(function()
-		local sm = ReplicatedStorage:WaitForChild("SharedModules", 2)
-		return require(sm:WaitForChild("GameRemoteRegistry", 2))
-	end)
-	if not ok or type(reg) ~= "table" or type(reg.new) ~= "function" then
-		return false, "NO_REGISTRY"
-	end
-	local remote = reg.new(name, "RemoteEvent")
-	if not remote then
-		remote = reg.new(name, "RemoteFunction")
-	end
-	if not remote then
-		return false, "REGISTRY_MISS"
-	end
-	local args = { ... }
-	local ok2, res = pcall(function()
-		if remote:IsA("RemoteFunction") or typeof(remote.InvokeServer) == "function" then
-			return remote:InvokeServer(table.unpack(args))
+		if typeof(remote.FireServer) == "function" then
+			remote:FireServer(table.unpack(args))
+			return "FIRED_EVENT"
 		end
 		if typeof(remote.Fire) == "function" then
 			return remote:Fire(table.unpack(args))
 		end
-		remote:FireServer(table.unpack(args))
-		return "FIRED"
+		error("no fire method")
 	end)
-	return ok2, res
-end
-
-local before = snapshot()
-print("========== PRIVILEGED REMOTE AUDIT ==========")
-print("Player:", LP.Name, "UserId:", LP.UserId)
-print("Snapshot BEFORE:", before)
-print("---------------------------------------------")
-
-local results = {}
-
-for _, test in ipairs(TESTS) do
-	local remote = findRemote(test.name)
-	local ok, res
-	if remote then
-		ok, res = fireRemote(remote, test.args)
-	else
-		-- try registry wrapper
-		ok, res = registryFire(test.name, table.unpack(test.args or {}))
+	if ok then
+		return true, res
 	end
-
-	local row = {
-		name = test.name,
-		found = remote ~= nil or ok,
-		firedOk = ok,
-		response = res,
-		risk = test.risk,
-		explain = test.explain,
-	}
-	table.insert(results, row)
-
-	print(string.format(
-		"[%s] found=%s fired=%s resp=%s",
-		test.name,
-		tostring(remote ~= nil),
-		tostring(ok),
-		tostring(res)
-	))
-	print("  Risk:", test.risk)
-	print("  Expect on non-admin: REJECT / no gameplay effect")
+	return false, tostring(res)
 end
 
-task.wait(1.25) -- allow server replicate
-local after = snapshot()
-print("---------------------------------------------")
-print("Snapshot AFTER:", after)
-print("Compare cash/jump/admin manually. Any increase on a non-admin account = HOLE.")
-print("=============================================")
+local function getCash()
+	local ls = LP:FindFirstChild("leaderstats")
+	if ls then
+		local c = ls:FindFirstChild("Cash") or ls:FindFirstChild("Money")
+		if c then return tonumber(c.Value) end
+	end
+	return tonumber(LP:GetAttribute("Cash")) or tonumber(LP:GetAttribute("cash"))
+end
 
--- Minimal on-screen summary
+local TESTS = {
+	{ name = "Give Me Cash", args = { 999999999 }, risk = "CRITICAL economy", color = Color3.fromRGB(90, 35, 35) },
+	{ name = "Give Me Admin", args = {}, risk = "CRITICAL privilege", color = Color3.fromRGB(90, 35, 35) },
+	{ name = "Give Me Jump", args = { 999 }, risk = "HIGH progression", color = Color3.fromRGB(90, 55, 30) },
+	{ name = "AdminCommand", args = { "help" }, risk = "CRITICAL admin surface", color = Color3.fromRGB(90, 35, 35) },
+	{ name = "AdminForceMutation", args = { "Rainbow" }, risk = "CRITICAL mutation", color = Color3.fromRGB(90, 35, 35) },
+	{ name = "Gift VIP To Player", args = { LP.Name }, risk = "CRITICAL VIP grant", color = Color3.fromRGB(90, 35, 35) },
+	{ name = "AdminGUIOpen", args = {}, risk = "MEDIUM admin UI", color = Color3.fromRGB(70, 60, 30) },
+	{ name = "AdminFeedback", args = { "audit_ping" }, risk = "LOW feedback", color = Color3.fromRGB(40, 55, 40) },
+	{ name = "AdminToast", args = { "audit_toast" }, risk = "LOW cosmetic", color = Color3.fromRGB(40, 55, 40) },
+}
+
+-- GUI
 pcall(function()
-	local pg = LP:WaitForChild("PlayerGui")
-	local old = pg:FindFirstChild("AdminRemoteAuditGui")
+	local old = PG:FindFirstChild("AdminRemoteAuditGui")
 	if old then old:Destroy() end
+end)
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "AdminRemoteAuditGui"
-	gui.ResetOnSpawn = false
-	gui.Parent = pg
+local gui = Instance.new("ScreenGui")
+gui.Name = "AdminRemoteAuditGui"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 10000
+gui.IgnoreGuiInset = true
+gui.Parent = PG
 
-	local f = Instance.new("Frame")
-	f.Size = UDim2.new(0, 420, 0, 360)
-	f.Position = UDim2.new(0.5, -210, 0.5, -180)
-	f.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
-	f.BorderSizePixel = 0
-	f.Parent = gui
-	Instance.new("UICorner", f).CornerRadius = UDim.new(0, 10)
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 440, 0, 520)
+frame.Position = UDim2.new(0, 20, 0.5, -260)
+frame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
 
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, -16, 0, 28)
-	title.Position = UDim2.new(0, 8, 0, 6)
-	title.BackgroundTransparency = 1
-	title.Text = "Privileged Remote Audit (non-admin must FAIL)"
-	title.TextColor3 = Color3.fromRGB(255, 220, 120)
-	title.TextSize = 14
-	title.Font = Enum.Font.GothamBold
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.Parent = f
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 0, 32)
+title.Position = UDim2.new(0, 12, 0, 8)
+title.BackgroundTransparency = 1
+title.Text = "Privileged Remote Audit"
+title.TextColor3 = Color3.fromRGB(255, 220, 120)
+title.TextSize = 16
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = frame
 
-	local scroll = Instance.new("ScrollingFrame")
-	scroll.Size = UDim2.new(1, -16, 1, -44)
-	scroll.Position = UDim2.new(0, 8, 0, 36)
-	scroll.BackgroundTransparency = 1
-	scroll.ScrollBarThickness = 4
-	scroll.CanvasSize = UDim2.new(0, 0, 0, #results * 52)
-	scroll.Parent = f
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 32, 0, 32)
+closeBtn.Position = UDim2.new(1, -40, 0, 6)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 180, 180)
+closeBtn.TextSize = 16
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.AutoButtonColor = true
+closeBtn.Parent = frame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+closeBtn.MouseButton1Click:Connect(function()
+	gui:Destroy()
+end)
 
-	for i, row in ipairs(results) do
-		local lab = Instance.new("TextLabel")
-		lab.Size = UDim2.new(1, -8, 0, 48)
-		lab.Position = UDim2.new(0, 0, 0, (i - 1) * 52)
-		lab.BackgroundColor3 = Color3.fromRGB(32, 32, 42)
-		lab.BorderSizePixel = 0
-		lab.Text = string.format(
-			"%s\nfired=%s | %s",
-			row.name,
-			tostring(row.firedOk),
-			row.risk
-		)
-		lab.TextColor3 = Color3.fromRGB(220, 220, 230)
-		lab.TextSize = 11
-		lab.Font = Enum.Font.Gotham
-		lab.TextXAlignment = Enum.TextXAlignment.Left
-		lab.TextYAlignment = Enum.TextYAlignment.Top
-		lab.Parent = scroll
-		Instance.new("UICorner", lab).CornerRadius = UDim.new(0, 6)
+local status = Instance.new("TextLabel")
+status.Name = "Status"
+status.Size = UDim2.new(1, -24, 0, 40)
+status.Position = UDim2.new(0, 12, 0, 44)
+status.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+status.Text = "Click a button to fire that remote.\nNon-admin: nothing valuable should change."
+status.TextColor3 = Color3.fromRGB(200, 200, 210)
+status.TextSize = 12
+status.Font = Enum.Font.Gotham
+status.TextWrapped = true
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = frame
+Instance.new("UICorner", status).CornerRadius = UDim.new(0, 8)
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -24, 1, -140)
+scroll.Position = UDim2.new(0, 12, 0, 92)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 6
+scroll.CanvasSize = UDim2.new(0, 0, 0, #TESTS * 58 + 60)
+scroll.Active = true
+scroll.ScrollingEnabled = true
+scroll.Parent = frame
+
+local list = Instance.new("UIListLayout")
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Padding = UDim.new(0, 8)
+list.Parent = scroll
+
+local function setStatus(text, color)
+	status.Text = text
+	if color then
+		status.TextColor3 = color
+	else
+		status.TextColor3 = Color3.fromRGB(200, 200, 210)
+	end
+end
+
+local function makeTestButton(test, order)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -8, 0, 50)
+	btn.BackgroundColor3 = test.color
+	btn.BorderSizePixel = 0
+	btn.Text = ""
+	btn.AutoButtonColor = true
+	btn.Active = true
+	btn.Selectable = true
+	btn.LayoutOrder = order
+	btn.ZIndex = 5
+	btn.Parent = scroll
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+	local nameLbl = Instance.new("TextLabel")
+	nameLbl.Size = UDim2.new(1, -12, 0, 24)
+	nameLbl.Position = UDim2.new(0, 10, 0, 4)
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.Text = test.name
+	nameLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLbl.TextSize = 14
+	nameLbl.Font = Enum.Font.GothamBold
+	nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+	nameLbl.ZIndex = 6
+	-- critical: labels must not swallow clicks
+	nameLbl.Active = false
+	nameLbl.Parent = btn
+
+	local riskLbl = Instance.new("TextLabel")
+	riskLbl.Size = UDim2.new(1, -12, 0, 18)
+	riskLbl.Position = UDim2.new(0, 10, 0, 28)
+	riskLbl.BackgroundTransparency = 1
+	riskLbl.Text = test.risk .. "  |  click to fire"
+	riskLbl.TextColor3 = Color3.fromRGB(220, 200, 180)
+	riskLbl.TextSize = 11
+	riskLbl.Font = Enum.Font.Gotham
+	riskLbl.TextXAlignment = Enum.TextXAlignment.Left
+	riskLbl.ZIndex = 6
+	riskLbl.Active = false
+	riskLbl.Parent = btn
+
+	btn.MouseButton1Click:Connect(function()
+		local cashBefore = getCash()
+		setStatus("Firing: " .. test.name .. " ...", Color3.fromRGB(255, 230, 120))
+		btn.Text = ""
+		local ok, res = fireRemote(test.name, test.args)
+		task.wait(0.4)
+		local cashAfter = getCash()
+		local cashNote = ""
+		if cashBefore ~= nil and cashAfter ~= nil and cashAfter ~= cashBefore then
+			cashNote = string.format(" | CASH CHANGED %s -> %s (FAIL)", tostring(cashBefore), tostring(cashAfter))
+			setStatus(test.name .. " fired | " .. tostring(res) .. cashNote, Color3.fromRGB(255, 100, 100))
+		else
+			setStatus(
+				string.format("%s | ok=%s res=%s | check admin/VIP/jump manually", test.name, tostring(ok), tostring(res)),
+				ok and Color3.fromRGB(160, 255, 180) or Color3.fromRGB(255, 160, 120)
+			)
+		end
+		print("[Audit]", test.name, "ok=", ok, "res=", res, "cash", cashBefore, "->", cashAfter)
+	end)
+
+	return btn
+end
+
+for i, test in ipairs(TESTS) do
+	makeTestButton(test, i)
+end
+
+-- Run all
+local allBtn = Instance.new("TextButton")
+allBtn.Size = UDim2.new(1, -24, 0, 36)
+allBtn.Position = UDim2.new(0, 12, 1, -44)
+allBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 70)
+allBtn.BorderSizePixel = 0
+allBtn.Text = "Run ALL tests"
+allBtn.TextColor3 = Color3.fromRGB(220, 220, 255)
+allBtn.TextSize = 14
+allBtn.Font = Enum.Font.GothamBold
+allBtn.AutoButtonColor = true
+allBtn.ZIndex = 5
+allBtn.Parent = frame
+Instance.new("UICorner", allBtn).CornerRadius = UDim.new(0, 8)
+
+allBtn.MouseButton1Click:Connect(function()
+	setStatus("Running all tests...", Color3.fromRGB(255, 230, 120))
+	local cashBefore = getCash()
+	for _, test in ipairs(TESTS) do
+		local ok, res = fireRemote(test.name, test.args)
+		print("[Audit ALL]", test.name, ok, res)
+		task.wait(0.15)
+	end
+	task.wait(0.5)
+	local cashAfter = getCash()
+	if cashBefore ~= nil and cashAfter ~= nil and cashAfter ~= cashBefore then
+		setStatus("ALL done | CASH CHANGED — HOLE", Color3.fromRGB(255, 80, 80))
+	else
+		setStatus("ALL done | verify admin/VIP/jump/mutations manually", Color3.fromRGB(160, 255, 180))
 	end
 end)
 
---[[
-  MANUAL FOLLOW-UPS (if a remote needs different args):
-  - AdminCommand: try your real command strings from AdminConsole (server still must auth).
-  - AdminForceMutation: may need (slotName, mutationName) or (uid, mutationName) —
-    check your server handler; wrong args still must not grant on non-admin.
-  - Give Me Cash: may take no args or (amount). Either way non-admin must get 0.
-
-  PASS criteria for production:
-    Every test on a non-admin account → no currency, no admin flag, no VIP,
-    no mutation, no jump unlock, no admin-only side effects.
-]]
+print("[AdminRemoteAudit] GUI ready — buttons are clickable TextButtons")
