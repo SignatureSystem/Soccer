@@ -277,7 +277,7 @@ task.spawn(function()
 	StateRE.OnClientEvent:Connect(onState)
 	print("[ProLocker] Ready. Start penalty at midfield ball when window is open.")
 
-	-- Pull current state if already mid-session
+	- Pull current state if already mid-session
 	task.wait(0.3)
 	local st = invokeAction("GetState", nil)
 	if type(st) == "table" then
