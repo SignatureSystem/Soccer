@@ -1,5 +1,5 @@
 -- Minimal Japan-only Stealer + timer + count
--- Auto-starts on execute. Fast scan; hops to EMPTY public servers (0 players only) if no Japan boxes.
+-- Auto-starts on execute. Fast scan; hops to lowest-pop public server (max 1 player) if no Japan boxes.
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local LP = Players.LocalPlayer
@@ -202,7 +202,7 @@ local function decodeJson(str)
 end
 
 -- Find public servers with the fewest players (prefer 0, allow only <= MAX_SERVER_PLAYERS)
-local MAX_SERVER_PLAYERS = 0  -- only join servers with 0 players
+local MAX_SERVER_PLAYERS = 1
 
 local function findLowPopJobId(placeId)
     local cursor = ""
@@ -233,11 +233,20 @@ local function findLowPopJobId(placeId)
 
             -- Skip current server and invalid ids
             if id and tostring(id) ~= "" and tostring(id) ~= tostring(game.JobId) then
-                -- 0 players only
-                if playing == 0 then
-                    return tostring(id), 0
+                if playing <= MAX_SERVER_PLAYERS and playing < bestPlaying then
+                    bestPlaying = playing
+                    bestId = tostring(id)
+                    -- Perfect: empty server
+                    if playing == 0 then
+                        return bestId, bestPlaying
+                    end
                 end
             end
+        end
+
+        -- sortOrder=Asc already prefers low pop; if we found any <= limit, use it
+        if bestId and bestPlaying <= MAX_SERVER_PLAYERS then
+            return bestId, bestPlaying
         end
 
         cursor = data.nextPageCursor
@@ -260,7 +269,7 @@ local function hopServer()
 
     pcall(function()
         if statusLbl then
-            statusLbl.Text = "Finding 0-player server..."
+            statusLbl.Text = "Finding server with <= " .. tostring(MAX_SERVER_PLAYERS) .. " players..."
         end
     end)
 
@@ -269,7 +278,7 @@ local function hopServer()
     if not jobId then
         pcall(function()
             if statusLbl then
-                statusLbl.Text = "No 0-player server found — retry later"
+                statusLbl.Text = "No 0-1 player server found — retry later"
             end
         end)
         hopping = false
@@ -281,7 +290,7 @@ local function hopServer()
 
     pcall(function()
         if statusLbl then
-            statusLbl.Text = "Hop -> empty (0 player) server..."
+            statusLbl.Text = string.format("Hop -> %d player server...", tonumber(playing) or 0)
         end
     end)
 
@@ -540,4 +549,4 @@ task.spawn(function()
     end
 end)
 
-print("[JapanStealer] Auto-run ON | hop to 0-player servers only if no Japan after", EMPTY_SCANS_BEFORE_HOP, "empty scans")
+print("[JapanStealer] Auto-run ON | hop to <=1 player servers if no Japan after", EMPTY_SCANS_BEFORE_HOP, "empty scans")
