@@ -1,5 +1,7 @@
 -- Slime Value Browser - LIVE CURRENT VALUE + Multi Select + Auto Equip + JAPAN
 -- Batch pick/place/sell: parallel remote spam (not sequential)
+-- Filter change (rarity/mutation/source) clears all checkboxes
+-- Selected: N button lists all checked slimes
 -- Sell = inventory only (Sell Button per INV row + Sell Selected). Never sells placed.
 -- Inventory + Placed slimes using the same CURRENT FINAL cash/s calculation
 -- as the existing Place Slimes feature.
@@ -909,8 +911,8 @@ if not Gui.Parent then Gui.Parent = CoreGui end
 
 local Main = Instance.new("Frame")
 Main.Name = "Main"
-Main.Size = UDim2.new(0, 760, 0, 520)
-Main.Position = UDim2.new(0.5, -380, 0.5, -260)
+Main.Size = UDim2.new(0, 760, 0, 548)
+Main.Position = UDim2.new(0.5, -380, 0.5, -274)
 Main.BackgroundColor3 = Color3.fromRGB(23, 23, 29)
 Main.BorderSizePixel = 0
 Main.Active = true
@@ -953,7 +955,7 @@ Close.Size = UDim2.new(0, 30, 0, 30)
 Close.Position = UDim2.new(1, -38, 0, 8)
 Close.BackgroundColor3 = Color3.fromRGB(50, 35, 40)
 Close.BorderSizePixel = 0
-Close.Text = "Ã—"
+Close.Text = "X"
 Close.TextColor3 = Color3.fromRGB(255, 135, 145)
 Close.TextSize = 20
 Close.Font = Enum.Font.GothamBold
@@ -1168,7 +1170,7 @@ PlaceSelectedBtn.Parent = Main
 Instance.new("UICorner", PlaceSelectedBtn).CornerRadius = UDim.new(0, 6)
 
 local SellSelectedBtn = Instance.new("TextButton")
-SellSelectedBtn.Size = UDim2.new(0, 120, 0, 24)
+SellSelectedBtn.Size = UDim2.new(0, 100, 0, 24)
 SellSelectedBtn.Position = UDim2.new(0, 300, 0, 486)
 SellSelectedBtn.BackgroundColor3 = Color3.fromRGB(62, 38, 38)
 SellSelectedBtn.BorderSizePixel = 0
@@ -1179,9 +1181,80 @@ SellSelectedBtn.Font = Enum.Font.GothamBold
 SellSelectedBtn.Parent = Main
 Instance.new("UICorner", SellSelectedBtn).CornerRadius = UDim.new(0, 6)
 
+local SelectedCountBtn = Instance.new("TextButton")
+SelectedCountBtn.Size = UDim2.new(0, 110, 0, 24)
+SelectedCountBtn.Position = UDim2.new(0, 408, 0, 486)
+SelectedCountBtn.BackgroundColor3 = Color3.fromRGB(48, 42, 62)
+SelectedCountBtn.BorderSizePixel = 0
+SelectedCountBtn.Text = "Selected: 0"
+SelectedCountBtn.TextColor3 = Color3.fromRGB(220, 200, 255)
+SelectedCountBtn.TextSize = 9
+SelectedCountBtn.Font = Enum.Font.GothamBold
+SelectedCountBtn.Parent = Main
+Instance.new("UICorner", SelectedCountBtn).CornerRadius = UDim.new(0, 6)
+
+local SelectedListPanel = Instance.new("Frame")
+SelectedListPanel.Name = "SelectedListPanel"
+SelectedListPanel.Size = UDim2.new(0, 320, 0, 280)
+SelectedListPanel.Position = UDim2.new(0, 14, 0, 190)
+SelectedListPanel.BackgroundColor3 = Color3.fromRGB(26, 26, 34)
+SelectedListPanel.BorderSizePixel = 0
+SelectedListPanel.Visible = false
+SelectedListPanel.ZIndex = 80
+SelectedListPanel.Parent = Main
+Instance.new("UICorner", SelectedListPanel).CornerRadius = UDim.new(0, 8)
+local selectedListStroke = Instance.new("UIStroke", SelectedListPanel)
+selectedListStroke.Color = Color3.fromRGB(90, 80, 120)
+selectedListStroke.Thickness = 1.5
+
+local SelectedListTitle = Instance.new("TextLabel")
+SelectedListTitle.Size = UDim2.new(1, -40, 0, 28)
+SelectedListTitle.Position = UDim2.new(0, 10, 0, 6)
+SelectedListTitle.BackgroundTransparency = 1
+SelectedListTitle.Text = "Selected Slimes"
+SelectedListTitle.TextColor3 = Color3.fromRGB(245, 245, 250)
+SelectedListTitle.TextSize = 13
+SelectedListTitle.Font = Enum.Font.GothamBold
+SelectedListTitle.TextXAlignment = Enum.TextXAlignment.Left
+SelectedListTitle.ZIndex = 81
+SelectedListTitle.Parent = SelectedListPanel
+
+local SelectedListClose = Instance.new("TextButton")
+SelectedListClose.Size = UDim2.new(0, 26, 0, 26)
+SelectedListClose.Position = UDim2.new(1, -32, 0, 6)
+SelectedListClose.BackgroundColor3 = Color3.fromRGB(50, 35, 40)
+SelectedListClose.BorderSizePixel = 0
+SelectedListClose.Text = "X"
+SelectedListClose.TextColor3 = Color3.fromRGB(255, 140, 150)
+SelectedListClose.TextSize = 14
+SelectedListClose.Font = Enum.Font.GothamBold
+SelectedListClose.ZIndex = 82
+SelectedListClose.Parent = SelectedListPanel
+Instance.new("UICorner", SelectedListClose).CornerRadius = UDim.new(0, 6)
+SelectedListClose.MouseButton1Click:Connect(function()
+    SelectedListPanel.Visible = false
+end)
+
+local SelectedListScroll = Instance.new("ScrollingFrame")
+SelectedListScroll.Size = UDim2.new(1, -16, 1, -44)
+SelectedListScroll.Position = UDim2.new(0, 8, 0, 36)
+SelectedListScroll.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+SelectedListScroll.BorderSizePixel = 0
+SelectedListScroll.ScrollBarThickness = 5
+SelectedListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+SelectedListScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+SelectedListScroll.ZIndex = 81
+SelectedListScroll.Parent = SelectedListPanel
+Instance.new("UICorner", SelectedListScroll).CornerRadius = UDim.new(0, 6)
+
+local SelectedListLayout = Instance.new("UIListLayout")
+SelectedListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SelectedListLayout.Padding = UDim.new(0, 3)
+SelectedListLayout.Parent = SelectedListScroll
+
 local Summary = Instance.new("TextLabel")
-Summary.Size = UDim2.new(0, 360, 0, 24)
-Summary.Position = UDim2.new(0, 180, 0, 486)
+Summary.Size = UDim2.new(0, 520, 0, 20)
+Summary.Position = UDim2.new(0, 14, 0, 516)
 Summary.BackgroundTransparency = 1
 Summary.Text = "Loading..."
 Summary.TextColor3 = Color3.fromRGB(165, 165, 180)
@@ -1201,6 +1274,53 @@ AutoRefreshBtn.TextSize = 9
 AutoRefreshBtn.Font = Enum.Font.GothamBold
 AutoRefreshBtn.Parent = Main
 Instance.new("UICorner", AutoRefreshBtn).CornerRadius = UDim.new(0, 6)
+
+local function clearAllChecks()
+    state.selectedChecks = {}
+end
+
+local function countSelectedChecks()
+    local n = 0
+    for _, v in pairs(state.selectedChecks) do
+        if v then
+            n += 1
+        end
+    end
+    return n
+end
+
+local function updateSelectedCountButton()
+    if not (SelectedCountBtn and SelectedCountBtn.Parent) then
+        return
+    end
+    local n = countSelectedChecks()
+    SelectedCountBtn.Text = "Selected: " .. tostring(n)
+    if n > 0 then
+        SelectedCountBtn.BackgroundColor3 = Color3.fromRGB(70, 55, 95)
+        SelectedCountBtn.TextColor3 = Color3.fromRGB(235, 220, 255)
+    else
+        SelectedCountBtn.BackgroundColor3 = Color3.fromRGB(48, 42, 62)
+        SelectedCountBtn.TextColor3 = Color3.fromRGB(220, 200, 255)
+    end
+end
+
+local function getSelectedItemsForDisplay()
+    local allItems = collectSlimes()
+    local byKey = {}
+    for _, item in ipairs(allItems) do
+        byKey[getItemKey(item)] = item
+    end
+    local selected = {}
+    for key, on in pairs(state.selectedChecks) do
+        if on and byKey[key] then
+            table.insert(selected, byKey[key])
+        end
+    end
+    sortItems(selected)
+    return selected
+end
+
+
 
 -- ============================================================
 -- DROPDOWNS
@@ -1279,12 +1399,18 @@ end)
 createDropdown(RarityBtn, rarityOptions, function(value)
     state.rarity = value
     RarityBtn.Text = "Rarity: " .. tostring(value) .. " v"
+    clearAllChecks()
+    SelectedListPanel.Visible = false
+    updateSelectedCountButton()
     if refreshList then refreshList() end
 end)
 
 createDropdown(MutationBtn, mutationOptions, function(value)
     state.mutation = value
     MutationBtn.Text = "Mutation: " .. tostring(value) .. " v"
+    clearAllChecks()
+    SelectedListPanel.Visible = false
+    updateSelectedCountButton()
     if refreshList then refreshList() end
 end)
 
@@ -1309,6 +1435,9 @@ end)
 createDropdown(SourceBtn, sourceOptions, function(value)
     state.source = value
     SourceBtn.Text = "Source: " .. tostring(value) .. " v"
+    clearAllChecks()
+    SelectedListPanel.Visible = false
+    updateSelectedCountButton()
     if refreshList then refreshList() end
 end)
 
@@ -1355,6 +1484,78 @@ local function updateDetail(item)
         SecondaryAction.TextColor3 = Color3.fromRGB(255, 210, 135)
     end
 end
+
+
+local function showSelectedListPanel()
+    for _, child in ipairs(SelectedListScroll:GetChildren()) do
+        if not child:IsA("UIListLayout") then
+            child:Destroy()
+        end
+    end
+
+    local selected = getSelectedItemsForDisplay()
+    SelectedListTitle.Text = "Selected Slimes (" .. tostring(#selected) .. ")"
+
+    if #selected == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, -8, 0, 40)
+        empty.BackgroundTransparency = 1
+        empty.Text = "No slimes selected."
+        empty.TextColor3 = Color3.fromRGB(160, 160, 175)
+        empty.TextSize = 12
+        empty.Font = Enum.Font.Gotham
+        empty.ZIndex = 82
+        empty.Parent = SelectedListScroll
+    else
+        for i, item in ipairs(selected) do
+            local row = Instance.new("TextButton")
+            row.Size = UDim2.new(1, -6, 0, 44)
+            row.BackgroundColor3 = Color3.fromRGB(34, 34, 44)
+            row.BorderSizePixel = 0
+            row.Text = ""
+            row.AutoButtonColor = true
+            row.ZIndex = 82
+            row.LayoutOrder = i
+            row.Parent = SelectedListScroll
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
+
+            local line = Instance.new("TextLabel")
+            line.Size = UDim2.new(1, -10, 1, -4)
+            line.Position = UDim2.new(0, 6, 0, 2)
+            line.BackgroundTransparency = 1
+            line.Text = string.format(
+                "%s\n%s | %s | %s | %s",
+                tostring(item.displayName),
+                formatCash(item.value),
+                tostring(item.rarity),
+                tostring(item.mutation),
+                tostring(item.sourceLabel)
+            )
+            line.TextColor3 = Color3.fromRGB(230, 230, 240)
+            line.TextSize = 10
+            line.Font = Enum.Font.Gotham
+            line.TextXAlignment = Enum.TextXAlignment.Left
+            line.TextYAlignment = Enum.TextYAlignment.Center
+            line.ZIndex = 83
+            line.Active = false
+            line.Parent = row
+
+            row.MouseButton1Click:Connect(function()
+                updateDetail(item)
+            end)
+        end
+    end
+
+    SelectedListPanel.Visible = true
+end
+
+SelectedCountBtn.MouseButton1Click:Connect(function()
+    if SelectedListPanel.Visible then
+        SelectedListPanel.Visible = false
+    else
+        showSelectedListPanel()
+    end
+end)
 
 local function clearRows()
     for _, row in ipairs(state.rows) do
@@ -1434,6 +1635,7 @@ local function createRow(item, order)
 
         updateCheck()
         updateSelectAllVisual()
+        updateSelectedCountButton()
     end)
 
     updateCheck()
@@ -1587,6 +1789,8 @@ refreshList = function()
             state.sortMode == "Highest First" and "HIGH" or "LOW"
         )
     end
+
+    updateSelectedCountButton()
 
     updateSelectAllVisual()
 
@@ -2463,6 +2667,7 @@ SellSelectedBtn.MouseButton1Click:Connect(function()
         end)
     end
 end)
+
 
 -- ============================================================
 -- INITIALIZE
