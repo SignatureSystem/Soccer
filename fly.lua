@@ -1,65 +1,62 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FlyButtonGui"
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.IgnoreGuiInset = true
-screenGui.Parent = playerGui
-
-local button = Instance.new("TextButton")
-button.Name = "FlyButton"
-button.Size = UDim2.new(0, 140, 0, 50)
-button.Position = UDim2.new(1, -20, 0.85, 0)  -- Right side
-button.AnchorPoint = Vector2.new(1, 0)
-button.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-button.TextColor3 = Color3.fromRGB(255, 255, 255)
-button.Text = "Hold to Fly Up"
-button.Font = Enum.Font.GothamBold
-button.TextSize = 18
-button.AutoButtonColor = true
-button.Parent = screenGui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = button
-
+local flySpeed = 60          -- Change this to make it faster/slower
 local flying = false
-local flySpeed = 60
 
-button.MouseButton1Down:Connect(function()
+-- Detect when jump is pressed (works for both Space and the mobile jump button)
+local function onJumpRequest()
 	flying = true
+end
+
+-- Detect when jump is released
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.ButtonA then
+		flying = false
+	end
 end)
 
-button.MouseButton1Up:Connect(function()
-	flying = false
+-- Mobile jump button release support
+humanoid.StateChanged:Connect(function(_, newState)
+	if newState \~= Enum.HumanoidStateType.Jumping and newState \~= Enum.HumanoidStateType.Freefall then
+		flying = false
+	end
 end)
 
-button.MouseLeave:Connect(function()
-	flying = false
+-- Listen for jump requests (this catches the original jump button)
+humanoid:GetPropertyChangedSignal("Jump"):Connect(function()
+	if humanoid.Jump then
+		flying = true
+	end
 end)
 
-button.TouchLongPress:Connect(function()
-	flying = true
+player.CharacterAdded:Connect(function(newChar)
+	character = newChar
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	
+	humanoid:GetPropertyChangedSignal("Jump"):Connect(function()
+		if humanoid.Jump then
+			flying = true
+		end
+	end)
 end)
 
-button.TouchEnded:Connect(function()
-	flying = false
-end)
-
+-- Apply upward velocity while jump is held
 RunService.RenderStepped:Connect(function()
-	local character = player.Character
-	if not character then return end
-
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then return end
+	if not rootPart or not humanoid or humanoid.Health <= 0 then return end
 
 	if flying then
 		local velocity = rootPart.AssemblyLinearVelocity
 		rootPart.AssemblyLinearVelocity = Vector3.new(velocity.X, flySpeed, velocity.Z)
+		
+		-- Prevent the normal jump from happening
+		humanoid.Jump = false
 	end
 end)
