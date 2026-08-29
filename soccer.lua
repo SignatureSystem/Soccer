@@ -3818,8 +3818,8 @@ end
 
 -- ============================================================
 -- UNIVERSAL LUCKY BOX PLACE / OPEN (ALL types)
--- Place Boxes  -> parallel spam Place Slime for every lucky box UID into
---                 free slots at once (admin.lua startBatchPlace pattern)
+-- Place Boxes  -> hop-teleport to each free slot + spam Place Slime
+--                 (server requires player near stand to place)
 -- Open Boxes   -> Open Lucky Block on every occupied stand (all types)
 -- Does NOT use selectedLuckyBlockType filter.
 -- ============================================================
@@ -3892,9 +3892,10 @@ local function getAllLuckyBlockPlaceEntries()
 end
 
 -- Parallel spam-place ALL lucky boxes into free slots at once.
--- Same pattern as admin.lua startBatchPlace: assign each UID a free slot,
--- then fire Place Slime for every remaining pair every ~0.05s until the
--- UID appears in PlotSlimes (or timeout). All slots are hit concurrently.
+-- Server only accepts Place Slime when the player is near the stand, so
+-- this loops: teleport to each remaining free slot super-fast, fire Place
+-- Slime for that UID/slot (and spam the rest), then hop to the next stand.
+-- Continues until every UID is confirmed in PlotSlimes or timeout.
 local function doPlaceBoxesOnly()
     local placeRemote = PlaceRemote or ResolvePlaceRemote()
     PlaceRemote = placeRemote
@@ -3924,21 +3925,54 @@ local function doPlaceBoxesOnly()
         return nil
     end
 
+    local function getStandCFrame(stand)
+        if not stand or not stand.Parent then
+            return nil
+        end
+        local part =
+            stand.PrimaryPart
+            or stand:FindFirstChild("Main")
+            or stand:FindFirstChildWhichIsA("BasePart", true)
+        if part and part:IsA("BasePart") then
+            return part.CFrame
+        end
+        if part and part:IsA("Model") then
+            local sub = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)
+            if sub then
+                return sub.CFrame
+            end
+        end
+        return nil
+    end
+
+    local function teleportToStand(stand)
+        local root = getRoot()
+        local cf = getStandCFrame(stand)
+        if not root or not cf then
+            return false
+        end
+        root.CFrame = cf * CFrame.new(0, 3, 3)
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+        return true
+    end
+
     local targets = {}
     local total = math.min(#boxes, #slots)
     for i = 1, total do
         table.insert(targets, {
             uid = boxes[i].uid,
             slot = slots[i].name,
+            stand = slots[i].stand,
             done = false,
         })
     end
 
-    local deadline = os.clock() + 12
-    local lastFire = 0
+    local deadline = os.clock() + 14
+    local hopIndex = 1
 
     while os.clock() < deadline do
-        local remaining = 0
+        local remainingList = {}
         local data = getData()
 
         for _, t in ipairs(targets) do
@@ -3946,28 +3980,55 @@ local function doPlaceBoxesOnly()
                 if findPlacedSlotByUID(data, t.uid) then
                     t.done = true
                 else
-                    remaining += 1
+                    table.insert(remainingList, t)
                 end
             end
         end
 
-        if remaining == 0 then
+        if #remainingList == 0 then
             break
         end
 
-        -- Spam ALL remaining slot/UID pairs at once (no sequential wait).
-        if os.clock() - lastFire >= 0.05 then
-            lastFire = os.clock()
-            for _, t in ipairs(targets) do
-                if not t.done and t.uid and t.slot then
+        -- Cycle through remaining stands: teleport, then fire Place for
+        -- the current slot (required for near-check) and spam the rest.
+        if hopIndex > #remainingList then
+            hopIndex = 1
+        end
+
+        local current = remainingList[hopIndex]
+        hopIndex += 1
+
+        if current and current.stand then
+            teleportToStand(current.stand)
+            -- tiny settle so server can see the player at the stand
+            task.wait(0.04)
+
+            -- Fire the stand we are standing on first
+            if current.uid and current.slot then
+                pcall(function()
+                    placeRemote:FireServer(tostring(current.slot), current.uid)
+                end)
+            end
+
+            -- Also spam every other remaining pair while we are here
+            for _, t in ipairs(remainingList) do
+                if t ~= current and t.uid and t.slot then
                     pcall(function()
                         placeRemote:FireServer(tostring(t.slot), t.uid)
                     end)
                 end
             end
+        else
+            -- No stand reference: still spam remotes
+            for _, t in ipairs(remainingList) do
+                if t.uid and t.slot then
+                    pcall(function()
+                        placeRemote:FireServer(tostring(t.slot), t.uid)
+                    end)
+                end
+            end
+            task.wait(0.05)
         end
-
-        task.wait(0.03)
     end
 
     local placed = 0
@@ -5272,6 +5333,6 @@ end
 
 print("========================================")
 print("[AutoFarm] JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
-print("Place Boxes = parallel spam all free slots (admin-style) | Open Boxes = burst open only")
+print("Place Boxes = teleport-hop + spam Place Slime near each slot | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
