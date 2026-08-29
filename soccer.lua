@@ -1,4 +1,4 @@
--- Combined Script: JAPAN + ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
+-- Combined Script: JAPAN + ICONS UPDATE + BATCH-10 Auto Upgrade ALL + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
@@ -469,18 +469,16 @@ local CollectBtn   = createButton("CollectToggle", 30, "Auto Collect: OFF")
 local UpgradeBtn   = createButton("UpgradeToggle", 64, "Auto Upgrade: OFF")
 
 -- ============================================
--- AUTO UPGRADE RARITY + MUTATION FILTERS
--- Both selections are read live by Auto Upgrade.
+-- LEGACY AUTO UPGRADE RARITY + MUTATION CONTROLS
+-- Auto Upgrade now ignores these controls and targets ALL eligible slimes.
+-- They are created for compatibility, then hidden below.
 
 -- Forward declaration is required because the Auto Upgrade dropdown
 -- click callbacks also close the Lucky Type dropdown, which is built
 -- slightly later in the GUI.
 local LuckyTypeDropList
 local PickupRangeDropList
--- Example:
---   Rarity = Champions
---   Mutation = Cosmic
--- -> only Cosmic Champions are eligible.
+-- Rarity/mutation selection no longer affects Auto Upgrade.
 -- ============================================
 
 local UpgradeRarityDropBtn = Instance.new("TextButton")
@@ -546,6 +544,27 @@ Instance.new("UICorner", UpgradeMutationDropList).CornerRadius = UDim.new(0, 7)
 local upgradeMutationListLayout = Instance.new("UIListLayout")
 upgradeMutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 upgradeMutationListLayout.Parent = UpgradeMutationDropList
+
+-- Auto Upgrade no longer uses rarity/mutation filters. Keep the legacy
+-- controls hidden so the rest of this combined script can remain compatible.
+UpgradeRarityDropBtn.Visible = false
+UpgradeMutationDropBtn.Visible = false
+UpgradeRarityDropList.Visible = false
+UpgradeMutationDropList.Visible = false
+
+local UpgradeAllLabel = Instance.new("TextLabel")
+UpgradeAllLabel.Name = "UpgradeAllLabel"
+UpgradeAllLabel.Size = UDim2.new(0, 220, 0, 30)
+UpgradeAllLabel.Position = UDim2.new(0, 15, 0, 98)
+UpgradeAllLabel.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
+UpgradeAllLabel.BorderSizePixel = 0
+UpgradeAllLabel.Text = "Upgrade Target: ALL"
+UpgradeAllLabel.TextColor3 = Color3.fromRGB(150, 205, 255)
+UpgradeAllLabel.TextSize = 11
+UpgradeAllLabel.Font = Enum.Font.GothamBold
+UpgradeAllLabel.ZIndex = 50
+UpgradeAllLabel.Parent = MainFrame
+Instance.new("UICorner", UpgradeAllLabel).CornerRadius = UDim.new(0, 8)
 
 local function upgradeRarityDisplayName(value)
     return tostring(value)
@@ -1463,10 +1482,7 @@ local function setUpgradeState(on)
     StatusLabel.Text =
         "Auto Upgrade "
         .. (on and "ON" or "OFF")
-        .. " | Rarity: "
-        .. upgradeRarityDisplayName(selectedUpgradeRarity)
-        .. " | Mutation: "
-        .. upgradeMutationDisplayName(selectedUpgradeMutation)
+        .. " | Target: ALL eligible slimes"
 end
 local function setLuckyState(on)
     luckyEnabled = on
@@ -1520,24 +1536,17 @@ UpgradeBtn.MouseButton1Click:Connect(function()
             local upgrades, stats = getPrioritizedUpgrades()
 
             print(
-                "[AutoUpgrade] ON | Rarity:",
-                upgradeRarityDisplayName(selectedUpgradeRarity),
-                "| Mutation:",
-                upgradeMutationDisplayName(selectedUpgradeMutation),
+                "[AutoUpgrade] ON | Target: ALL eligible slimes",
                 "| Route:",
                 channel and "_Lib.Network" or (remote and remote:GetFullName() or "missing"),
                 "| Occupied:",
                 stats and stats.occupied or 0,
-                "| Readable:",
-                stats and stats.readable or 0,
-                "| Matched:",
+                "| Readable/Eligible:",
                 #upgrades
             )
 
             StatusLabel.Text = string.format(
-                "Upgrade ON | %s + %s | %d matching / %d occupied",
-                upgradeRarityDisplayName(selectedUpgradeRarity),
-                upgradeMutationDisplayName(selectedUpgradeMutation),
+                "Upgrade ON | ALL eligible | %d ready / %d occupied",
                 #upgrades,
                 stats and stats.occupied or 0
             )
@@ -3443,26 +3452,10 @@ local function getUpgradeInfoRobust(slotName, stand, suppliedData)
     }
 end
 
-local function candidateMatchesUpgradeFilters(info)
-    if not info then return false end
-
-    if selectedUpgradeRarity ~= "All" then
-        local candidateRarity =
-            string.lower(normalizeUpgradeRarity(info.rarity))
-        local wantedRarity =
-            string.lower(normalizeUpgradeRarity(selectedUpgradeRarity))
-
-        if candidateRarity ~= wantedRarity then
-            return false
-        end
-    end
-
-    return upgradeMutationMatches(
-        selectedUpgradeMutation,
-        info.mutation,
-        info.hasEventMutation,
-        info.eventMutationNames
-    )
+-- Auto Upgrade now targets EVERY readable, non-maxed occupied slime.
+-- Rarity and mutation are intentionally ignored here.
+local function candidateIsUpgradeEligible(info)
+    return info ~= nil
 end
 
 getPrioritizedUpgrades = function()
@@ -3497,7 +3490,7 @@ getPrioritizedUpgrades = function()
                 local info, reason = getUpgradeInfoRobust(slotName, stand, data)
                 if info then
                     stats.readable += 1
-                    if candidateMatchesUpgradeFilters(info) then
+                    if candidateIsUpgradeEligible(info) then
                         stats.matched += 1
                         table.insert(list, info)
                     end
@@ -3512,30 +3505,9 @@ getPrioritizedUpgrades = function()
         local aCost = tonumber(a.cost)
         local bCost = tonumber(b.cost)
 
-        -- Special priority only when Mutation dropdown = All:
-        --   1) Higher CURRENT cash/s first
-        --   2) Stronger effective mutation multiplier first
-        --   3) Lower next-upgrade cost first
-        -- This keeps a high mutation ahead only when it is actually producing
-        -- more cash than weaker mutations, exactly as requested.
-        if tostring(selectedUpgradeMutation) == "All" then
-            local aCash = tonumber(a.currentCashPerSecond) or 0
-            local bCash = tonumber(b.currentCashPerSecond) or 0
-
-            if aCash ~= bCash then
-                return aCash > bCash
-            end
-
-            local aMutationMulti = tonumber(a.mutationMultiplier) or 1
-            local bMutationMulti = tonumber(b.mutationMultiplier) or 1
-
-            if aMutationMulti ~= bMutationMulti then
-                return aMutationMulti > bMutationMulti
-            end
-        end
-
-        -- For a specifically selected mutation, preserve the old cheapest-first
-        -- behavior.  For Mutation=All this is the third tie-breaker above.
+        -- No rarity/mutation priority: process all eligible slimes.
+        -- Cheapest next upgrade first so the available cash can cover as many
+        -- different slimes as possible before the next rescan.
         if aCost and bCost and aCost ~= bCost then
             return aCost < bCost
         elseif aCost and not bCost then
@@ -4730,22 +4702,11 @@ task.spawn(function()
     while true do
         if upgradeEnabled then
             local ok, err = xpcall(function()
-                local rarityAtDecision = selectedUpgradeRarity
-                local mutationAtDecision = selectedUpgradeMutation
-
                 local upgrades, stats = getPrioritizedUpgrades()
-
-                if rarityAtDecision ~= selectedUpgradeRarity
-                    or mutationAtDecision ~= selectedUpgradeMutation
-                then
-                    return
-                end
 
                 if #upgrades == 0 then
                     StatusLabel.Text = string.format(
-                        "Upgrade ON | %s + %s | matched 0 | occupied %d/read %d/max %d",
-                        upgradeRarityDisplayName(rarityAtDecision),
-                        upgradeMutationDisplayName(mutationAtDecision),
+                        "Upgrade ON | ALL eligible | ready 0 | occupied %d/read %d/max %d",
                         tonumber(stats.occupied) or 0,
                         tonumber(stats.readable) or 0,
                         tonumber(stats.maxed) or 0
@@ -4781,7 +4742,7 @@ task.spawn(function()
                 if #batch == 0 then
                     local first = upgrades[1]
                     StatusLabel.Text = string.format(
-                        "Upgrade ON | %d match | no affordable batch | first $%s | cash $%s",
+                        "Upgrade ON | %d eligible | no affordable batch | first $%s | cash $%s",
                         #upgrades,
                         tostring(first and first.cost and math.floor(first.cost) or "?"),
                         tostring(math.floor(cash))
@@ -4791,10 +4752,8 @@ task.spawn(function()
                 end
 
                 StatusLabel.Text = string.format(
-                    "Batch upgrading %d/10 | %s + %s | %d matching",
+                    "Batch upgrading %d/10 | ALL eligible | %d ready",
                     #batch,
-                    upgradeRarityDisplayName(rarityAtDecision),
-                    upgradeMutationDisplayName(mutationAtDecision),
                     #upgrades
                 )
 
@@ -4802,9 +4761,8 @@ task.spawn(function()
                 print(
                     "[AutoUpgrade] BATCH",
                     #batch,
-                    "| Rarity:", rarityAtDecision,
-                    "| Mutation:", mutationAtDecision,
-                    "| Matches:", #upgrades
+                    "| Target: ALL eligible",
+                    "| Ready:", #upgrades
                 )
 
                 for i, candidate in ipairs(batch) do
@@ -4854,7 +4812,7 @@ task.spawn(function()
                 end
 
                 StatusLabel.Text = string.format(
-                    "Batch fired %d | confirmed %d | %d matching",
+                    "Batch fired %d | confirmed %d | %d eligible",
                     #batch,
                     succeeded,
                     #upgrades
