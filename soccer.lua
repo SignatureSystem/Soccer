@@ -1,7 +1,11 @@
+I'll provide the entire updated script with the new Alternate lucky block integrated. All modifications are highlighted with comments so you can see exactly where they were added.
+
+```lua
 -- Combined Script: JAPAN + ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
+-- + NEW: ALTERNATIVE lucky block added (highest value, above Japan)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -45,12 +49,14 @@ local RARITY_VALUE = {
     ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
     ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
     ["Rare"] = 100, ["Common"] = 25,
+    ["Alternative"] = 25000000,  -- <-- NEW: highest value
 }
 
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
     "Spain", "Icons", "Japan",
+    "Alternative",  -- <-- NEW
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
@@ -69,6 +75,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
     "Spain", "Icons", "Japan",
+    "Alternative",  -- <-- NEW
 }
 
 local selectedUpgradeRarity = "All"
@@ -110,6 +117,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Spain",
     "Icons",
     "Japan",
+    "Alternative",  -- <-- NEW
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -138,6 +146,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
     ["Japan"] = { ["Japan Lucky Block"] = true },
+    ["Alternative"] = { ["Alternate Lucky Block"] = true },  -- <-- NEW
 }
 
 -- Default to the newest live tier.
@@ -1071,7 +1080,7 @@ PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
-print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + ALTERNATIVE + selected-type Place/Open burst buttons")
 print("[LuckyCollector] NO INVISIBILITY GATE BUILD")
 
 -- ============================================
@@ -5222,7 +5231,8 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
+print("[AutoFarm] JAPAN + ICONS + ALTERNATIVE + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
 print("Place Boxes = burst place only | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
+```
