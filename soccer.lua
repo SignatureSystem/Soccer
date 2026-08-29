@@ -1179,45 +1179,274 @@ end
 -- ============================================
 -- UNIVERSAL PLACE / OPEN ALL LUCKY BOXES
 -- ============================================
+local LUCKY_BLOCK_RARITY_VALUE = {
+    ["Common"] = 5,
+    ["Rare"] = 220,
+    ["Epic"] = 750,
+    ["Legendary"] = 2500,
+    ["Mythic"] = 8500,
+    ["Secret"] = 29000,
+    ["Divine"] = 35000,
+    ["Slime God"] = 95000,
+    ["Exclusive"] = 330000,
+    ["LIMITED"] = 330000,
+    ["OG"] = 1100000,
+    ["Champions"] = 5250000,
+    ["Spain"] = 18400000,
+    ["Icons"] = 82500000,
+    ["Japan"] = 209000000,
+    ["Alternative"] = 700000000,
+}
+
+local function getLuckyBlockPlacementValue(entry, def, tool)
+    -- Prefer a real live/persisted value if this build exposes one.
+    local direct = nil
+
+    if tool then
+        direct =
+            tonumber(tool:GetAttribute("Value"))
+            or tonumber(tool:GetAttribute("MoneyPerSecond"))
+            or tonumber(tool:GetAttribute("_AutoMoneyPerSecond"))
+            or tonumber(tool:GetAttribute("_MpsOverride"))
+    end
+
+    if not direct and type(entry) == "table" then
+        direct =
+            tonumber(entry.Value)
+            or tonumber(entry.value)
+            or tonumber(entry.MoneyPerSecond)
+            or tonumber(entry.money_per_second)
+            or tonumber(entry.production_mps)
+            or tonumber(entry.mps)
+    end
+
+    if not direct and def then
+        local mps = tonumber(def.MoneyPerSecond)
+        if mps and mps > 0 then
+            direct = mps
+        end
+    end
+
+    if direct and direct > 0 then
+        return direct
+    end
+
+    -- Lucky Block database entries often have MoneyPerSecond = 0, so use
+    -- the block's content-rarity floor as the placement priority fallback.
+    local rarity =
+        (def and (def.Rarity or def.rarity))
+        or (type(entry) == "table" and (entry.Rarity or entry.rarity))
+        or (tool and (tool:GetAttribute("Rarity") or tool:GetAttribute("rarity")))
+        or nil
+
+    if isAlternateLuckyBlockData(entry, def, tool) then
+        rarity = "Alternative"
+    end
+
+    rarity = tostring(rarity or "")
+
+    if rarity == "Player God" then
+        rarity = "Slime God"
+    elseif rarity == "Limited" then
+        rarity = "LIMITED"
+    elseif rarity == "Alternate" then
+        rarity = "Alternative"
+    end
+
+    return LUCKY_BLOCK_RARITY_VALUE[rarity] or RARITY_VALUE[rarity] or 0
+end
+
 local function getAllLuckyBlockPlaceEntries()
-    local list,seen={},{}
-    local data=getData();local map={}
-    if data and type(data.Inventory)=="table" then
-        for _,e in pairs(data.Inventory) do if type(e)=="table" and e.uid~=nil then map[tostring(e.uid)]=e end end
-    end
-    local function add(uid,tool,e)
-        if uid==nil or seen[tostring(uid)] then return end
-        local def=resolveSlimeDefinition(e)
-        if not isLuckyInventoryEntry(tool,e,def) then return end
-        seen[tostring(uid)]=true;table.insert(list,{uid=uid,tool=tool})
-    end
-    local function scan(bag)
-        if not bag then return end
-        for _,tool in ipairs(bag:GetChildren()) do
-            if tool:IsA("Tool") then
-                local uid=tool:GetAttribute("slimeUID")
-                add(uid,tool,uid~=nil and map[tostring(uid)] or nil)
+    local list, seen = {}, {}
+    local data = getData()
+    local inventoryByUID = {}
+    local toolsByUID = collectCurrentSlimeToolsByUID()
+
+    if data and type(data.Inventory) == "table" then
+        for _, entry in pairs(data.Inventory) do
+            if type(entry) == "table" and entry.uid ~= nil then
+                inventoryByUID[tostring(entry.uid)] = entry
             end
         end
     end
-    scan(LocalPlayer:FindFirstChild("Backpack"));scan(LocalPlayer.Character)
-    for k,e in pairs(map) do if not seen[k] then add(e.uid,nil,e) end end
+
+    local function add(uid, tool, entry)
+        if uid == nil then return end
+
+        local key = tostring(uid)
+        if seen[key] then return end
+
+        entry = entry or inventoryByUID[key]
+        tool = tool or toolsByUID[key]
+
+        local def = resolveSlimeDefinition(entry)
+
+        if not isLuckyInventoryEntry(tool, entry, def) then
+            return
+        end
+
+        seen[key] = true
+
+        local rarity =
+            (def and (def.Rarity or def.rarity))
+            or (entry and (entry.Rarity or entry.rarity))
+            or (tool and (tool:GetAttribute("Rarity") or tool:GetAttribute("rarity")))
+            or "Unknown"
+
+        if isAlternateLuckyBlockData(entry, def, tool) then
+            rarity = "Alternative"
+        end
+
+        table.insert(list, {
+            uid = uid,
+            tool = tool,
+            entry = entry,
+            def = def,
+            rarity = tostring(rarity),
+            name =
+                (def and def.Name)
+                or (entry and (entry.Name or entry.name))
+                or (tool and tool.Name)
+                or tostring(uid),
+            value = getLuckyBlockPlacementValue(entry, def, tool),
+        })
+    end
+
+    -- Inventory is the source of truth. Physical tools are attached by UID.
+    for key, entry in pairs(inventoryByUID) do
+        add(entry.uid, toolsByUID[key], entry)
+    end
+
+    -- Fallback for a tool that is visible before Data.Inventory refreshes.
+    for key, tool in pairs(toolsByUID) do
+        if not seen[key] then
+            add(tool:GetAttribute("slimeUID"), tool, inventoryByUID[key])
+        end
+    end
+
+    -- HIGHEST VALUE LUCKY BOX ALWAYS FIRST.
+    table.sort(list, function(a, b)
+        local av = tonumber(a.value) or 0
+        local bv = tonumber(b.value) or 0
+
+        if av ~= bv then
+            return av > bv
+        end
+
+        -- Stable tie-breakers.
+        if tostring(a.rarity) ~= tostring(b.rarity) then
+            return tostring(a.rarity) < tostring(b.rarity)
+        end
+
+        return tostring(a.uid) < tostring(b.uid)
+    end)
+
     return list
 end
 
 local function doPlaceBoxesOnly()
-    local remote=ResolvePlaceRemote()
-    if not remote then return 0 end
-    local boxes=getAllLuckyBlockPlaceEntries()
-    local slots=getAvailableSlots() -- ALL available floors
-    local total=math.min(#boxes,#slots)
-    if total<=0 then return 0 end
-    local pairs={}
-    for i=1,total do pairs[i]={uid=boxes[i].uid,slot=slots[i].name} end
-    for _=1,8 do
-        for _,p in ipairs(pairs) do pcall(function() remote:FireServer(tostring(p.slot),p.uid) end) end
+    local remote = ResolvePlaceRemote()
+    if not remote then
+        StatusLabel.Text = 'Place Boxes: "Place Slime" remote missing'
+        return 0
     end
-    return total
+
+    local boxes = getAllLuckyBlockPlaceEntries()
+    local slots = getAvailableSlots() -- ALL currently free stands/floors.
+    local total = math.min(#boxes, #slots)
+
+    if total <= 0 then
+        if #boxes == 0 then
+            StatusLabel.Text = "Place Boxes: no Lucky Boxes detected"
+        else
+            StatusLabel.Text = "Place Boxes: no free stands/floors"
+        end
+        return 0
+    end
+
+    print("====================================================")
+    print("[PlaceBoxes] HIGHEST VALUE LUCKY BOX FIRST")
+    print("Detected boxes:", #boxes, "| Free slots:", #slots, "| Placing:", total)
+
+    for i = 1, total do
+        local box = boxes[i]
+        print(string.format(
+            "#%d %s | Rarity=%s | PriorityValue=%.0f | UID=%s -> Slot %s",
+            i,
+            tostring(box.name),
+            tostring(box.rarity),
+            tonumber(box.value) or 0,
+            tostring(box.uid),
+            tostring(slots[i].name)
+        ))
+    end
+    print("====================================================")
+
+    local placed = 0
+
+    for i = 1, total do
+        local box = boxes[i]
+        local slot = slots[i]
+
+        -- Re-find the current physical tool just before placing.
+        local currentTool = box.tool
+        if not currentTool or not currentTool.Parent then
+            currentTool = collectCurrentSlimeToolsByUID()[tostring(box.uid)]
+        end
+
+        -- Use the same equip path as the working normal Place button whenever
+        -- a physical tool exists. Inventory-only entries still get a remote try.
+        if currentTool and currentTool.Parent then
+            equipTool(currentTool)
+        end
+
+        local success = false
+
+        -- Controlled retries are more reliable than blasting every UID into every
+        -- slot for eight rounds. The server remains authoritative.
+        for attempt = 1, 3 do
+            local fired = pcall(function()
+                remote:FireServer(tostring(slot.name), box.uid)
+            end)
+
+            if fired then
+                success = true
+                break
+            end
+
+            task.wait(0.10)
+        end
+
+        if success then
+            placed += 1
+            StatusLabel.Text = string.format(
+                "Place Boxes %d/%d | %s | %.0f -> slot %s",
+                placed,
+                total,
+                tostring(box.name),
+                tonumber(box.value) or 0,
+                tostring(slot.name)
+            )
+        else
+            warn(
+                "[PlaceBoxes] Failed UID",
+                tostring(box.uid),
+                "-> slot",
+                tostring(slot.name)
+            )
+        end
+
+        task.wait(DELAY_PLACE)
+    end
+
+    local hum = getHumanoid()
+    if hum then
+        pcall(function()
+            hum:UnequipTools()
+        end)
+    end
+
+    return placed
 end
 
 local function doOpenBoxesOnly()
@@ -1558,7 +1787,7 @@ PlaceBoxesBtn.MouseButton1Click:Connect(function()
     if actionBusy then return end
     actionBusy=true;PlaceBoxesBtn.Text="Spam..."
     local p=doPlaceBoxesOnly()
-    StatusLabel.Text=string.format("Placed %d Lucky Boxes across all free floors",p)
+    StatusLabel.Text=string.format("Placed %d Lucky Boxes | highest value first",p)
     PlaceBoxesBtn.Text="Place Boxes";actionBusy=false
 end)
 
@@ -1790,6 +2019,6 @@ print("====================================================")
 print("[AutoFarm] Alternate Lucky Block fully integrated")
 print("Alternate = dropdown | Alternate Lucky Block = exact name")
 print("Alternative = rarity | ID = 1263")
-print("Place and Place Boxes = ALL available stands/floors")
+print("Place and Place Boxes = ALL available stands/floors | Lucky Boxes highest value first")
 print("Commands: stopAll() | goToBase() | countMyFloors()")
 print("====================================================")
