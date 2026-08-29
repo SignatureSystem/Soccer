@@ -1,5 +1,5 @@
--- Combined Script: ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
--- + selected-type Lucky Block Place + OPEN ALL active boxes + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
+-- Combined Script: JAPAN + ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
+-- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
 
@@ -36,11 +36,11 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Icons"] = 1, ["Spain"] = 2 }
-local TARGET_RARITIES  = { ["Icons"] = true, ["Spain"] = true }
+local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
+local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
-    ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
+    ["Japan"] = 10000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
     ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
     ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
     ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
@@ -50,7 +50,7 @@ local RARITY_VALUE = {
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
@@ -68,7 +68,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons",
+    "Spain", "Icons", "Japan",
 }
 
 local selectedUpgradeRarity = "All"
@@ -85,7 +85,7 @@ end
 local selectedUpgradeMutation = "All"
 
 -- Exact Lucky Block types found in the latest game slime registry.
--- New live entry: Icons Lucky Block (ID 1112, rarity Icons).
+-- New live entry: Japan Lucky Block (rarity Japan). Previous: Icons Lucky Block.
 -- The dropdown uses display labels; matching uses exact live model names.
 local LUCKY_BLOCK_OPTIONS = {
     "All",
@@ -109,6 +109,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Champions",
     "Spain",
     "Icons",
+    "Japan",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -136,10 +137,11 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Champions"] = { ["Champions Lucky Block"] = true },
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
+    ["Japan"] = { ["Japan Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
-local selectedLuckyBlockType = "Icons"
+local selectedLuckyBlockType = "Japan"
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -1069,7 +1071,7 @@ PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
-print("[AutoFarm] GUI — ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
 print("[LuckyCollector] NO INVISIBILITY GATE BUILD")
 
 -- ============================================
@@ -2759,6 +2761,7 @@ local function resolveHeldToolRarity(entry)
             local text = tostring(value)
             local lower = string.lower(text)
 
+            if lower:find("japan") then return "Japan" end
             if lower:find("icons") then return "Icons" end
             if lower:find("spain") then return "Spain" end
             if lower:find("champion") then return "Champions" end
@@ -3813,36 +3816,173 @@ local function attemptSteal(prompt)
     return false
 end
 
--- BURST place selected Lucky Block type (no open)
-local function doPlaceBoxesOnly()
-    if not PlaceRemote then return 0 end
-    local boxes = getSelectedLuckyBlockTools()
-    local slots = getAvailableSlots()
-    if #boxes == 0 or #slots == 0 then return 0 end
-    local total = math.min(#boxes, #slots)
-    local placed = 0
-    for i = 1, total do
-        local entry, slot = boxes[i], slots[i]
-        if entry and entry.uid and slot then
-            if pcall(function() PlaceRemote:FireServer(slot.name, entry.uid) end) then
-                placed += 1
+-- ============================================================
+-- UNIVERSAL LUCKY BOX PLACE / OPEN (ALL types)
+-- Place Boxes  -> parallel spam Place Slime for every lucky box UID into
+--                 free slots at once (admin.lua startBatchPlace pattern)
+-- Open Boxes   -> Open Lucky Block on every occupied stand (all types)
+-- Does NOT use selectedLuckyBlockType filter.
+-- ============================================================
+
+local function getAllLuckyBlockPlaceEntries()
+    -- Collect ALL lucky-block UIDs from tools + inventory data (any type).
+    local list, seen = {}, {}
+    local playerData = getData()
+    local inventoryByUID = {}
+
+    if playerData and type(playerData.Inventory) == "table" then
+        for _, entry in pairs(playerData.Inventory) do
+            if type(entry) == "table" and entry.uid ~= nil then
+                inventoryByUID[tostring(entry.uid)] = entry
             end
         end
     end
+
+    local function tryAdd(uid, tool, invEntry)
+        if uid == nil then return end
+        local key = tostring(uid)
+        if seen[key] then return end
+
+        local def = resolveSlimeDefinition(invEntry)
+        if not isLuckyInventoryEntry(tool, invEntry, def) then
+            -- Still accept exact known model names from tools
+            if tool then
+                local n = tostring(tool.Name)
+                local known = false
+                for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
+                    if names[n] then
+                        known = true
+                        break
+                    end
+                end
+                if not known then
+                    return
+                end
+            else
+                return
+            end
+        end
+
+        seen[key] = true
+        table.insert(list, { uid = uid, tool = tool })
+    end
+
+    local function scanBag(bag)
+        if not bag then return end
+        for _, item in ipairs(bag:GetChildren()) do
+            if item:IsA("Tool") then
+                local uid = item:GetAttribute("slimeUID")
+                local inv = uid ~= nil and inventoryByUID[tostring(uid)] or nil
+                tryAdd(uid, item, inv)
+            end
+        end
+    end
+
+    scanBag(LocalPlayer:FindFirstChild("Backpack"))
+    scanBag(LocalPlayer.Character)
+
+    -- Inventory-only lucky boxes (tool may not be present)
+    for key, entry in pairs(inventoryByUID) do
+        if not seen[key] then
+            tryAdd(entry.uid, nil, entry)
+        end
+    end
+
+    return list
+end
+
+-- Parallel spam-place ALL lucky boxes into free slots at once.
+-- Same pattern as admin.lua startBatchPlace: assign each UID a free slot,
+-- then fire Place Slime for every remaining pair every ~0.05s until the
+-- UID appears in PlotSlimes (or timeout). All slots are hit concurrently.
+local function doPlaceBoxesOnly()
+    local placeRemote = PlaceRemote or ResolvePlaceRemote()
+    PlaceRemote = placeRemote
+    if not placeRemote then
+        return 0
+    end
+
+    local boxes = getAllLuckyBlockPlaceEntries()
+    local slots = getAvailableSlots()
+    if #boxes == 0 or #slots == 0 then
+        return 0
+    end
+
+    local function findPlacedSlotByUID(playerData, uid)
+        if uid == nil or not playerData or type(playerData.PlotSlimes) ~= "table" then
+            return nil
+        end
+        local wanted = tostring(uid)
+        for slotKey, entry in pairs(playerData.PlotSlimes) do
+            if type(entry) == "table" then
+                local entryUID = entry.uid or entry.UID or entry.slimeUID
+                if entryUID ~= nil and tostring(entryUID) == wanted then
+                    return tostring(slotKey)
+                end
+            end
+        end
+        return nil
+    end
+
+    local targets = {}
+    local total = math.min(#boxes, #slots)
+    for i = 1, total do
+        table.insert(targets, {
+            uid = boxes[i].uid,
+            slot = slots[i].name,
+            done = false,
+        })
+    end
+
+    local deadline = os.clock() + 12
+    local lastFire = 0
+
+    while os.clock() < deadline do
+        local remaining = 0
+        local data = getData()
+
+        for _, t in ipairs(targets) do
+            if not t.done then
+                if findPlacedSlotByUID(data, t.uid) then
+                    t.done = true
+                else
+                    remaining += 1
+                end
+            end
+        end
+
+        if remaining == 0 then
+            break
+        end
+
+        -- Spam ALL remaining slot/UID pairs at once (no sequential wait).
+        if os.clock() - lastFire >= 0.05 then
+            lastFire = os.clock()
+            for _, t in ipairs(targets) do
+                if not t.done and t.uid and t.slot then
+                    pcall(function()
+                        placeRemote:FireServer(tostring(t.slot), t.uid)
+                    end)
+                end
+            end
+        end
+
+        task.wait(0.03)
+    end
+
+    local placed = 0
+    for _, t in ipairs(targets) do
+        if t.done then
+            placed += 1
+        end
+    end
+
     return placed
 end
 
--- BURST OPEN ALL ACTIVE LUCKY BLOCKS IN SLIME SLOTS
--- IMPORTANT: do not filter by rarity/type/name here.
--- The real game opens a Lucky Block by slot name only:
---     Open Lucky Block(slotName)
--- So we fire the open request at EVERY currently occupied slime slot.
--- Normal players are rejected/ignored by the server; any active Lucky Block
--- (Icons, Spain, Divine/event/new tiers, etc.) is opened automatically.
+-- Spam-open ALL occupied slots (any lucky type). Server ignores non-boxes.
 local function doOpenBoxesOnly()
-    -- Resolve lazily on every click in case startup caching was late.
     local remote = OpenRemote
-
     if not (remote and remote.Parent and remote:IsA("RemoteEvent")) then
         remote = ResolveRemoteEventExact("Open Lucky Block")
         OpenRemote = remote
@@ -3853,65 +3993,59 @@ local function doOpenBoxesOnly()
         return 0
     end
 
-    -- This is intentionally ALL occupied slime stands, not a Lucky Block filter.
     local occupiedSlots = getAllOccupiedSlots()
+    if #occupiedSlots == 0 then
+        -- Also try unopened lucky slots from plot data (all types)
+        local names = getUnopenedLuckyBlockSlots("All")
+        for _, name in ipairs(names) do
+            table.insert(occupiedSlots, { name = name })
+        end
+    end
+
     if #occupiedSlots == 0 then
         return 0
     end
 
-    local fired = 0
-
-    -- Burst every occupied slot with no artificial per-slot delay.
+    local slotNames = {}
+    local seen = {}
     for _, slot in ipairs(occupiedSlots) do
-        local slotName = tostring(slot.name)
-
-        local ok, err = pcall(function()
-            remote:FireServer(slotName)
-        end)
-
-        if ok then
-            fired += 1
-        else
-            warn("[OpenBoxes] Fire failed for slot", slotName, err)
+        local n = tostring(slot.name or slot)
+        if n ~= "" and not seen[n] then
+            seen[n] = true
+            table.insert(slotNames, n)
         end
     end
 
-    return fired
-end
-
--- BURST place selected Lucky Block type, then open ALL active boxes on the plot.
-local function doPlaceAndOpenBoxes()
-    local placeRemote = ResolvePlaceRemote()
-    if not placeRemote then return 0, 0 end
-
-    local boxes = getSelectedLuckyBlockTools()
-    local slots = getAvailableSlots()
-    if #boxes == 0 or #slots == 0 then
-        -- Even if there is nothing new to place, still open boxes already active.
-        return 0, doOpenBoxesOnly()
+    -- Also merge explicit unopened lucky slots
+    for _, name in ipairs(getUnopenedLuckyBlockSlots("All")) do
+        local n = tostring(name)
+        if n ~= "" and not seen[n] then
+            seen[n] = true
+            table.insert(slotNames, n)
+        end
     end
 
-    local total = math.min(#boxes, #slots)
-    local placed = 0
+    local fired = 0
+    local rounds = 10
 
-    -- Keep the already-working placement logic unchanged.
-    for i = 1, total do
-        local entry, slot = boxes[i], slots[i]
-        if entry and entry.uid and slot then
+    for _ = 1, rounds do
+        for _, slotName in ipairs(slotNames) do
             if pcall(function()
-                placeRemote:FireServer(slot.name, entry.uid)
+                remote:FireServer(slotName)
             end) then
-                placed += 1
+                fired += 1
             end
         end
     end
 
-    -- Give newly placed blocks a moment to become active PlotSlimes/stands.
-    task.wait(0.35)
+    return #slotNames
+end
 
-    -- Open EVERY active box currently occupying a slime slot, regardless of type.
-    local openedRequests = doOpenBoxesOnly()
-    return placed, openedRequests
+-- Universal place all + open all, spam, no waits between.
+local function doPlaceAndOpenBoxes()
+    local placed = doPlaceBoxesOnly()
+    local opened = doOpenBoxesOnly()
+    return placed, opened
 end
 
 -- ============================================
@@ -4481,8 +4615,7 @@ BoxesBtn.MouseButton1Click:Connect(function()
     BoxesBtn.Text = "Burst..."
     local p, o = doPlaceAndOpenBoxes()
     StatusLabel.Text = string.format(
-        "Burst %s — Placed %d | Opened %d",
-        selectedLuckyBlockType,
+        "Burst ALL types — Placed %d | Opened %d",
         p,
         o
     )
@@ -4493,12 +4626,11 @@ end)
 PlaceBoxesBtn.MouseButton1Click:Connect(function()
     if actionBusy then return end
     actionBusy = true
-    PlaceBoxesBtn.Text = "..."
+    PlaceBoxesBtn.Text = "Spam..."
     local p = doPlaceBoxesOnly()
     StatusLabel.Text = string.format(
-        "Placed %d %s boxes (instant)",
-        p,
-        selectedLuckyBlockType
+        "Place ALL lucky boxes: %d targets (spam)",
+        p
     )
     PlaceBoxesBtn.Text = "Place Boxes"
     actionBusy = false
@@ -4507,10 +4639,10 @@ end)
 OpenBoxesBtn.MouseButton1Click:Connect(function()
     if actionBusy then return end
     actionBusy = true
-    OpenBoxesBtn.Text = "..."
+    OpenBoxesBtn.Text = "Spam..."
     local o = doOpenBoxesOnly()
     StatusLabel.Text = string.format(
-        "Open All: fired %d occupied slime slots",
+        "Open ALL boxes: %d slots (spam)",
         o
     )
     OpenBoxesBtn.Text = "Open Boxes"
@@ -5095,8 +5227,7 @@ task.spawn(function()
             local p, o = doPlaceAndOpenBoxes()
             if p > 0 or o > 0 then
                 StatusLabel.Text = string.format(
-                    "Auto Boxes [%s]: +%d / +%d",
-                    selectedLuckyBlockType,
+                    "Auto Boxes [ALL]: +%d place / +%d open",
                     p,
                     o
                 )
@@ -5140,7 +5271,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
-print("Place Boxes = burst place only | Open Boxes = burst open only")
+print("[AutoFarm] JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
+print("Place Boxes = parallel spam all free slots (admin-style) | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
