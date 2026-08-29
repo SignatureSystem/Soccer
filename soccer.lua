@@ -110,7 +110,6 @@ local LUCKY_BLOCK_OPTIONS = {
     "Spain",
     "Icons",
     "Japan",
-    "Alternate",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -139,7 +138,6 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
     ["Japan"] = { ["Japan Lucky Block"] = true },
-    ["Alternate"] = { ["Alternate Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
@@ -2113,13 +2111,6 @@ local function getUnopenedLuckyBlockSlots(filterType)
 
         local def = nil
 
-        if filterType == "Alternate"
-            and slimeId ~= nil
-            and tostring(slimeId) == "1263"
-        then
-            return true
-        end
-
         if slimeId ~= nil
             and _Lib
             and _Lib.Database
@@ -2163,10 +2154,6 @@ local function getUnopenedLuckyBlockSlots(filterType)
                 return true
             end
 
-            if filterType == "Alternate" and r == "Alternative" then
-                return true
-            end
-
             if string.lower(r) == string.lower(filterType) then
                 return true
             end
@@ -2206,8 +2193,7 @@ local function getUnopenedLuckyBlockSlots(filterType)
                         or ""
                     )
 
-                if (typ:lower():find("lucky", 1, true)
-                    or (slimeId ~= nil and tostring(slimeId) == "1263"))
+                if typ:lower():find("lucky", 1, true)
                     and entryMatches(entry)
                 then
                     add(k)
@@ -2340,18 +2326,6 @@ local function resolveSlimeDefinition(inventoryEntry)
 end
 
 local function isLuckyInventoryEntry(tool, inventoryEntry, def)
-    if inventoryEntry then
-        local slimeId =
-            inventoryEntry.id
-            or inventoryEntry.Id
-            or inventoryEntry.slimeId
-            or inventoryEntry.slimeID
-
-        if slimeId ~= nil and tostring(slimeId) == "1263" then
-            return true
-        end
-    end
-
     local function containsBoxWord(value)
         value = string.lower(tostring(value or ""))
 
@@ -2918,19 +2892,6 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
         or nil
 
     local def = resolveSlimeDefinition(inventoryEntry)
-
-    if filterType == "Alternate" and inventoryEntry then
-        local slimeId =
-            inventoryEntry.id
-            or inventoryEntry.Id
-            or inventoryEntry.slimeId
-            or inventoryEntry.slimeID
-
-        if slimeId ~= nil and tostring(slimeId) == "1263" then
-            return true
-        end
-    end
-
     local allowed = LUCKY_BLOCK_MODEL_NAMES[filterType]
 
     if allowed then
@@ -2960,10 +2921,6 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
         end
 
         if filterType == "Limited" and r == "LIMITED" then
-            return true
-        end
-
-        if filterType == "Alternate" and r == "Alternative" then
             return true
         end
 
