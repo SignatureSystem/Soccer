@@ -1346,13 +1346,19 @@ end
 
 local function doPlaceBoxesOnly()
     local remote = ResolvePlaceRemote()
+
     if not remote then
         StatusLabel.Text = 'Place Boxes: "Place Slime" remote missing'
         return 0
     end
 
+    -- getAllLuckyBlockPlaceEntries() is already sorted:
+    -- HIGHEST VALUE -> LOWEST VALUE.
     local boxes = getAllLuckyBlockPlaceEntries()
-    local slots = getAvailableSlots() -- ALL currently free stands/floors.
+
+    -- Dynamic placement across every currently free stand/floor.
+    local slots = getAvailableSlots()
+
     local total = math.min(#boxes, #slots)
 
     if total <= 0 then
@@ -1361,92 +1367,94 @@ local function doPlaceBoxesOnly()
         else
             StatusLabel.Text = "Place Boxes: no free stands/floors"
         end
+
         return 0
     end
 
-    print("====================================================")
-    print("[PlaceBoxes] HIGHEST VALUE LUCKY BOX FIRST")
-    print("Detected boxes:", #boxes, "| Free slots:", #slots, "| Placing:", total)
-
-    for i = 1, total do
-        local box = boxes[i]
-        print(string.format(
-            "#%d %s | Rarity=%s | PriorityValue=%.0f | UID=%s -> Slot %s",
-            i,
-            tostring(box.name),
-            tostring(box.rarity),
-            tonumber(box.value) or 0,
-            tostring(box.uid),
-            tostring(slots[i].name)
-        ))
-    end
-    print("====================================================")
-
-    local placed = 0
+    -- Lock the full highest-value-first box -> slot assignment
+    -- BEFORE firing anything.
+    local pairsToPlace = {}
 
     for i = 1, total do
         local box = boxes[i]
         local slot = slots[i]
 
-        -- Re-find the current physical tool just before placing.
-        local currentTool = box.tool
-        if not currentTool or not currentTool.Parent then
-            currentTool = collectCurrentSlimeToolsByUID()[tostring(box.uid)]
-        end
+        pairsToPlace[i] = {
+            uid = box.uid,
+            slot = slot.name,
+            name = box.name,
+            rarity = box.rarity,
+            value = tonumber(box.value) or 0,
+        }
+    end
 
-        -- Use the same equip path as the working normal Place button whenever
-        -- a physical tool exists. Inventory-only entries still get a remote try.
-        if currentTool and currentTool.Parent then
-            equipTool(currentTool)
-        end
+    print("====================================================")
+    print("[PlaceBoxes] SPAM ALL | HIGHEST VALUE FIRST")
+    print(
+        "Detected boxes:",
+        #boxes,
+        "| Free slots:",
+        #slots,
+        "| Targets:",
+        total
+    )
 
-        local success = false
+    for i, p in ipairs(pairsToPlace) do
+        print(string.format(
+            "#%d %s | Rarity=%s | Value=%.0f | UID=%s -> Slot %s",
+            i,
+            tostring(p.name),
+            tostring(p.rarity),
+            tonumber(p.value) or 0,
+            tostring(p.uid),
+            tostring(p.slot)
+        ))
+    end
 
-        -- Controlled retries are more reliable than blasting every UID into every
-        -- slot for eight rounds. The server remains authoritative.
-        for attempt = 1, 3 do
-            local fired = pcall(function()
-                remote:FireServer(tostring(slot.name), box.uid)
-            end)
+    print("====================================================")
 
-            if fired then
-                success = true
-                break
+    -- ORIGINAL BULK-SPAM BEHAVIOUR:
+    -- Fire ALL box/slot pairs every round.
+    -- No equip wait.
+    -- No per-item wait.
+    -- No sequential verification gate.
+    local rounds = 8
+    local fireCount = 0
+
+    for round = 1, rounds do
+        for _, p in ipairs(pairsToPlace) do
+            if p.uid ~= nil and p.slot ~= nil then
+                local fired = pcall(function()
+                    remote:FireServer(
+                        tostring(p.slot),
+                        p.uid
+                    )
+                end)
+
+                if fired then
+                    fireCount += 1
+                end
             end
-
-            task.wait(0.10)
         end
-
-        if success then
-            placed += 1
-            StatusLabel.Text = string.format(
-                "Place Boxes %d/%d | %s | %.0f -> slot %s",
-                placed,
-                total,
-                tostring(box.name),
-                tonumber(box.value) or 0,
-                tostring(slot.name)
-            )
-        else
-            warn(
-                "[PlaceBoxes] Failed UID",
-                tostring(box.uid),
-                "-> slot",
-                tostring(slot.name)
-            )
-        end
-
-        task.wait(DELAY_PLACE)
     end
 
-    local hum = getHumanoid()
-    if hum then
-        pcall(function()
-            hum:UnequipTools()
-        end)
-    end
+    StatusLabel.Text = string.format(
+        "Place Boxes: spammed ALL %d targets x%d | highest value first",
+        total,
+        rounds
+    )
 
-    return placed
+    print(
+        "[PlaceBoxes] COMPLETE | targets:",
+        total,
+        "| rounds:",
+        rounds,
+        "| remote fires:",
+        fireCount
+    )
+
+    -- Return number of distinct box->slot targets, same idea as original.
+    return total
 end
 
 local function doOpenBoxesOnly()
