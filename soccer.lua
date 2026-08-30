@@ -3369,6 +3369,181 @@ local function equipTool(tool)
     return tool.Parent == char
 end
 
+
+-- ============================================================
+-- ROBUST NORMAL PLAYER PLACEMENT
+--
+-- The server validates placement against the target stand.
+-- Equip the exact UID, move beside that stand, send Place Slime,
+-- then confirm Data.PlotSlimes actually contains the UID.
+-- ============================================================
+
+local function getStandPlacementCFrame(stand)
+    if not stand or not stand.Parent then
+        return nil
+    end
+
+    local part = stand.PrimaryPart
+
+    if not part then
+        local main = stand:FindFirstChild("Main")
+
+        if main then
+            if main:IsA("BasePart") then
+                part = main
+            elseif main:IsA("Model") then
+                part =
+                    main.PrimaryPart
+                    or main:FindFirstChildWhichIsA("BasePart", true)
+            end
+        end
+    end
+
+    part =
+        part
+        or stand:FindFirstChildWhichIsA("BasePart", true)
+
+    if part and part:IsA("BasePart") then
+        -- A little in front/above the stand, matching the working box placer.
+        return part.CFrame * CFrame.new(0, 3, 3)
+    end
+
+    return nil
+end
+
+local function teleportBesideStand(stand)
+    local char = LocalPlayer.Character
+    local root =
+        char
+        and char:FindFirstChild("HumanoidRootPart")
+
+    local cf = getStandPlacementCFrame(stand)
+
+    if not root or not cf then
+        return false, "stand/root unavailable"
+    end
+
+    root.CFrame = cf
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+
+    return true
+end
+
+local function isUIDPlacedInSlot(slotName, uid)
+    local data = getData()
+    local plotSlimes =
+        data
+        and data.PlotSlimes
+
+    if type(plotSlimes) ~= "table" then
+        return false
+    end
+
+    local entry =
+        plotSlimes[tostring(slotName)]
+        or plotSlimes[tonumber(slotName)]
+
+    if type(entry) ~= "table" then
+        return false
+    end
+
+    local placedUID =
+        entry.uid
+        or entry.UID
+        or entry.slimeUID
+
+    if placedUID ~= nil and uid ~= nil then
+        return tostring(placedUID) == tostring(uid)
+    end
+
+    -- Some builds do not replicate UID on PlotSlimes immediately.
+    -- If the slot became occupied, treat that as placement confirmation.
+    return true
+end
+
+local function placeToolAtSlot(remote, tool, slot, uid)
+    if not remote
+        or not remote.Parent
+        or not remote:IsA("RemoteEvent")
+    then
+        return false, "Place Slime RemoteEvent unavailable"
+    end
+
+    if not tool or not tool.Parent then
+        return false, "tool unavailable"
+    end
+
+    if not slot or not slot.name then
+        return false, "slot unavailable"
+    end
+
+    -- Make sure the exact player is equipped first.
+    if not equipTool(tool) then
+        return false, "equip failed"
+    end
+
+    -- Current server placement is proximity-sensitive.
+    local moved, moveErr =
+        teleportBesideStand(slot.stand)
+
+    if not moved then
+        return false, moveErr
+    end
+
+    -- Allow the server to observe the new character position.
+    task.wait(0.08)
+
+    local lastErr = nil
+
+    -- A few short retries handle replication/ping without changing order.
+    for attempt = 1, 4 do
+        local fired, fireErr = pcall(function()
+            remote:FireServer(
+                tostring(slot.name),
+                uid
+            )
+        end)
+
+        if not fired then
+            lastErr = fireErr
+        end
+
+        local deadline = os.clock() + 0.40
+
+        while os.clock() < deadline do
+            if isUIDPlacedInSlot(slot.name, uid) then
+                return true, attempt
+            end
+
+            -- Tool leaving Character/Backpack is another strong success signal.
+            if tool
+                and (
+                    not tool.Parent
+                    or (
+                        tool.Parent ~= LocalPlayer.Character
+                        and tool.Parent ~= LocalPlayer:FindFirstChild("Backpack")
+                    )
+                )
+            then
+                task.wait(0.05)
+
+                if isUIDPlacedInSlot(slot.name, uid) then
+                    return true, attempt
+                end
+            end
+
+            task.wait(0.05)
+        end
+
+        -- Stay beside the same stand before retrying.
+        teleportBesideStand(slot.stand)
+        task.wait(0.05)
+    end
+
+    return false, lastErr or "server did not confirm placement"
+end
+
 local function findCloakTool()
     local function scan(bag)
         if not bag then return nil end
@@ -4896,35 +5071,43 @@ ManualFilters.placeButton.MouseButton1Click:Connect(function()
                     getPlayerSlimesFolder(),
                     slot.stand
                 ) then
-                    if equipTool(tool) then
-                        local fired, fireErr = pcall(function()
-                            remote:FireServer(
-                                slot.name,
-                                rankedEntry.uid
-                            )
-                        end)
+                    local placedOK, placeInfo =
+                        placeToolAtSlot(
+                            remote,
+                            tool,
+                            slot,
+                            rankedEntry.uid
+                        )
 
-                        if fired then
-                            placed += 1
+                    if placedOK then
+                        placed += 1
 
-                            StatusLabel.Text = string.format(
-                                "Placed %d/%d | R:%s M:%s | %.2f cash/s",
-                                placed,
-                                total,
-                                tostring(rarityFilter),
-                                tostring(mutationFilter),
-                                tonumber(rankedEntry.value) or 0
-                            )
-                        else
-                            warn(
-                                "[PlaceDualFilter] Place failed UID",
-                                tostring(rankedEntry.uid),
-                                fireErr
-                            )
-                        end
+                        StatusLabel.Text = string.format(
+                            "Placed %d/%d | R:%s M:%s | %.2f cash/s -> slot %s",
+                            placed,
+                            total,
+                            tostring(rarityFilter),
+                            tostring(mutationFilter),
+                            tonumber(rankedEntry.value) or 0,
+                            tostring(slot.name)
+                        )
+                    else
+                        warn(
+                            "[PlaceDualFilter] Place failed UID",
+                            tostring(rankedEntry.uid),
+                            "slot",
+                            tostring(slot.name),
+                            placeInfo
+                        )
 
-                        task.wait(DELAY_PLACE)
+                        StatusLabel.Text = string.format(
+                            "Place retry failed | UID %s -> slot %s",
+                            tostring(rankedEntry.uid),
+                            tostring(slot.name)
+                        )
                     end
+
+                    task.wait(DELAY_PLACE)
                 end
             else
                 warn(
@@ -5069,31 +5252,41 @@ PlaceBtn.MouseButton1Click:Connect(function()
                     getPlayerSlimesFolder(),
                     slot.stand
                 ) then
-                    if equipTool(tool) then
-                        local fired, fireErr = pcall(function()
-                            remote:FireServer(slot.name, rankedEntry.uid)
-                        end)
+                    local placedOK, placeInfo =
+                        placeToolAtSlot(
+                            remote,
+                            tool,
+                            slot,
+                            rankedEntry.uid
+                        )
 
-                        if fired then
-                            placed += 1
+                    if placedOK then
+                        placed += 1
 
-                            StatusLabel.Text = string.format(
-                                "Placed #%d/%d | %.2f cash/s -> slot %s",
-                                i,
-                                total,
-                                tonumber(rankedEntry.value) or 0,
-                                tostring(slot.name)
-                            )
-                        else
-                            warn(
-                                "[PlaceAll] Place failed UID",
-                                rankedEntry.uid,
-                                fireErr
-                            )
-                        end
+                        StatusLabel.Text = string.format(
+                            "Placed #%d/%d | %.2f cash/s -> slot %s",
+                            i,
+                            total,
+                            tonumber(rankedEntry.value) or 0,
+                            tostring(slot.name)
+                        )
+                    else
+                        warn(
+                            "[PlaceAll] Place failed UID",
+                            tostring(rankedEntry.uid),
+                            "slot",
+                            tostring(slot.name),
+                            placeInfo
+                        )
 
-                        task.wait(DELAY_PLACE)
+                        StatusLabel.Text = string.format(
+                            "Place failed | UID %s -> slot %s",
+                            tostring(rankedEntry.uid),
+                            tostring(slot.name)
+                        )
                     end
+
+                    task.wait(DELAY_PLACE)
                 end
             else
                 warn(
