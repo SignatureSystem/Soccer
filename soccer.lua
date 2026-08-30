@@ -4,6 +4,21 @@
 -- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
 
 local Players = game:GetService("Players")
+
+-- INSTANT PROXIMITY PROMPTS
+-- Existing prompts:
+for _, v in ipairs(workspace:GetDescendants()) do
+    if v:IsA("ProximityPrompt") then
+        v.HoldDuration = 0
+    end
+end
+
+-- Future prompts that replicate/spawn later:
+workspace.DescendantAdded:Connect(function(v)
+    if v:IsA("ProximityPrompt") then
+        v.HoldDuration = 0
+    end
+end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
@@ -1141,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] STRICT holdingSlime confirm | first normal hold -> retry +0.15s | NO SERVER HOP")
+print("[LuckyCollector] INSTANT TAP | teleport -> steal -> base | HoldDuration=0 | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -4482,66 +4497,32 @@ local function attemptSteal(prompt)
         return false
     end
 
-    -- Fixed first steal attempt duration.
-    local hold = 0.8
-
-    -- Manually hold the prompt for exactly 0.8 seconds so the
-    -- steal attempt duration is deterministic.
-    local ok = pcall(function()
-        prompt:InputHoldBegin()
-        task.wait(hold)
-        prompt:InputHoldEnd()
+    -- Prompt hold is globally forced to zero.
+    pcall(function()
+        prompt.HoldDuration = 0
     end)
 
-    if ok then
-        task.wait(0.10)
-        return true
-    end
-
-    -- Fallback only if manual hold fails.
+    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
-        local fired = pcall(function()
+        local ok = pcall(function()
             fireproximityprompt(prompt)
         end)
 
-        if fired then
-            task.wait(0.8)
+        if ok then
             return true
         end
     end
 
-    return false
-end
-
-
--- Extended proximity-hold retry.
--- Used ONLY when the normal steal attempt did not actually produce
--- LocalPlayer:GetAttribute("holdingSlime") == true.
-local function attemptStealExtended(prompt, extraHold)
-    if not prompt or not prompt.Parent then
-        return false
-    end
-
-    extraHold = math.max(0, tonumber(extraHold) or 0.15)
-
-    -- First attempt is fixed at 0.8s.
-    -- Retry extends that by +0.15s => 0.95s by default.
-    local hold = 0.8 + extraHold
-
+    -- Fallback.
     local ok = pcall(function()
         prompt:InputHoldBegin()
-        task.wait(hold)
         prompt:InputHoldEnd()
     end)
 
-    if not ok then
-        return false
-    end
-
-    task.wait(0.10)
-
-    return true
+    return ok
 end
+
+
 
 -- ============================================================
 -- UNIVERSAL LUCKY BOX PLACE / OPEN (ALL types)
@@ -6111,170 +6092,64 @@ task.spawn(function()
             end
 
             --------------------------------------------------
-            -- STRICT STEAL CONFIRMATION
+            -- INSTANT TAP STEAL FLOW
             --
-            -- IMPORTANT:
-            -- attemptSteal() returning true only means the prompt call ran.
-            -- It does NOT mean the server actually gave us the Lucky Block.
-            --
-            -- The ONLY success condition is:
-            -- LocalPlayer:GetAttribute("holdingSlime") == true
+            -- 1) Teleport to Lucky Block (already done above)
+            -- 2) Tap the ProximityPrompt instantly
+            -- 3) Return to base immediately
             --------------------------------------------------
-            local collected = false
+
+            local prompt = block.prompt
+
+            if (not prompt or not prompt.Parent) and block.model then
+                for _, d in ipairs(block.model:GetDescendants()) do
+                    if d:IsA("ProximityPrompt") and d.Enabled then
+                        prompt = d
+                        break
+                    end
+                end
+            end
 
             if prompt and prompt.Parent then
+                pcall(function()
+                    prompt.HoldDuration = 0
+                end)
+
                 StatusLabel.Text =
-                    "Lucky Block: steal attempt 1"
+                    tostring(selectedLuckyBlockType)
+                    .. " Lucky Block -> instant steal"
 
                 attemptSteal(prompt)
 
-                -- Give the authoritative holding state a short chance to update.
-                local confirmDeadline =
-                    os.clock() + 0.35
-
-                while luckyEnabled
-                    and os.clock() < confirmDeadline
-                do
-                    if LocalPlayer:GetAttribute("holdingSlime") == true then
-                        collected = true
-                        break
-                    end
-
-                    task.wait(0.03)
+                -- Remove float immediately after tapping.
+                if bv and bv.Parent then
+                    bv:Destroy()
                 end
-            end
 
-            --------------------------------------------------
-            -- FIRST ATTEMPT DID NOT PRODUCE holdingSlime.
-            -- Retry with proximity duration extended by +0.15s.
-            --------------------------------------------------
-            if not collected
-                and luckyEnabled
-                and block.model
-                and block.model.Parent
-            then
-                -- Stay exactly under the same target for the extended retry.
                 root = getRoot()
 
-                if root
-                    and block.part
-                    and block.part.Parent
-                then
-                    root.CFrame =
-                        block.part.CFrame
-                        * CFrame.new(0, -1, 0)
-
-                    root.AssemblyLinearVelocity =
-                        Vector3.zero
+                if root then
+                    root.AssemblyLinearVelocity = Vector3.zero
                 end
 
-                -- Re-find a currently enabled prompt before retrying.
-                local retryPrompt = nil
+                -- Exact requested flow:
+                -- TELEPORT -> STEAL -> RETURN TO BASE
+                teleportToBase()
 
-                for _, d in ipairs(
-                    block.model:GetDescendants()
-                ) do
-                    if d:IsA("ProximityPrompt")
-                        and d.Enabled
-                    then
-                        retryPrompt = d
-                        break
-                    end
-                end
-
-                retryPrompt =
-                    retryPrompt
-                    or prompt
-
-                if retryPrompt
-                    and retryPrompt.Parent
-                then
-                    StatusLabel.Text =
-                        "Lucky Block: retry +0.15s proximity hold"
-
-                    attemptStealExtended(
-                        retryPrompt,
-                        0.15
-                    )
-
-                    local confirmDeadline =
-                        os.clock() + 0.40
-
-                    while luckyEnabled
-                        and os.clock() < confirmDeadline
-                    do
-                        if LocalPlayer:GetAttribute("holdingSlime") == true then
-                            collected = true
-                            break
-                        end
-
-                        task.wait(0.03)
-                    end
-                end
-            end
-
-            -- Float cleanup AFTER both steal attempts.
-            if bv and bv.Parent then
-                bv:Destroy()
-            end
-
-            root = getRoot()
-
-            if root then
-                root.AssemblyLinearVelocity =
-                    Vector3.zero
-            end
-
-            --------------------------------------------------
-            -- RETURN TO BASE ONLY WHEN holdingSlime IS TRUE.
-            --------------------------------------------------
-            if collected
-                and LocalPlayer:GetAttribute("holdingSlime") == true
-            then
                 totalCollected += 1
 
                 StatusLabel.Text =
                     string.format(
-                        "%s HOLDING confirmed (#%d) -> base in 1s",
-                        tostring(selectedLuckyBlockType),
+                        "Instant steal #%d -> returned to base",
                         totalCollected
                     )
-
-                -- After holdingSlime is TRUE, wait exactly 1 second
-                -- before teleporting back to base.
-                task.wait(1.0)
-
-                -- This can only execute after authoritative holding confirmation.
-                teleportToBase()
-
-                task.wait(0.3)
-
-                local t = os.clock() + 1
-
-                while luckyEnabled
-                    and LocalPlayer:GetAttribute("holdingSlime") == true
-                    and os.clock() < t
-                do
-                    task.wait(0.1)
-                end
-
-                if LocalPlayer:GetAttribute("holdingSlime") == true then
-                    StatusLabel.Text =
-                        "Lucky Block: still carrying after 1s at base"
-                else
-                    StatusLabel.Text =
-                        string.format(
-                            "Deposited #%d | scanning %s...",
-                            totalCollected,
-                            tostring(selectedLuckyBlockType)
-                        )
-                end
             else
-                -- NEVER teleport home here.
-                StatusLabel.Text =
-                    "holdingSlime FALSE - staying at target / retry"
+                if bv and bv.Parent then
+                    bv:Destroy()
+                end
 
-                task.wait(0.15)
+                StatusLabel.Text =
+                    "Lucky Block prompt missing"
             end
 
             luckyBlockBusy = false
