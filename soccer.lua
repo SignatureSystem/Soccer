@@ -861,9 +861,50 @@ PickupRangeDropBtn.MouseButton1Click:Connect(function()
         .. selectedPickupRange.label
 end)
 
-local PickupAllBtn = createButton("PickupAllBtn", 378, "Pick Up ALL Floors")
+-- Random pickup control:
+-- Enter how many currently placed slimes to pick up, then press Pick Up.
+-- The selected occupied stand IDs are shuffled every run.
+local RandomPickupCountBox = Instance.new("TextBox")
+RandomPickupCountBox.Name = "RandomPickupCount"
+RandomPickupCountBox.Size = UDim2.new(0, 140, 0, 30)
+RandomPickupCountBox.Position = UDim2.new(0, 15, 0, 378)
+RandomPickupCountBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
+RandomPickupCountBox.BorderSizePixel = 0
+RandomPickupCountBox.PlaceholderText = "Random pick count"
+RandomPickupCountBox.Text = "10"
+RandomPickupCountBox.ClearTextOnFocus = false
+RandomPickupCountBox.TextColor3 = Color3.fromRGB(245, 245, 250)
+RandomPickupCountBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 155)
+RandomPickupCountBox.TextSize = 11
+RandomPickupCountBox.Font = Enum.Font.GothamBold
+RandomPickupCountBox.Parent = MainFrame
+Instance.new("UICorner", RandomPickupCountBox).CornerRadius = UDim.new(0, 8)
+
+local RandomPickupBtn = Instance.new("TextButton")
+RandomPickupBtn.Name = "RandomPickupBtn"
+RandomPickupBtn.Size = UDim2.new(0, 72, 0, 30)
+RandomPickupBtn.Position = UDim2.new(0, 163, 0, 378)
+RandomPickupBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 70)
+RandomPickupBtn.BorderSizePixel = 0
+RandomPickupBtn.Text = "Pick Up"
+RandomPickupBtn.TextColor3 = Color3.fromRGB(205, 175, 255)
+RandomPickupBtn.TextSize = 11
+RandomPickupBtn.Font = Enum.Font.GothamBold
+RandomPickupBtn.Parent = MainFrame
+Instance.new("UICorner", RandomPickupBtn).CornerRadius = UDim.new(0, 8)
+
+RandomPickupCountBox.FocusLost:Connect(function()
+    local count = math.floor(tonumber(RandomPickupCountBox.Text) or 10)
+
+    if count < 1 then
+        count = 1
+    end
+
+    RandomPickupCountBox.Text = tostring(count)
+end)
+
 local PlaceBtn     = createButton("PlaceBtn", 412, "Place Slimes (CURRENT CASH first)")
-local BoxesBtn     = createButton("BoxesBtn", 446, "Place + Open Selected Boxes (Once)")
+local BoxesBtn     = createButton("BoxesBtn", 446, "Place + Open Boxes")
 
 -- Side-by-side: Place Boxes | Open Boxes
 local PlaceBoxesBtn = Instance.new("TextButton")
@@ -1094,8 +1135,6 @@ do
     Instance.new("UICorner", ManualFilters.placeButton).CornerRadius = UDim.new(0, 6)
 end
 
-PickupAllBtn.TextColor3 = Color3.fromRGB(200, 160, 255)
-PickupAllBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 70)
 PlaceBtn.TextColor3 = Color3.fromRGB(120, 220, 150)
 PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
@@ -4439,14 +4478,38 @@ local function getTargetLuckyBlock()
 end
 
 local function attemptSteal(prompt)
-    if not prompt then return false end
-    local hold = prompt.HoldDuration or 0
-    if typeof(fireproximityprompt) == "function" then
-        local ok = pcall(function() fireproximityprompt(prompt) end)
-        if ok then task.wait(hold + 0.5) return true end
+    if not prompt or not prompt.Parent then
+        return false
     end
-    local ok = pcall(function() prompt:Trigger() end)
-    if ok then task.wait(hold + 0.5) return true end
+
+    -- Fixed first steal attempt duration.
+    local hold = 0.8
+
+    -- Manually hold the prompt for exactly 0.8 seconds so the
+    -- steal attempt duration is deterministic.
+    local ok = pcall(function()
+        prompt:InputHoldBegin()
+        task.wait(hold)
+        prompt:InputHoldEnd()
+    end)
+
+    if ok then
+        task.wait(0.10)
+        return true
+    end
+
+    -- Fallback only if manual hold fails.
+    if typeof(fireproximityprompt) == "function" then
+        local fired = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+
+        if fired then
+            task.wait(0.8)
+            return true
+        end
+    end
+
     return false
 end
 
@@ -4461,15 +4524,10 @@ local function attemptStealExtended(prompt, extraHold)
 
     extraHold = math.max(0, tonumber(extraHold) or 0.15)
 
-    local hold =
-        math.max(
-            0,
-            tonumber(prompt.HoldDuration) or 0
-        )
-        + extraHold
+    -- First attempt is fixed at 0.8s.
+    -- Retry extends that by +0.15s => 0.95s by default.
+    local hold = 0.8 + extraHold
 
-    -- For an extended duration we manually hold the ProximityPrompt
-    -- instead of trusting a successful fireproximityprompt call.
     local ok = pcall(function()
         prompt:InputHoldBegin()
         task.wait(hold)
@@ -4480,7 +4538,6 @@ local function attemptStealExtended(prompt, extraHold)
         return false
     end
 
-    -- Small replication window after releasing the prompt.
     task.wait(0.10)
 
     return true
@@ -4772,10 +4829,26 @@ local function doOpenBoxesOnly()
     return #slotNames
 end
 
--- Universal place all + open all, spam, no waits between.
+-- Universal Place + Open.
+-- IMPORTANT:
+-- This deliberately uses the EXACT same two working functions as the
+-- separate "Place Boxes" and "Open Boxes" buttons.
+--
+-- Flow:
+--   1) doPlaceBoxesOnly()
+--   2) short replication settle
+--   3) doOpenBoxesOnly()
 local function doPlaceAndOpenBoxes()
-    local placed = doPlaceBoxesOnly()
-    local opened = doOpenBoxesOnly()
+    local placed =
+        doPlaceBoxesOnly()
+
+    -- Let the server/client PlotSlimes state catch up after the final
+    -- teleport-hop placement before scanning occupied slots for opening.
+    task.wait(0.25)
+
+    local opened =
+        doOpenBoxesOnly()
+
     return placed, opened
 end
 
@@ -4938,18 +5011,111 @@ PickupBtn.MouseButton1Click:Connect(function()
     actionBusy = false
 end)
 
-PickupAllBtn.MouseButton1Click:Connect(function()
-    if actionBusy or not PickupRemote then return end
-    actionBusy = true
-    PickupAllBtn.Text = "Picking ALL..."
-    local slots = getAllOccupiedSlots()
-    local n = 0
-    for _, slot in ipairs(slots) do
-        if pcall(function() PickupRemote:FireServer(slot.name) end) then n += 1 end
-        task.wait(DELAY_PICK)
+RandomPickupBtn.MouseButton1Click:Connect(function()
+    if actionBusy then
+        StatusLabel.Text = "Another action is still running..."
+        return
     end
-    StatusLabel.Text = string.format("Picked %d from ALL floors", n)
-    PickupAllBtn.Text = "Pick Up ALL Floors"
+
+    if not PickupRemote then
+        PickupRemote = ResolveRemoteEventExact("Pickup Slime")
+    end
+
+    if not PickupRemote then
+        StatusLabel.Text = 'Random pickup error: "Pickup Slime" remote missing'
+        return
+    end
+
+    local requested =
+        math.floor(
+            tonumber(RandomPickupCountBox.Text)
+            or 0
+        )
+
+    if requested < 1 then
+        requested = 1
+    end
+
+    RandomPickupCountBox.Text =
+        tostring(requested)
+
+    actionBusy = true
+    RandomPickupBtn.Text = "Picking..."
+
+    local ok, err = xpcall(function()
+        local slots =
+            getAllOccupiedSlots()
+
+        if #slots == 0 then
+            StatusLabel.Text =
+                "Random pickup: no placed slimes found"
+            return
+        end
+
+        -- Fisher-Yates shuffle so every run chooses a random set
+        -- from ALL currently occupied dynamic stands/floors.
+        local rng = Random.new()
+
+        for i = #slots, 2, -1 do
+            local j =
+                rng:NextInteger(1, i)
+
+            slots[i], slots[j] =
+                slots[j], slots[i]
+        end
+
+        local targetCount =
+            math.min(
+                requested,
+                #slots
+            )
+
+        local picked = 0
+
+        for i = 1, targetCount do
+            local slot = slots[i]
+
+            if slot and slot.name then
+                local fired =
+                    pcall(function()
+                        PickupRemote:FireServer(
+                            tostring(slot.name)
+                        )
+                    end)
+
+                if fired then
+                    picked += 1
+                end
+            end
+
+            StatusLabel.Text =
+                string.format(
+                    "Random pickup %d/%d",
+                    picked,
+                    targetCount
+                )
+
+            task.wait(DELAY_PICK)
+        end
+
+        StatusLabel.Text =
+            string.format(
+                "Randomly picked %d/%d placed slime%s",
+                picked,
+                targetCount,
+                targetCount == 1 and "" or "s"
+            )
+    end, debug.traceback)
+
+    if not ok then
+        warn("[RandomPickup] ERROR:", err)
+
+        StatusLabel.Text =
+            "Random pickup error: "
+            .. tostring(err):match("^[^\n]+")
+    end
+
+    RandomPickupBtn.Text = "Pick Up"
     actionBusy = false
 end)
 
@@ -5363,16 +5529,53 @@ PlaceBtn.MouseButton1Click:Connect(function()
 end)
 
 BoxesBtn.MouseButton1Click:Connect(function()
-    if actionBusy then return end
+    if actionBusy then
+        StatusLabel.Text = "Another action is still running..."
+        return
+    end
+
     actionBusy = true
-    BoxesBtn.Text = "Burst..."
-    local p, o = doPlaceAndOpenBoxes()
-    StatusLabel.Text = string.format(
-        "Burst ALL types — Placed %d | Opened %d",
-        p,
-        o
-    )
-    BoxesBtn.Text = "Place + Open Selected Boxes (Once)"
+
+    local ok, err = xpcall(function()
+        -- PHASE 1 = EXACT same function as "Place Boxes"
+        BoxesBtn.Text = "Placing..."
+        StatusLabel.Text =
+            "Place + Open: placing lucky boxes..."
+
+        local placed =
+            doPlaceBoxesOnly()
+
+        -- Important replication settle before Open Boxes scans PlotSlimes.
+        task.wait(0.25)
+
+        -- PHASE 2 = EXACT same function as "Open Boxes"
+        BoxesBtn.Text = "Opening..."
+        StatusLabel.Text =
+            string.format(
+                "Place + Open: placed %d | opening...",
+                placed
+            )
+
+        local opened =
+            doOpenBoxesOnly()
+
+        StatusLabel.Text =
+            string.format(
+                "Place + Open complete | Placed %d | Opened %d",
+                placed,
+                opened
+            )
+    end, debug.traceback)
+
+    if not ok then
+        warn("[PlaceOpenBoxes] ERROR:", err)
+
+        StatusLabel.Text =
+            "Place + Open error: "
+            .. tostring(err):match("^[^\n]+")
+    end
+
+    BoxesBtn.Text = "Place + Open Boxes"
     actionBusy = false
 end)
 
