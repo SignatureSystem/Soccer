@@ -9,14 +9,20 @@
 --
 --     workspace.Live.Slimes
 --
--- using the SAME ProximityPrompt mechanism as the supplied
--- Alternate Lucky Block stealer:
+-- using the EXACT proven Lucky Block collector movement/pickup mechanism:
 --
 --   find world Lucky Block
---   -> teleport beside it
---   -> fire Steal/Pick/Take ProximityPrompt
---   -> teleport back to own base
---   -> wait for the NEW Lucky Block UID to appear in Inventory
+--   -> activate cloak
+--   -> root.CFrame = box.part.CFrame * CFrame.new(0, 3, 4)
+--   -> zero AssemblyLinearVelocity / AssemblyAngularVelocity
+--   -> wait 0.2
+--   -> up to 5 ProximityPrompt attempts
+--   -> confirm holdingSlime == true
+--   -> teleport to Base.Teleport + Vector3.new(0,3,0)
+--   -> wait 0.35
+--   -> confirm holdingSlime == false (deposit)
+--   -> wait 0.2
+--   -> resolve the NEW Lucky Block UID in Inventory
 --
 -- RARITY FLOW:
 -- Common -> Rare -> Epic -> Legendary -> Mythic -> Secret
@@ -61,10 +67,20 @@ local BATCH_SIZE = 10
 local WORLD_SCAN_INTERVAL = 0.08
 local NO_TARGET_RETRY_DELAY = 0.20
 
-local WORLD_TELEPORT_OFFSET = CFrame.new(0, 3, 3)
-local WORLD_TELEPORT_SETTLE = 0.06
+-- EXACT working collector pickup values.
+local PICKUP_TRIES = 5
+local PICKUP_CONFIRM_TIMEOUT = 1.5
+local DEPOSIT_TIMEOUT = 5.0
 
-local BASE_DEPOSIT_SETTLE = 0.20
+-- Exact world target offset:
+-- root.CFrame = box.part.CFrame * CFrame.new(0, 3, 4)
+local WORLD_TELEPORT_OFFSET = CFrame.new(0, 3, 4)
+local WORLD_TELEPORT_SETTLE = 0.20
+
+-- Exact collector return/deposit timing.
+local BASE_RETURN_SETTLE = 0.35
+local POST_DEPOSIT_SETTLE = 0.20
+
 local INVENTORY_CONFIRM_TIMEOUT = 4.0
 
 local STAND_TELEPORT_SETTLE = 0.04
@@ -449,86 +465,84 @@ local function toBase()
         return false
     end
 
-    local tp =
-        _G.MyPlot
-        and _G.MyPlot.Base
-        and _G.MyPlot.Base.Teleport
+    local plot = getMyPlot()
 
-    if tp and tp.WorldCFrame then
+    if not plot then
+        return false
+    end
+
+    local base =
+        plot:FindFirstChild("Base")
+
+    local tp =
+        base and base:FindFirstChild("Teleport")
+
+    if not tp then
+        return false
+    end
+
+    -- EXACT collector return mechanism.
+    if tp:IsA("Attachment") then
         r.CFrame =
             tp.WorldCFrame
             + Vector3.new(0, 3, 0)
 
-        r.AssemblyLinearVelocity =
-            Vector3.zero
+    elseif tp:IsA("BasePart") then
+        r.CFrame =
+            tp.CFrame
+            + Vector3.new(0, 3, 0)
 
-        r.AssemblyAngularVelocity =
-            Vector3.zero
-
-        return true
-    end
-
-    local plots =
-        Workspace:FindFirstChild("Plots")
-
-    if not plots then
+    else
         return false
     end
 
-    for _, plot in ipairs(plots:GetChildren()) do
-        local owner =
-            plot:FindFirstChild("owner")
+    r.AssemblyLinearVelocity =
+        Vector3.zero
 
-        if owner
-            and tostring(owner.Value) == LocalPlayer.Name
-        then
-            local base =
-                plot:FindFirstChild("Base")
+    r.AssemblyAngularVelocity =
+        Vector3.zero
 
-            local attachment =
-                base and base:FindFirstChild("Teleport")
+    return true
+end
 
-            if attachment
-                and attachment:IsA("Attachment")
-                and attachment.WorldCFrame
-            then
-                r.CFrame =
-                    attachment.WorldCFrame
-                    + Vector3.new(0, 3, 0)
+local function isHolding()
+    return
+        LocalPlayer:GetAttribute(
+            "holdingSlime"
+        ) == true
+end
 
-                r.AssemblyLinearVelocity =
-                    Vector3.zero
+local function waitPickup()
+    local timeout =
+        os.clock()
+        + PICKUP_CONFIRM_TIMEOUT
 
-                r.AssemblyAngularVelocity =
-                    Vector3.zero
-
-                return true
-            end
-
-            local basePart =
-                base
-                and (
-                    base.PrimaryPart
-                    or base:FindFirstChildWhichIsA("BasePart", true)
-                )
-
-            if basePart then
-                r.CFrame =
-                    basePart.CFrame
-                    * CFrame.new(0, 4, 0)
-
-                r.AssemblyLinearVelocity =
-                    Vector3.zero
-
-                r.AssemblyAngularVelocity =
-                    Vector3.zero
-
-                return true
-            end
+    while enabled
+        and os.clock() < timeout
+    do
+        if isHolding() then
+            return true
         end
+
+        task.wait(0.05)
     end
 
-    return false
+    return isHolding()
+end
+
+local function waitDeposit()
+    local timeout =
+        os.clock()
+        + DEPOSIT_TIMEOUT
+
+    while enabled
+        and isHolding()
+        and os.clock() < timeout
+    do
+        task.wait(0.10)
+    end
+
+    return not isHolding()
 end
 
 -- ============================================================
@@ -1150,42 +1164,42 @@ end
 -- EXACT STEAL MECHANISM FROM SUPPLIED SCRIPT
 -- ============================================================
 
-local function triggerStealPrompt(prompt)
-    if not prompt then
+local function firePrompt(prompt)
+    if not prompt
+        or not prompt.Parent
+    then
         return false
     end
 
-    local hold =
-        tonumber(prompt.HoldDuration)
-        or 0
-
+    -- Exact preferred executor path.
     if typeof(fireproximityprompt)
         == "function"
     then
-        local ok =
-            pcall(
-                fireproximityprompt,
-                prompt
-            )
+        local success =
+            pcall(function()
+                fireproximityprompt(prompt)
+            end)
 
-        if ok then
-            task.wait(hold + 0.15)
+        if success then
             return true
         end
     end
 
-    -- Executor/game fallback.
-    local ok =
-        pcall(function()
-            prompt:Trigger()
-        end)
+    -- Exact working fallback from the collector.
+    return pcall(function()
+        prompt:InputHoldBegin()
 
-    if ok then
-        task.wait(hold + 0.15)
-        return true
-    end
+        task.wait(
+            math.max(
+                tonumber(
+                    prompt.HoldDuration
+                ) or 0,
+                0.05
+            )
+        )
 
-    return false
+        prompt:InputHoldEnd()
+    end)
 end
 
 local function teleportToWorldBlock(target)
@@ -1199,9 +1213,10 @@ local function teleportToWorldBlock(target)
         return false
     end
 
+    -- EXACT working collector teleport:
     r.CFrame =
         target.part.CFrame
-        * WORLD_TELEPORT_OFFSET
+        * CFrame.new(0, 3, 4)
 
     r.AssemblyLinearVelocity =
         Vector3.zero
@@ -1209,7 +1224,8 @@ local function teleportToWorldBlock(target)
     r.AssemblyAngularVelocity =
         Vector3.zero
 
-    task.wait(WORLD_TELEPORT_SETTLE)
+    -- Exact settle before pickup attempts.
+    task.wait(0.20)
 
     return true
 end
@@ -1219,6 +1235,7 @@ local function stealOneWorldLuckyBlock(rarity)
         return nil, "stopped"
     end
 
+    -- Snapshot BEFORE stealing so we can identify the deposited box UID.
     local before =
         getInventoryLuckyUIDSet(
             rarity
@@ -1235,9 +1252,9 @@ local function stealOneWorldLuckyBlock(rarity)
 
     Status.Text =
         tostring(rarity)
-        .. " | teleporting to "
-        .. tostring(target.name)
+        .. " | box found"
 
+    -- EXACT collector sequence starts with cloak activation.
     activateCloak()
 
     if not teleportToWorldBlock(
@@ -1246,30 +1263,78 @@ local function stealOneWorldLuckyBlock(rarity)
         return nil, "teleport failed"
     end
 
-    Status.Text =
-        tostring(rarity)
-        .. " | stealing "
-        .. tostring(target.name)
+    local picked = false
 
-    local triggered =
-        triggerStealPrompt(
-            target.prompt
-        )
+    -- EXACT collector retry loop.
+    for attempt = 1, PICKUP_TRIES do
+        if not enabled then
+            return nil, "stopped"
+        end
 
-    if not triggered then
-        return nil, "prompt failed"
+        Status.Text =
+            string.format(
+                "%s | pickup attempt %d/%d",
+                rarity,
+                attempt,
+                PICKUP_TRIES
+            )
+
+        -- Never go to base until the server says we're holding it.
+        if isHolding() then
+            picked = true
+            break
+        end
+
+        -- Collector re-activates cloak on every attempt.
+        activateCloak()
+
+        -- Re-find the prompt from the still-live model each attempt.
+        local prompt =
+            target.model
+            and target.model.Parent
+            and findStealPrompt(
+                target.model
+            )
+
+        if prompt then
+            firePrompt(prompt)
+
+            -- Exact confirmation:
+            -- LocalPlayer:GetAttribute("holdingSlime") == true
+            if waitPickup() then
+                picked = true
+                break
+            end
+        end
+
+        task.wait(0.20)
     end
 
-    -- SAME deposited-steal concept:
-    -- after taking the box, go to our base so the carried object is banked.
+    if not picked
+        or not isHolding()
+    then
+        return nil, "pickup not confirmed"
+    end
+
+    -- EXACT main-loop behavior:
+    -- holdingSlime TRUE -> teleport base -> wait .35 -> waitDeposit -> .2
     Status.Text =
         tostring(rarity)
-        .. " | returning to base"
+        .. " | holding confirmed -> base"
 
-    toBase()
+    if not toBase() then
+        return nil, "base teleport failed"
+    end
 
-    task.wait(BASE_DEPOSIT_SETTLE)
+    task.wait(BASE_RETURN_SETTLE)
 
+    if not waitDeposit() then
+        return nil, "deposit not confirmed"
+    end
+
+    task.wait(POST_DEPOSIT_SETTLE)
+
+    -- After deposit is confirmed, resolve the exact new inventory UID.
     local newBox =
         waitForNewLuckyInventoryUID(
             rarity,
@@ -1281,7 +1346,7 @@ local function stealOneWorldLuckyBlock(rarity)
         return newBox, "collected"
     end
 
-    return nil, "inventory UID not confirmed"
+    return nil, "deposited but inventory UID not confirmed"
 end
 
 local function acquireWorldBatch(
