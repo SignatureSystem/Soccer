@@ -1156,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] EXACT Minimal Stealer teleport -> wait 1s -> HoldDuration=0 -> pickup -> base | NO SERVER HOP")
+print("[LuckyCollector] teleport -> wait 1s -> HoldDuration=0 -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -4497,66 +4497,32 @@ local function attemptSteal(prompt)
         return false
     end
 
-    -- Fixed first steal attempt duration.
-    local hold = 0.8
-
-    -- Manually hold the prompt for exactly 0.8 seconds so the
-    -- steal attempt duration is deterministic.
-    local ok = pcall(function()
-        prompt:InputHoldBegin()
-        task.wait(hold)
-        prompt:InputHoldEnd()
+    -- Prompt hold is globally forced to zero.
+    pcall(function()
+        prompt.HoldDuration = 0
     end)
 
-    if ok then
-        task.wait(0.10)
-        return true
-    end
-
-    -- Fallback only if manual hold fails.
+    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
-        local fired = pcall(function()
+        local ok = pcall(function()
             fireproximityprompt(prompt)
         end)
 
-        if fired then
-            task.wait(0.8)
+        if ok then
             return true
         end
     end
 
-    return false
-end
-
-
--- Extended proximity-hold retry.
--- Used ONLY when the normal steal attempt did not actually produce
--- LocalPlayer:GetAttribute("holdingSlime") == true.
-local function attemptStealExtended(prompt, extraHold)
-    if not prompt or not prompt.Parent then
-        return false
-    end
-
-    extraHold = math.max(0, tonumber(extraHold) or 0.15)
-
-    -- First attempt is fixed at 0.8s.
-    -- Retry extends that by +0.15s => 0.95s by default.
-    local hold = 0.8 + extraHold
-
+    -- Fallback.
     local ok = pcall(function()
         prompt:InputHoldBegin()
-        task.wait(hold)
         prompt:InputHoldEnd()
     end)
 
-    if not ok then
-        return false
-    end
-
-    task.wait(0.10)
-
-    return true
+    return ok
 end
+
+
 
 -- ============================================================
 -- UNIVERSAL LUCKY BOX PLACE / OPEN (ALL types)
@@ -6067,176 +6033,22 @@ task.spawn(function()
                 tostring(selectedLuckyBlockType)
                 .. " Lucky Block found - stealing..."
 
-            ------------------------------------------
-            -- EXACT TELEPORT LOGIC FROM THE
-            -- MINIMAL ALTERNATE LUCKY BLOCK STEALER
-            ------------------------------------------
-
-            activateCloak()
+            -- EXACT reference cloak step.
+            pcall(function()
+                activateCloak()
+            end)
 
             task.wait(0.2)
 
-            local r =
-                getRoot()
+            -- EXACT reference teleport:
+            -- directly under the target.
+            local root = getRoot()
 
-            if
-                not r
+            if not root
                 or not block.part
                 or not block.part.Parent
             then
-
                 luckyBlockBusy = false
-
-                task.wait(0.15)
-
-                continue
-            end
-
-            r.CFrame =
-                block.part.CFrame
-                * CFrame.new(
-                    0,
-                    -1,
-                    0
-                )
-
-            r.AssemblyLinearVelocity =
-                Vector3.zero
-
-            local bv =
-                Instance.new(
-                    "BodyVelocity"
-                )
-
-            bv.Name =
-                "LuckyFloat"
-
-            bv.Velocity =
-                Vector3.zero
-
-            bv.MaxForce =
-                Vector3.new(
-                    1e5,
-                    1e5,
-                    1e5
-                )
-
-            bv.P = 1250
-            bv.Parent = r
-
-            task.wait(0.15)
-
-            ------------------------------------------
-            -- NEW ACTION AFTER THE ORIGINAL TELEPORT
-            --
-            -- 1) stay at Lucky Block for 1 second
-            -- 2) make all prompts instant
-            -- 3) tap/pick up target
-            -- 4) return to base
-            ------------------------------------------
-
-            StatusLabel.Text =
-                tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> waiting 1s"
-
-            task.wait(1.0)
-
-            -- Exact zero-hold loop requested by user.
-            for i, v in ipairs(
-                game:GetService("Workspace"):GetDescendants()
-            ) do
-                if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0
-                end
-            end
-
-            ------------------------------------------
-            -- Prompt lookup
-            ------------------------------------------
-
-            local prompt =
-                block.prompt
-
-            if
-                (
-                    not prompt
-                    or not prompt.Parent
-                )
-                and block.model
-            then
-
-                for _, d in ipairs(
-                    block.model:GetDescendants()
-                ) do
-
-                    if
-                        d:IsA(
-                            "ProximityPrompt"
-                        )
-                        and d.Enabled
-                    then
-
-                        prompt = d
-
-                        break
-                    end
-                end
-            end
-
-            ------------------------------------------
-            -- Instant pickup
-            ------------------------------------------
-
-            if
-                prompt
-                and prompt.Parent
-            then
-
-                prompt.HoldDuration = 0
-
-                StatusLabel.Text =
-                    tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> instant pickup"
-
-                attemptSteal(prompt)
-
-                if bv and bv.Parent then
-                    bv:Destroy()
-                end
-
-                r =
-                    getRoot()
-
-                if r then
-                    r.AssemblyLinearVelocity =
-                        Vector3.zero
-                end
-
-                --------------------------------------
-                -- Return to base immediately after tap
-                --------------------------------------
-
-                teleportToBase()
-
-                totalCollected += 1
-
-                StatusLabel.Text =
-                    string.format(
-                        "Picked up #%d -> returned to base",
-                        totalCollected
-                    )
-
-            else
-
-                if bv and bv.Parent then
-                    bv:Destroy()
-                end
-
-                StatusLabel.Text =
-                    "Lucky Block prompt missing"
-            end
-
-            luckyBlockBusy = false
                 task.wait(0.15)
                 continue
             end
