@@ -1,4 +1,4 @@
--- Combined Script: JAPAN + ICONS UPDATE + ALL-100 DIRECT SPAM Auto Upgrade (NO SCAN / NO FILTERS) + FILTERED Lucky Block Collector
+-- Combined Script: JAPAN + ICONS UPDATE + ALL-AVAILABLE DYNAMIC SPAM Auto Upgrade (NO FILTERS / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
@@ -22,11 +22,12 @@ local UPGRADE_DELAY = 0.08
 local UPGRADE_SCAN = 0.20
 local MAX_LEVEL = 100
 
--- Auto Upgrade: NO SCANNING.
--- Every cycle fires Upgrade Slime for slots 1 through 100 at once.
--- The server/game decides which slots are valid and affordable.
-local UPGRADE_FIRST_SLOT = 1
-local UPGRADE_LAST_SLOT = 100
+-- Auto Upgrade: DYNAMIC ALL-AVAILABLE MODE.
+-- No fixed floor/slot limit.
+-- Every cycle reads the CURRENT placed slot IDs from Data.PlotSlimes
+-- and fires Upgrade Slime for every placed entry concurrently.
+-- If PlotSlimes is temporarily unavailable, it falls back to every
+-- current stand under MyPlot.Stands.
 local UPGRADE_SPAM_ROUNDS = 2
 local UPGRADE_SPAM_GAP = 0.05
 local UPGRADE_CYCLE_DELAY = 0.10
@@ -1517,7 +1518,7 @@ local function setUpgradeState(on)
 
     StatusLabel.Text =
         on
-        and "Auto Upgrade ON | ALL 100 slot spam"
+        and "Auto Upgrade ON | ALL available placed slots"
         or "Auto Upgrade OFF"
 end
 local function setLuckyState(on)
@@ -5134,6 +5135,69 @@ task.spawn(function()
     end
 end)
 
+-- Return every CURRENT placed stand/slot dynamically.
+-- Primary source = Data.PlotSlimes, so this automatically supports
+-- 101+, 200+, or any future number of floors/stands.
+local function getAllDynamicUpgradeSlots()
+    local slots = {}
+    local seen = {}
+
+    local function add(slotName)
+        if slotName == nil then
+            return
+        end
+
+        local name = tostring(slotName)
+
+        if name ~= "" and not seen[name] then
+            seen[name] = true
+            table.insert(slots, name)
+        end
+    end
+
+    -- Best source: only CURRENTLY placed entries.
+    local data = getData()
+
+    if data and type(data.PlotSlimes) == "table" then
+        for slotName, entry in pairs(data.PlotSlimes) do
+            if entry ~= nil then
+                add(slotName)
+            end
+        end
+    end
+
+    -- Fallback: use every currently existing stand if data is temporarily empty.
+    if #slots == 0 then
+        local plot = getMyPlot()
+        local stands = plot and plot:FindFirstChild("Stands")
+
+        if stands then
+            for _, stand in ipairs(stands:GetChildren()) do
+                if stand:IsA("Model") then
+                    add(stand.Name)
+                end
+            end
+        end
+    end
+
+    table.sort(slots, function(a, b)
+        local an = tonumber(a)
+        local bn = tonumber(b)
+
+        if an and bn then
+            return an < bn
+        elseif an then
+            return true
+        elseif bn then
+            return false
+        end
+
+        return a < b
+    end)
+
+    return slots
+end
+
 task.spawn(function()
     while true do
         if not upgradeEnabled then
@@ -5142,27 +5206,43 @@ task.spawn(function()
         end
 
         local ok, err = xpcall(function()
+            local slots =
+                getAllDynamicUpgradeSlots()
+
+            if #slots == 0 then
+                StatusLabel.Text =
+                    "Auto Upgrade | no placed slots found"
+
+                task.wait(0.15)
+                return
+            end
+
             StatusLabel.Text =
-                "Auto Upgrade | SPAM slots 1-100"
+                string.format(
+                    "Auto Upgrade | SPAM ALL %d placed slots",
+                    #slots
+                )
 
             local firedCount = 0
 
-            -- NO PlotSlimes scan.
+            -- NO fixed slot/floor limit.
             -- NO rarity/mutation filter.
             -- NO cost sorting/check.
-            -- NO max-level check.
-            -- Just fire every possible stand slot and let the game/server
-            -- accept whatever can actually be upgraded.
+            -- NO max-level pre-check.
+            --
+            -- Fire every CURRENT placed slot and let the game's
+            -- authoritative upgrade handler accept whichever entries
+            -- are actually upgradeable/affordable.
             for round = 1, UPGRADE_SPAM_ROUNDS do
                 if not upgradeEnabled then
                     break
                 end
 
-                for slot = UPGRADE_FIRST_SLOT, UPGRADE_LAST_SLOT do
+                for _, slotName in ipairs(slots) do
                     task.spawn(function()
                         local fired =
                             FireUpgradeSlot(
-                                tostring(slot)
+                                slotName
                             )
 
                         if fired then
@@ -5178,7 +5258,8 @@ task.spawn(function()
 
             StatusLabel.Text =
                 string.format(
-                    "Auto Upgrade | 1-100 spam | %d requests",
+                    "Auto Upgrade | %d dynamic slots | %d requests",
+                    #slots,
                     firedCount
                 )
 
