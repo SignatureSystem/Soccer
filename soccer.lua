@@ -5122,16 +5122,31 @@ end
 -- ============================================
 -- LOOPS
 -- ============================================
+-- AUTO COLLECT
+-- When ON, fire Collect Earnings for stand IDs "1" through "150"
+-- rapidly, then repeat the full 1-150 cycle every 5 seconds.
 task.spawn(function()
     while true do
         if collectEnabled and CollectRemote then
-            for _, pad in ipairs(getAllCollectPads()) do
-                if not collectEnabled then break end
-                pcall(function() CollectRemote:FireServer(pad.Name) end)
-                task.wait(COLLECT_INTERVAL)
+            for standId = 1, 150 do
+                if not collectEnabled then
+                    break
+                end
+
+                task.spawn(function()
+                    pcall(function()
+                        CollectRemote:FireServer(
+                            tostring(standId)
+                        )
+                    end)
+                end)
             end
+
+            -- One complete 1 -> 150 collection burst every 5 seconds.
+            task.wait(5)
+        else
+            task.wait(0.2)
         end
-        task.wait(COLLECT_SCAN)
     end
 end)
 
