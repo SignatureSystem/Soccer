@@ -9,14 +9,14 @@ local Players = game:GetService("Players")
 -- Existing prompts:
 for _, v in ipairs(workspace:GetDescendants()) do
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0
+        v.HoldDuration = 0.08.08
     end
 end
 
 -- Future prompts that replicate/spawn later:
 workspace.DescendantAdded:Connect(function(v)
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0
+        v.HoldDuration = 0.08.08
     end
 end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -6130,7 +6130,7 @@ task.spawn(function()
             -- NEW ACTION AFTER THE ORIGINAL TELEPORT
             --
             -- 1) stay at Lucky Block for 1 second
-            -- 2) make all prompts instant
+            -- 2) set all prompts to 0.08s hold
             -- 3) tap/pick up target
             -- 4) return to base
             ------------------------------------------
@@ -6146,7 +6146,7 @@ task.spawn(function()
                 game:GetService("Workspace"):GetDescendants()
             ) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0
+                    v.HoldDuration = 0.08.08
                 end
             end
 
@@ -6184,7 +6184,7 @@ task.spawn(function()
             end
 
             ------------------------------------------
-            -- Instant pickup
+            -- 0.08s pickup
             ------------------------------------------
 
             if
@@ -6192,11 +6192,11 @@ task.spawn(function()
                 and prompt.Parent
             then
 
-                prompt.HoldDuration = 0
+                prompt.HoldDuration = 0.08.08
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> instant pickup"
+                    .. " Lucky Block -> 0.08s pickup"
 
                 attemptSteal(prompt)
 
@@ -6284,7 +6284,7 @@ task.spawn(function()
             --
             -- 1) Teleport to Lucky Block (already done above)
             -- 2) Wait exactly 1 second
-            -- 3) Force ALL proximity prompts HoldDuration = 0
+            -- 3) Force ALL proximity prompts HoldDuration = 0.08
             -- 4) Instantly trigger the Lucky Block prompt / pick up
             -- 5) Return to base
             --------------------------------------------------
@@ -6301,7 +6301,7 @@ task.spawn(function()
                 game:GetService("Workspace"):GetDescendants()
             ) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0
+                    v.HoldDuration = 0.08.08
                 end
             end
 
@@ -6317,13 +6317,13 @@ task.spawn(function()
             end
 
             if prompt and prompt.Parent then
-                prompt.HoldDuration = 0
+                prompt.HoldDuration = 0.08.08
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
                     .. " Lucky Block -> picking up"
 
-                -- Instant pickup / steal.
+                -- 0.08s pickup / steal.
                 attemptSteal(prompt)
 
                 if bv and bv.Parent then
