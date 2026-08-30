@@ -1,4 +1,4 @@
--- Combined Script: JAPAN + ICONS UPDATE + BATCH-10 Auto Upgrade ALL + FILTERED Lucky Block Collector
+-- Combined Script: JAPAN + ICONS UPDATE + BATCH-10 Auto Upgrade + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
@@ -57,6 +57,8 @@ local ALL_RARITIES = {
 local ALL_MUTATIONS = {
     "Golden", "Diamond", "Rainbow", "Cursed", "Divine", "Fallen",
     "Volcanic", "Toxic", "Taco", "Cosmic", "Slimey",
+    -- Present in the new PlotStandInteractionController mutation rendering.
+    "Joker", "Stellar", "Huge",
 }
 local PICK_OPTIONS = {}
 for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
@@ -469,16 +471,18 @@ local CollectBtn   = createButton("CollectToggle", 30, "Auto Collect: OFF")
 local UpgradeBtn   = createButton("UpgradeToggle", 64, "Auto Upgrade: OFF")
 
 -- ============================================
--- LEGACY AUTO UPGRADE RARITY + MUTATION CONTROLS
--- Auto Upgrade now ignores these controls and targets ALL eligible slimes.
--- They are created for compatibility, then hidden below.
+-- AUTO UPGRADE RARITY + MUTATION FILTERS
+-- Both selections are read live by Auto Upgrade.
 
 -- Forward declaration is required because the Auto Upgrade dropdown
 -- click callbacks also close the Lucky Type dropdown, which is built
 -- slightly later in the GUI.
 local LuckyTypeDropList
 local PickupRangeDropList
--- Rarity/mutation selection no longer affects Auto Upgrade.
+-- Example:
+--   Rarity = Champions
+--   Mutation = Cosmic
+-- -> only Cosmic Champions are eligible.
 -- ============================================
 
 local UpgradeRarityDropBtn = Instance.new("TextButton")
@@ -544,27 +548,6 @@ Instance.new("UICorner", UpgradeMutationDropList).CornerRadius = UDim.new(0, 7)
 local upgradeMutationListLayout = Instance.new("UIListLayout")
 upgradeMutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 upgradeMutationListLayout.Parent = UpgradeMutationDropList
-
--- Auto Upgrade no longer uses rarity/mutation filters. Keep the legacy
--- controls hidden so the rest of this combined script can remain compatible.
-UpgradeRarityDropBtn.Visible = false
-UpgradeMutationDropBtn.Visible = false
-UpgradeRarityDropList.Visible = false
-UpgradeMutationDropList.Visible = false
-
-local UpgradeAllLabel = Instance.new("TextLabel")
-UpgradeAllLabel.Name = "UpgradeAllLabel"
-UpgradeAllLabel.Size = UDim2.new(0, 220, 0, 30)
-UpgradeAllLabel.Position = UDim2.new(0, 15, 0, 98)
-UpgradeAllLabel.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
-UpgradeAllLabel.BorderSizePixel = 0
-UpgradeAllLabel.Text = "Upgrade Target: ALL"
-UpgradeAllLabel.TextColor3 = Color3.fromRGB(150, 205, 255)
-UpgradeAllLabel.TextSize = 11
-UpgradeAllLabel.Font = Enum.Font.GothamBold
-UpgradeAllLabel.ZIndex = 50
-UpgradeAllLabel.Parent = MainFrame
-Instance.new("UICorner", UpgradeAllLabel).CornerRadius = UDim.new(0, 8)
 
 local function upgradeRarityDisplayName(value)
     return tostring(value)
@@ -1357,15 +1340,39 @@ local function FireGiftSlime(playerName, slimeUID)
     return false, 'RemoteFunction "Gift Slime" unavailable'
 end
 
--- Match the latest game's own upgrade path exactly:
--- _Lib.Network.new("Upgrade Slime", "RemoteEvent"):Fire(slotName)
--- Raw RemoteEvent is retained only as a fallback.
+-- Match the NEW live PlotStandInteractionController upgrade path exactly:
+-- _Lib.GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent"):Fire(slotName)
+-- Raw RemoteEvent and the legacy Network wrapper are retained only as fallbacks.
 local function ResolveUpgradeChannel()
     if UpgradeChannel and type(UpgradeChannel) == "table" then
         return UpgradeChannel
     end
 
-    if _Lib and _Lib.Network and typeof(_Lib.Network.new) == "function" then
+    -- NEW LIVE ROUTE:
+    -- PlotStandInteractionController creates this exact channel with
+    -- _Lib.GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent")
+    if _Lib
+        and _Lib.GameRemoteRegistry
+        and typeof(_Lib.GameRemoteRegistry.new) == "function"
+    then
+        local ok, channel = pcall(function()
+            return _Lib.GameRemoteRegistry.new(
+                "Upgrade Slime",
+                "RemoteEvent"
+            )
+        end)
+
+        if ok and channel then
+            UpgradeChannel = channel
+            return UpgradeChannel
+        end
+    end
+
+    -- Legacy compatibility only.
+    if _Lib
+        and _Lib.Network
+        and typeof(_Lib.Network.new) == "function"
+    then
         local ok, channel = pcall(function()
             return _Lib.Network.new("Upgrade Slime", "RemoteEvent")
         end)
@@ -1392,7 +1399,7 @@ local function FireUpgradeSlot(slotName)
             return true
         end
 
-        warn("[AutoUpgrade] Network wrapper failed:", err)
+        warn("[AutoUpgrade] GameRemoteRegistry wrapper failed:", err)
         UpgradeChannel = nil
     end
 
@@ -1482,7 +1489,10 @@ local function setUpgradeState(on)
     StatusLabel.Text =
         "Auto Upgrade "
         .. (on and "ON" or "OFF")
-        .. " | Target: ALL eligible slimes"
+        .. " | Rarity: "
+        .. upgradeRarityDisplayName(selectedUpgradeRarity)
+        .. " | Mutation: "
+        .. upgradeMutationDisplayName(selectedUpgradeMutation)
 end
 local function setLuckyState(on)
     luckyEnabled = on
@@ -1536,17 +1546,24 @@ UpgradeBtn.MouseButton1Click:Connect(function()
             local upgrades, stats = getPrioritizedUpgrades()
 
             print(
-                "[AutoUpgrade] ON | Target: ALL eligible slimes",
+                "[AutoUpgrade] ON | Rarity:",
+                upgradeRarityDisplayName(selectedUpgradeRarity),
+                "| Mutation:",
+                upgradeMutationDisplayName(selectedUpgradeMutation),
                 "| Route:",
-                channel and "_Lib.Network" or (remote and remote:GetFullName() or "missing"),
+                channel and "_Lib.GameRemoteRegistry" or (remote and remote:GetFullName() or "missing"),
                 "| Occupied:",
                 stats and stats.occupied or 0,
-                "| Readable/Eligible:",
+                "| Readable:",
+                stats and stats.readable or 0,
+                "| Matched:",
                 #upgrades
             )
 
             StatusLabel.Text = string.format(
-                "Upgrade ON | ALL eligible | %d ready / %d occupied",
+                "Upgrade ON | %s + %s | %d matching / %d occupied",
+                upgradeRarityDisplayName(selectedUpgradeRarity),
+                upgradeMutationDisplayName(selectedUpgradeMutation),
                 #upgrades,
                 stats and stats.occupied or 0
             )
@@ -1926,9 +1943,33 @@ local function getSlotRarityAndMutation(slotName, stand, plotSlimes, liveFolder)
                 addEventMutationName(eventMutations)
             end
 
-            if not rarity and entry.id and _Lib and _Lib.Database and _Lib.Database.Slimes then
-                local def = _Lib.Database.Slimes[entry.id] or _Lib.Database.Slimes[tostring(entry.id)]
-                if def then rarity = def.Rarity or def.rarity end
+            if not rarity and entry.id and _Lib then
+                local catalog =
+                    _Lib.SoccerGameCatalog
+                    and _Lib.SoccerGameCatalog.SoccerPlayerCatalog
+
+                local def =
+                    catalog
+                    and (
+                        catalog[entry.id]
+                        or catalog[tostring(entry.id)]
+                        or catalog[tonumber(entry.id)]
+                    )
+                    or nil
+
+                if not def
+                    and _Lib.Database
+                    and _Lib.Database.Slimes
+                then
+                    def =
+                        _Lib.Database.Slimes[entry.id]
+                        or _Lib.Database.Slimes[tostring(entry.id)]
+                        or _Lib.Database.Slimes[tonumber(entry.id)]
+                end
+
+                if def then
+                    rarity = def.Rarity or def.rarity
+                end
             end
         end
     end
@@ -2296,13 +2337,35 @@ local function getRebirthCashMultiplier(playerData)
     end
 
     local rebirth = playerData.Rebirth
+
+    -- NEW LIVE SOURCE used by PlotStandInteractionController.
+    local progression =
+        _Lib
+        and _Lib.SoccerGameCatalog
+        and _Lib.SoccerGameCatalog.RebirthProgressionTable
+
+    if progression then
+        local def =
+            progression[rebirth]
+            or progression[tostring(rebirth)]
+            or progression[tonumber(rebirth)]
+
+        if def and tonumber(def.CashMulti) then
+            return tonumber(def.CashMulti)
+        end
+    end
+
+    -- Legacy fallback.
     local rebirths =
         _Lib
         and _Lib.Database
         and _Lib.Database.Rebirths
 
     if rebirths then
-        local def = rebirths[rebirth] or rebirths[tostring(rebirth)]
+        local def =
+            rebirths[rebirth]
+            or rebirths[tostring(rebirth)]
+            or rebirths[tonumber(rebirth)]
 
         if def and tonumber(def.CashMulti) then
             return tonumber(def.CashMulti)
@@ -2317,21 +2380,44 @@ local function resolveSlimeDefinition(inventoryEntry)
         return nil
     end
 
-    local slimeId = inventoryEntry.id or inventoryEntry.Id
+    local slimeId =
+        inventoryEntry.id
+        or inventoryEntry.Id
+        or inventoryEntry.slimeId
+        or inventoryEntry.slimeID
 
-    if slimeId == nil
-        or not _Lib
-        or not _Lib.Database
-        or not _Lib.Database.Slimes
-    then
+    if slimeId == nil or not _Lib then
         return nil
     end
 
-    local db = _Lib.Database.Slimes
+    -- NEW LIVE SOURCE used directly by PlotStandInteractionController.
+    local catalog =
+        _Lib.SoccerGameCatalog
+        and _Lib.SoccerGameCatalog.SoccerPlayerCatalog
 
-    return db[slimeId]
-        or db[tostring(slimeId)]
-        or db[tonumber(slimeId)]
+    if catalog then
+        local def =
+            catalog[slimeId]
+            or catalog[tostring(slimeId)]
+            or catalog[tonumber(slimeId)]
+
+        if def then
+            return def
+        end
+    end
+
+    -- Legacy fallback.
+    local db =
+        _Lib.Database
+        and _Lib.Database.Slimes
+
+    if db then
+        return db[slimeId]
+            or db[tostring(slimeId)]
+            or db[tonumber(slimeId)]
+    end
+
+    return nil
 end
 
 local function isLuckyInventoryEntry(tool, inventoryEntry, def)
@@ -2414,63 +2500,109 @@ local function calculateOwnedSlimeEarnings(inventoryEntry, def, playerData)
     end
 
     local baseMps = getBaseProductionMPS(inventoryEntry, def)
-    local level = math.max(1, tonumber(inventoryEntry.level) or 1)
+    local level = math.max(
+        1,
+        tonumber(inventoryEntry.level)
+        or tonumber(inventoryEntry.Level)
+        or 1
+    )
     local rebirthMulti = getRebirthCashMultiplier(playerData)
 
-    local earnings = baseMps
+    -- NEW LIVE SOURCE:
+    -- PlotStandInteractionController uses GameplaySharedRegistry for
+    -- getRebirthScaledEarnings() and getItemEconomyMultiplier().
+    local registry =
+        _Lib
+        and (
+            _Lib.GameplaySharedRegistry
+            or _Lib.Shared
+        )
 
-    -- Game's own level + rebirth earnings formula.
-    if _Lib
-        and _Lib.Shared
-        and typeof(_Lib.Shared.getRebirthScaledEarnings) == "function"
+    local rebirthScaled = baseMps
+    local baseScaled = baseMps
+
+    if registry
+        and typeof(registry.getRebirthScaledEarnings) == "function"
     then
-        local ok, result = pcall(function()
-            return _Lib.Shared.getRebirthScaledEarnings(
+        local ok1, result1 = pcall(function()
+            return registry.getRebirthScaledEarnings(
                 baseMps,
                 level,
                 rebirthMulti
             )
         end)
 
-        if ok and tonumber(result) then
-            earnings = tonumber(result)
+        if ok1 and tonumber(result1) then
+            rebirthScaled = tonumber(result1)
+        end
+
+        local ok2, result2 = pcall(function()
+            return registry.getRebirthScaledEarnings(
+                baseMps,
+                level,
+                1
+            )
+        end)
+
+        if ok2 and tonumber(result2) then
+            baseScaled = tonumber(result2)
         end
     end
 
-    -- Game's own mutation calculation.
-    local mutation = inventoryEntry.mutation or "None"
-    local eventMutations = inventoryEntry.event_mutations or {}
-    local mutationMulti = 1
+    -- Exact new stand-income route:
+    -- getItemEconomyMultiplier(plotSlimeEntry)
+    -- This is preferable to manually applying only getMutationMulti because
+    -- the live game passes the complete PlotSlimes entry here.
+    local itemEconomyMultiplier = 1
 
-    if _Lib
-        and _Lib.Shared
-        and typeof(_Lib.Shared.getMutationMulti) == "function"
+    if registry
+        and typeof(registry.getItemEconomyMultiplier) == "function"
     then
         local ok, result = pcall(function()
-            return _Lib.Shared.getMutationMulti(
-                mutation,
-                eventMutations
+            return registry.getItemEconomyMultiplier(inventoryEntry)
+        end)
+
+        if ok and tonumber(result) then
+            itemEconomyMultiplier = tonumber(result)
+        end
+
+    elseif registry
+        and typeof(registry.getMutationMulti) == "function"
+    then
+        -- Compatibility fallback for older builds.
+        local ok, result = pcall(function()
+            return registry.getMutationMulti(
+                inventoryEntry.mutation
+                    or inventoryEntry.Mutation
+                    or "None",
+                inventoryEntry.event_mutations
+                    or inventoryEntry.EventMutations
+                    or {}
             )
         end)
 
         if ok and tonumber(result) then
-            mutationMulti = tonumber(result)
+            itemEconomyMultiplier = tonumber(result)
         end
     end
 
-    earnings = earnings * mutationMulti
-
-    -- These are current global/player production multipliers.
-    -- They do not change the relative order because they apply equally
-    -- to every owned slime, but applying them makes the debug Cash/s
-    -- closer to the game's current production display.
-    local inviteBonus = tonumber(playerData and playerData.InviteBonusMult) or 0
-    local friendBonus = tonumber(LocalPlayer:GetAttribute("FriendPresenceBonus")) or 0
-    local productionBonus = 1 + inviteBonus + friendBonus
+    local inviteBonus =
+        tonumber(playerData and playerData.InviteBonusMult) or 0
+    local friendBonus =
+        tonumber(LocalPlayer:GetAttribute("FriendPresenceBonus")) or 0
     local adminProductionMult =
         tonumber(workspace:GetAttribute("AdminProductionMult")) or 1
 
-    earnings = earnings * productionBonus * adminProductionMult
+    -- Mirrors PlotStandInteractionController:
+    -- (rebirthScaled + baseScaled * (invite + friend))
+    --      * itemEconomyMultiplier * AdminProductionMult
+    local earnings =
+        (
+            rebirthScaled
+            + baseScaled * (inviteBonus + friendBonus)
+        )
+        * itemEconomyMultiplier
+        * adminProductionMult
 
     earnings = tonumber(earnings) or 0
 
@@ -3066,13 +3198,49 @@ local function deactivateCloak()
 end
 
 local function getUpgradeCost(sellPrice, level)
-    if _Lib and _Lib.Shared and typeof(_Lib.Shared.getUpgradePrice) == "function" then
-        local ok, cost = pcall(_Lib.Shared.getUpgradePrice, sellPrice, level)
-        if ok and type(cost) == "number" and cost == cost and cost > 0 then return math.round(cost) end
+    local registry =
+        _Lib
+        and (
+            _Lib.GameplaySharedRegistry
+            or _Lib.Shared
+        )
+
+    -- NEW LIVE ROUTE used by PlotStandInteractionController.
+    if registry
+        and typeof(registry.getUpgradePrice) == "function"
+    then
+        local ok, cost = pcall(function()
+            return registry.getUpgradePrice(
+                sellPrice,
+                level
+            )
+        end)
+
+        if ok
+            and type(cost) == "number"
+            and cost == cost
+            and cost >= 0
+        then
+            return math.round(cost)
+        end
     end
-    if type(sellPrice) ~= "number" or type(level) ~= "number" then return math.huge end
-    local cost = sellPrice * 2 * (1.3 ^ (level - 1))
-    if cost ~= cost then return math.huge end
+
+    -- Mathematical fallback matching the previous live implementation.
+    if type(sellPrice) ~= "number"
+        or type(level) ~= "number"
+    then
+        return math.huge
+    end
+
+    local cost =
+        sellPrice
+        * 2
+        * (1.3 ^ (level - 1))
+
+    if cost ~= cost then
+        return math.huge
+    end
+
     return math.round(cost)
 end
 
@@ -3082,9 +3250,38 @@ local function getJumpUpgradePrice(currentJump)
 end
 
 local function getSlimeDef(slimeId)
-    if not slimeId or not _Lib or not _Lib.Database or not _Lib.Database.Slimes then return nil end
-    local db = _Lib.Database.Slimes
-    return db[slimeId] or db[tostring(slimeId)] or db[tonumber(slimeId)]
+    if slimeId == nil or not _Lib then
+        return nil
+    end
+
+    -- NEW LIVE SOURCE.
+    local catalog =
+        _Lib.SoccerGameCatalog
+        and _Lib.SoccerGameCatalog.SoccerPlayerCatalog
+
+    if catalog then
+        local def =
+            catalog[slimeId]
+            or catalog[tostring(slimeId)]
+            or catalog[tonumber(slimeId)]
+
+        if def then
+            return def
+        end
+    end
+
+    -- Legacy fallback.
+    local db =
+        _Lib.Database
+        and _Lib.Database.Slimes
+
+    if db then
+        return db[slimeId]
+            or db[tostring(slimeId)]
+            or db[tonumber(slimeId)]
+    end
+
+    return nil
 end
 
 local function readRarityFromBillboard(model)
@@ -3282,7 +3479,19 @@ local function getUpgradeInfoRobust(slotName, stand, suppliedData)
     local level, entry = getLiveUpgradeLevel(slotName, stand, data)
 
     local liveMaxLevel = MAX_LEVEL
-    if _Lib and _Lib.Shared and tonumber(_Lib.Shared.MAX_SLIME_LEVEL) then
+
+    -- NEW LIVE SOURCE used by PlotStandInteractionController.
+    if _Lib
+        and _Lib.GameplaySharedRegistry
+        and tonumber(_Lib.GameplaySharedRegistry.MAX_SLIME_LEVEL)
+    then
+        liveMaxLevel =
+            tonumber(_Lib.GameplaySharedRegistry.MAX_SLIME_LEVEL)
+
+    elseif _Lib
+        and _Lib.Shared
+        and tonumber(_Lib.Shared.MAX_SLIME_LEVEL)
+    then
         liveMaxLevel = tonumber(_Lib.Shared.MAX_SLIME_LEVEL)
     end
 
@@ -3397,14 +3606,39 @@ local function getUpgradeInfoRobust(slotName, stand, suppliedData)
     if type(entry) == "table" then
         currentCashPerSecond = calculateOwnedSlimeEarnings(entry, def, data)
 
-        if _Lib
-            and _Lib.Shared
-            and typeof(_Lib.Shared.getMutationMulti) == "function"
+        local registry =
+            _Lib
+            and (
+                _Lib.GameplaySharedRegistry
+                or _Lib.Shared
+            )
+
+        -- The new controller evaluates the complete PlotSlimes entry with
+        -- getItemEconomyMultiplier(). Keep this number as the effective
+        -- mutation/economy strength used for Auto Upgrade tie-breaking.
+        if registry
+            and typeof(registry.getItemEconomyMultiplier) == "function"
         then
             local okMutation, resultMutation = pcall(function()
-                return _Lib.Shared.getMutationMulti(
-                    entry.mutation or entry.Mutation or mutation or "None",
-                    entry.event_mutations or entry.EventMutations or {}
+                return registry.getItemEconomyMultiplier(entry)
+            end)
+
+            if okMutation and tonumber(resultMutation) then
+                mutationMultiplier = tonumber(resultMutation)
+            end
+
+        elseif registry
+            and typeof(registry.getMutationMulti) == "function"
+        then
+            local okMutation, resultMutation = pcall(function()
+                return registry.getMutationMulti(
+                    entry.mutation
+                        or entry.Mutation
+                        or mutation
+                        or "None",
+                    entry.event_mutations
+                        or entry.EventMutations
+                        or {}
                 )
             end)
 
@@ -3421,12 +3655,34 @@ local function getUpgradeInfoRobust(slotName, stand, suppliedData)
         }
         currentCashPerSecond = calculateOwnedSlimeEarnings(syntheticEntry, def, data)
 
-        if _Lib
-            and _Lib.Shared
-            and typeof(_Lib.Shared.getMutationMulti) == "function"
+        local registry =
+            _Lib
+            and (
+                _Lib.GameplaySharedRegistry
+                or _Lib.Shared
+            )
+
+        if registry
+            and typeof(registry.getItemEconomyMultiplier) == "function"
         then
             local okMutation, resultMutation = pcall(function()
-                return _Lib.Shared.getMutationMulti(mutation or "None", {})
+                return registry.getItemEconomyMultiplier(
+                    syntheticEntry
+                )
+            end)
+
+            if okMutation and tonumber(resultMutation) then
+                mutationMultiplier = tonumber(resultMutation)
+            end
+
+        elseif registry
+            and typeof(registry.getMutationMulti) == "function"
+        then
+            local okMutation, resultMutation = pcall(function()
+                return registry.getMutationMulti(
+                    mutation or "None",
+                    {}
+                )
             end)
 
             if okMutation and tonumber(resultMutation) then
@@ -3452,10 +3708,26 @@ local function getUpgradeInfoRobust(slotName, stand, suppliedData)
     }
 end
 
--- Auto Upgrade now targets EVERY readable, non-maxed occupied slime.
--- Rarity and mutation are intentionally ignored here.
-local function candidateIsUpgradeEligible(info)
-    return info ~= nil
+local function candidateMatchesUpgradeFilters(info)
+    if not info then return false end
+
+    if selectedUpgradeRarity ~= "All" then
+        local candidateRarity =
+            string.lower(normalizeUpgradeRarity(info.rarity))
+        local wantedRarity =
+            string.lower(normalizeUpgradeRarity(selectedUpgradeRarity))
+
+        if candidateRarity ~= wantedRarity then
+            return false
+        end
+    end
+
+    return upgradeMutationMatches(
+        selectedUpgradeMutation,
+        info.mutation,
+        info.hasEventMutation,
+        info.eventMutationNames
+    )
 end
 
 getPrioritizedUpgrades = function()
@@ -3490,7 +3762,7 @@ getPrioritizedUpgrades = function()
                 local info, reason = getUpgradeInfoRobust(slotName, stand, data)
                 if info then
                     stats.readable += 1
-                    if candidateIsUpgradeEligible(info) then
+                    if candidateMatchesUpgradeFilters(info) then
                         stats.matched += 1
                         table.insert(list, info)
                     end
@@ -3505,9 +3777,30 @@ getPrioritizedUpgrades = function()
         local aCost = tonumber(a.cost)
         local bCost = tonumber(b.cost)
 
-        -- No rarity/mutation priority: process all eligible slimes.
-        -- Cheapest next upgrade first so the available cash can cover as many
-        -- different slimes as possible before the next rescan.
+        -- Special priority only when Mutation dropdown = All:
+        --   1) Higher CURRENT cash/s first
+        --   2) Stronger effective mutation multiplier first
+        --   3) Lower next-upgrade cost first
+        -- This keeps a high mutation ahead only when it is actually producing
+        -- more cash than weaker mutations, exactly as requested.
+        if tostring(selectedUpgradeMutation) == "All" then
+            local aCash = tonumber(a.currentCashPerSecond) or 0
+            local bCash = tonumber(b.currentCashPerSecond) or 0
+
+            if aCash ~= bCash then
+                return aCash > bCash
+            end
+
+            local aMutationMulti = tonumber(a.mutationMultiplier) or 1
+            local bMutationMulti = tonumber(b.mutationMultiplier) or 1
+
+            if aMutationMulti ~= bMutationMulti then
+                return aMutationMulti > bMutationMulti
+            end
+        end
+
+        -- For a specifically selected mutation, preserve the old cheapest-first
+        -- behavior.  For Mutation=All this is the third tie-breaker above.
         if aCost and bCost and aCost ~= bCost then
             return aCost < bCost
         elseif aCost and not bCost then
@@ -4702,11 +4995,22 @@ task.spawn(function()
     while true do
         if upgradeEnabled then
             local ok, err = xpcall(function()
+                local rarityAtDecision = selectedUpgradeRarity
+                local mutationAtDecision = selectedUpgradeMutation
+
                 local upgrades, stats = getPrioritizedUpgrades()
+
+                if rarityAtDecision ~= selectedUpgradeRarity
+                    or mutationAtDecision ~= selectedUpgradeMutation
+                then
+                    return
+                end
 
                 if #upgrades == 0 then
                     StatusLabel.Text = string.format(
-                        "Upgrade ON | ALL eligible | ready 0 | occupied %d/read %d/max %d",
+                        "Upgrade ON | %s + %s | matched 0 | occupied %d/read %d/max %d",
+                        upgradeRarityDisplayName(rarityAtDecision),
+                        upgradeMutationDisplayName(mutationAtDecision),
                         tonumber(stats.occupied) or 0,
                         tonumber(stats.readable) or 0,
                         tonumber(stats.maxed) or 0
@@ -4742,7 +5046,7 @@ task.spawn(function()
                 if #batch == 0 then
                     local first = upgrades[1]
                     StatusLabel.Text = string.format(
-                        "Upgrade ON | %d eligible | no affordable batch | first $%s | cash $%s",
+                        "Upgrade ON | %d match | no affordable batch | first $%s | cash $%s",
                         #upgrades,
                         tostring(first and first.cost and math.floor(first.cost) or "?"),
                         tostring(math.floor(cash))
@@ -4752,8 +5056,10 @@ task.spawn(function()
                 end
 
                 StatusLabel.Text = string.format(
-                    "Batch upgrading %d/10 | ALL eligible | %d ready",
+                    "Batch upgrading %d/10 | %s + %s | %d matching",
                     #batch,
+                    upgradeRarityDisplayName(rarityAtDecision),
+                    upgradeMutationDisplayName(mutationAtDecision),
                     #upgrades
                 )
 
@@ -4761,8 +5067,9 @@ task.spawn(function()
                 print(
                     "[AutoUpgrade] BATCH",
                     #batch,
-                    "| Target: ALL eligible",
-                    "| Ready:", #upgrades
+                    "| Rarity:", rarityAtDecision,
+                    "| Mutation:", mutationAtDecision,
+                    "| Matches:", #upgrades
                 )
 
                 for i, candidate in ipairs(batch) do
@@ -4812,7 +5119,7 @@ task.spawn(function()
                 end
 
                 StatusLabel.Text = string.format(
-                    "Batch fired %d | confirmed %d | %d eligible",
+                    "Batch fired %d | confirmed %d | %d matching",
                     #batch,
                     succeeded,
                     #upgrades
