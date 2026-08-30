@@ -9,14 +9,14 @@ local Players = game:GetService("Players")
 -- Existing prompts:
 for _, v in ipairs(workspace:GetDescendants()) do
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0
+        v.HoldDuration = 0.09
     end
 end
 
 -- Future prompts that replicate/spawn later:
 workspace.DescendantAdded:Connect(function(v)
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0
+        v.HoldDuration = 0.09
     end
 end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -1156,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] teleport -> wait 1s -> HoldDuration=0 -> pickup -> base | NO SERVER HOP")
+print("[LuckyCollector] global HoldDuration=0.09 | exact teleport -> immediate zero-hold pass -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -6092,26 +6092,21 @@ task.spawn(function()
             end
 
             --------------------------------------------------
-            -- WAIT 1S -> ZERO HOLD -> PICKUP -> BASE
+            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
             --
-            -- 1) Teleport to Lucky Block (already done above)
-            -- 2) Wait exactly 1 second
-            -- 3) Force ALL proximity prompts HoldDuration = 0
-            -- 4) Instantly trigger the Lucky Block prompt / pick up
-            -- 5) Return to base
+            -- Exact reference teleport already completed above.
+            -- Immediately after arriving underneath the target:
+            -- 1) Force ALL current proximity prompts HoldDuration = 0
+            -- 2) Trigger the Lucky Block prompt / pick up
+            -- 3) Return to base
             --------------------------------------------------
 
             StatusLabel.Text =
                 tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> waiting 1s"
+                .. " Lucky Block -> zero hold + pickup"
 
-            -- Stay at the Lucky Block for 1 full second first.
-            task.wait(1.0)
-
-            -- Run the exact requested zero-hold pass AFTER the 1-second wait.
-            for _, v in ipairs(
-                game:GetService("Workspace"):GetDescendants()
-            ) do
+            -- Exact loop requested by user, run immediately after teleport.
+            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
                 if v.ClassName == "ProximityPrompt" then
                     v.HoldDuration = 0
                 end
