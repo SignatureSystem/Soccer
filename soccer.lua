@@ -1156,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] INSTANT TAP | teleport -> steal -> base | HoldDuration=0 | NO SERVER HOP")
+print("[LuckyCollector] teleport -> wait 1s -> HoldDuration=0 -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -6092,12 +6092,30 @@ task.spawn(function()
             end
 
             --------------------------------------------------
-            -- INSTANT TAP STEAL FLOW
+            -- WAIT 1S -> ZERO HOLD -> PICKUP -> BASE
             --
             -- 1) Teleport to Lucky Block (already done above)
-            -- 2) Tap the ProximityPrompt instantly
-            -- 3) Return to base immediately
+            -- 2) Wait exactly 1 second
+            -- 3) Force ALL proximity prompts HoldDuration = 0
+            -- 4) Instantly trigger the Lucky Block prompt / pick up
+            -- 5) Return to base
             --------------------------------------------------
+
+            StatusLabel.Text =
+                tostring(selectedLuckyBlockType)
+                .. " Lucky Block -> waiting 1s"
+
+            -- Stay at the Lucky Block for 1 full second first.
+            task.wait(1.0)
+
+            -- Run the exact requested zero-hold pass AFTER the 1-second wait.
+            for _, v in ipairs(
+                game:GetService("Workspace"):GetDescendants()
+            ) do
+                if v.ClassName == "ProximityPrompt" then
+                    v.HoldDuration = 0
+                end
+            end
 
             local prompt = block.prompt
 
@@ -6111,17 +6129,15 @@ task.spawn(function()
             end
 
             if prompt and prompt.Parent then
-                pcall(function()
-                    prompt.HoldDuration = 0
-                end)
+                prompt.HoldDuration = 0
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> instant steal"
+                    .. " Lucky Block -> picking up"
 
+                -- Instant pickup / steal.
                 attemptSteal(prompt)
 
-                -- Remove float immediately after tapping.
                 if bv and bv.Parent then
                     bv:Destroy()
                 end
@@ -6132,15 +6148,14 @@ task.spawn(function()
                     root.AssemblyLinearVelocity = Vector3.zero
                 end
 
-                -- Exact requested flow:
-                -- TELEPORT -> STEAL -> RETURN TO BASE
+                -- Return immediately after the pickup tap.
                 teleportToBase()
 
                 totalCollected += 1
 
                 StatusLabel.Text =
                     string.format(
-                        "Instant steal #%d -> returned to base",
+                        "Picked up #%d -> returned to base",
                         totalCollected
                     )
             else
