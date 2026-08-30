@@ -1,0 +1,343 @@
+-- ============================================================
+-- SIMPLE AUTO UPGRADE - VERIFIED AGAINST CURRENT GAME FILES
+-- LOWEST NEXT-UPGRADE COST FIRST
+-- ONE GUI BUTTON ONLY
+-- ============================================================
+
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+
+local player = Players.LocalPlayer
+
+-- Same startup condition used by PlotStandInteractionController
+repeat
+    task.wait()
+until _G._loaded == true
+    and _G.MyPlot
+    and _G._Lib
+
+local Lib = _G._Lib
+local MyPlot = _G.MyPlot
+local Stands = MyPlot:WaitForChild("Stands")
+
+-- Current game's exact upgrade channel:
+-- PlotStandInteractionController:
+-- GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent")
+local UpgradeRemote = Lib.GameRemoteRegistry.new(
+    "Upgrade Slime",
+    "RemoteEvent"
+)
+
+local enabled = false
+
+-- Stop an older copy of this exact script.
+local RUN_TOKEN = {}
+_G.__SimpleLowestCostUpgrade = RUN_TOKEN
+
+local function running()
+    return _G.__SimpleLowestCostUpgrade == RUN_TOKEN
+end
+
+-- ============================================================
+-- GUI - ONE BUTTON ONLY
+-- ============================================================
+
+pcall(function()
+    local old = CoreGui:FindFirstChild("SimpleLowestCostUpgradeGUI")
+    if old then
+        old:Destroy()
+    end
+end)
+
+pcall(function()
+    local pg = player:FindFirstChild("PlayerGui")
+    local old = pg and pg:FindFirstChild("SimpleLowestCostUpgradeGUI")
+    if old then
+        old:Destroy()
+    end
+end)
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "SimpleLowestCostUpgradeGUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+
+local ok = pcall(function()
+    gui.Parent = CoreGui
+end)
+
+if not ok then
+    gui.Parent = player:WaitForChild("PlayerGui")
+end
+
+local button = Instance.new("TextButton")
+button.Name = "AutoUpgradeButton"
+button.Size = UDim2.new(0, 220, 0, 48)
+button.Position = UDim2.new(0, 20, 0.5, -24)
+button.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+button.BorderSizePixel = 0
+button.Text = "Auto Upgrade: OFF"
+button.TextColor3 = Color3.fromRGB(255, 100, 100)
+button.TextSize = 15
+button.Font = Enum.Font.GothamBold
+button.Active = true
+button.Draggable = true
+button.Parent = gui
+
+Instance.new("UICorner", button).CornerRadius = UDim.new(0, 9)
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(90, 90, 110)
+stroke.Thickness = 1.5
+stroke.Parent = button
+
+local function updateButton()
+    if enabled then
+        button.Text = "Auto Upgrade: ON"
+        button.TextColor3 = Color3.fromRGB(100, 255, 135)
+        button.BackgroundColor3 = Color3.fromRGB(30, 65, 42)
+    else
+        button.Text = "Auto Upgrade: OFF"
+        button.TextColor3 = Color3.fromRGB(255, 100, 100)
+        button.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    end
+end
+
+button.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    updateButton()
+end)
+
+-- ============================================================
+-- GAME DATA
+-- ============================================================
+
+local function getData()
+    local okData, data = pcall(function()
+        return Lib.Data:Get()
+    end)
+
+    if okData then
+        return data
+    end
+
+    return nil
+end
+
+local function getCatalogDefinition(id)
+    local catalog =
+        Lib.SoccerGameCatalog
+        and Lib.SoccerGameCatalog.SoccerPlayerCatalog
+
+    if type(catalog) ~= "table" or id == nil then
+        return nil
+    end
+
+    return catalog[id]
+        or catalog[tostring(id)]
+        or catalog[tonumber(id)]
+end
+
+local function getLiveLevel(slotName, entry)
+    local stand = Stands:FindFirstChild(tostring(slotName))
+
+    -- PlotStandInteractionController writes the current level
+    -- onto the Stand's "level" attribute.
+    local standLevel =
+        stand and tonumber(stand:GetAttribute("level"))
+
+    if standLevel then
+        return standLevel
+    end
+
+    if type(entry) == "table" then
+        return tonumber(entry.level) or 1
+    end
+
+    return 1
+end
+
+local function buildUpgradeList()
+    local data = getData()
+
+    if not data or type(data.PlotSlimes) ~= "table" then
+        return {}, data
+    end
+
+    local shared = Lib.GameplaySharedRegistry
+
+    if not shared
+        or typeof(shared.getUpgradePrice) ~= "function"
+    then
+        return {}, data
+    end
+
+    local maxLevel =
+        tonumber(shared.MAX_SLIME_LEVEL)
+        or 100
+
+    local list = {}
+
+    for slotName, entry in pairs(data.PlotSlimes) do
+        if type(entry) == "table"
+            and entry.id ~= nil
+        then
+            local def = getCatalogDefinition(entry.id)
+
+            -- PlotStandInteractionController only creates Upgrade
+            -- controls for normal players, never Lucky Blocks.
+            if def
+                and tostring(def.Type or "Normal") ~= "Lucky Block"
+            then
+                local level =
+                    getLiveLevel(slotName, entry)
+
+                if level < maxLevel then
+                    local sellPrice =
+                        tonumber(def.SellPrice)
+
+                    if sellPrice and sellPrice > 0 then
+                        local okPrice, price =
+                            pcall(function()
+                                return shared.getUpgradePrice(
+                                    sellPrice,
+                                    level
+                                )
+                            end)
+
+                        price =
+                            okPrice
+                            and tonumber(price)
+                            or nil
+
+                        if price and price >= 0 then
+                            table.insert(list, {
+                                slot = tostring(slotName),
+                                level = level,
+                                cost = price,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- LOWEST CURRENT NEXT-UPGRADE COST FIRST.
+    table.sort(list, function(a, b)
+        if a.cost ~= b.cost then
+            return a.cost < b.cost
+        end
+
+        if a.level ~= b.level then
+            return a.level < b.level
+        end
+
+        return
+            (tonumber(a.slot) or math.huge)
+            <
+            (tonumber(b.slot) or math.huge)
+    end)
+
+    return list, data
+end
+
+local function waitForUpgrade(candidate)
+    local beforeLevel =
+        tonumber(candidate.level)
+        or 1
+
+    local timeout =
+        os.clock() + 0.8
+
+    while running()
+        and enabled
+        and os.clock() < timeout
+    do
+        task.wait(0.06)
+
+        local data = getData()
+        local plotSlimes =
+            data and data.PlotSlimes
+
+        local entry =
+            plotSlimes
+            and (
+                plotSlimes[candidate.slot]
+                or plotSlimes[tonumber(candidate.slot)]
+            )
+
+        if entry then
+            local currentLevel =
+                getLiveLevel(
+                    candidate.slot,
+                    entry
+                )
+
+            if currentLevel > beforeLevel then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+-- ============================================================
+-- AUTO UPGRADE LOOP
+-- ============================================================
+
+task.spawn(function()
+    while running() do
+        if not enabled then
+            task.wait(0.25)
+            continue
+        end
+
+        local upgrades, data =
+            buildUpgradeList()
+
+        if #upgrades == 0 then
+            task.wait(0.35)
+            continue
+        end
+
+        local cheapest =
+            upgrades[1]
+
+        -- PlotStandInteractionController compares upgrade price
+        -- directly with Data:Get().Cash.
+        local cash =
+            tonumber(data and data.Cash)
+            or 0
+
+        -- Because candidates are sorted cheapest-first:
+        -- if #1 is unaffordable, everything else is too.
+        if cheapest.cost > cash then
+            task.wait(0.30)
+            continue
+        end
+
+        local fired =
+            pcall(function()
+                UpgradeRemote:Fire(
+                    cheapest.slot
+                )
+            end)
+
+        if fired then
+            waitForUpgrade(cheapest)
+        end
+
+        -- The real controller uses a 0.2 s upgrade debounce.
+        -- Keep slightly above it.
+        task.wait(0.22)
+    end
+end)
+
+updateButton()
+
+print(
+    "[SimpleAutoUpgrade] VERIFIED | lowest next-upgrade cost first"
+)
