@@ -9,14 +9,14 @@ local Players = game:GetService("Players")
 -- Existing prompts:
 for _, v in ipairs(workspace:GetDescendants()) do
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0.08.08
+        v.HoldDuration = 0.08
     end
 end
 
 -- Future prompts that replicate/spawn later:
 workspace.DescendantAdded:Connect(function(v)
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0.08.08
+        v.HoldDuration = 0.08
     end
 end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -6146,7 +6146,7 @@ task.spawn(function()
                 game:GetService("Workspace"):GetDescendants()
             ) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0.08.08
+                    v.HoldDuration = 0.08
                 end
             end
 
@@ -6192,7 +6192,7 @@ task.spawn(function()
                 and prompt.Parent
             then
 
-                prompt.HoldDuration = 0.08.08
+                prompt.HoldDuration = 0.08
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
@@ -6301,7 +6301,7 @@ task.spawn(function()
                 game:GetService("Workspace"):GetDescendants()
             ) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0.08.08
+                    v.HoldDuration = 0.08
                 end
             end
 
@@ -6317,7 +6317,7 @@ task.spawn(function()
             end
 
             if prompt and prompt.Parent then
-                prompt.HoldDuration = 0.08.08
+                prompt.HoldDuration = 0.08
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
