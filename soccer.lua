@@ -1618,16 +1618,104 @@ end)
 -- ============================================
 -- HELPERS
 -- ============================================
+-- Convert the game's cash values into a plain Lua number.
+-- Some live builds expose leaderstats/UI-style compact values such as
+-- "227.01Qa" instead of a numeric Value. Auto Upgrade must NEVER compare
+-- candidate.cost against that raw string.
+local COMPACT_NUMBER_SUFFIX = {
+    K  = 1e3,
+    M  = 1e6,
+    B  = 1e9,
+    T  = 1e12,
+    Qa = 1e15,
+    Qi = 1e18,
+    Sx = 1e21,
+    Sp = 1e24,
+    Oc = 1e27,
+    No = 1e30,
+    Dc = 1e33,
+}
+
+local function numberFromGameValue(value)
+    if type(value) == "number" then
+        if value == value then
+            return value
+        end
+        return nil
+    end
+
+    if value == nil then
+        return nil
+    end
+
+    -- ValueBase fallback, if this helper is ever passed an Instance.
+    if typeof(value) == "Instance" and value:IsA("ValueBase") then
+        return numberFromGameValue(value.Value)
+    end
+
+    local textValue = tostring(value)
+    textValue = textValue
+        :gsub("%$", "")
+        :gsub(",", "")
+        :gsub("%s+", "")
+
+    if textValue == "" then
+        return nil
+    end
+
+    local direct = tonumber(textValue)
+    if direct then
+        return direct
+    end
+
+    local numText, suffix =
+        textValue:match("^([%+%-]?[%d%.]+)([%a]+)$")
+
+    local base = tonumber(numText)
+    local multiplier =
+        suffix and COMPACT_NUMBER_SUFFIX[suffix] or nil
+
+    if base and multiplier then
+        return base * multiplier
+    end
+
+    return nil
+end
+
 local function getCash()
+    -- Preferred source: exactly the same live data object used by
+    -- PlotStandInteractionController.
     if _Lib and _Lib.Data then
-        local ok, data = pcall(function() return _Lib.Data:Get() end)
-        if ok and data and type(data.Cash) == "number" then return data.Cash end
+        local ok, data = pcall(function()
+            return _Lib.Data:Get()
+        end)
+
+        if ok and data then
+            local cash = numberFromGameValue(data.Cash)
+
+            if cash ~= nil then
+                return cash
+            end
+        end
     end
+
+    -- Fallback only.  Leaderstats can be a compact string in some builds.
     local ls = LocalPlayer:FindFirstChild("leaderstats")
+
     if ls then
-        local c = ls:FindFirstChild("Cash") or ls:FindFirstChild("Money")
-        if c then return c.Value end
+        local c =
+            ls:FindFirstChild("Cash")
+            or ls:FindFirstChild("Money")
+
+        if c then
+            local cash = numberFromGameValue(c.Value)
+
+            if cash ~= nil then
+                return cash
+            end
+        end
     end
+
     return 0
 end
 
@@ -5023,7 +5111,10 @@ task.spawn(function()
                 -- Known costs reserve from the current cash budget so we do not
                 -- intentionally queue more known-cost upgrades than the player can pay.
                 -- Unknown costs are still allowed so the server remains authoritative.
-                local cash = getCash()
+                -- Force both sides of the affordability comparison to numbers.
+                -- This fixes live builds where Cash/leaderstats is formatted
+                -- as a compact string such as "227.01Qa".
+                local cash = numberFromGameValue(getCash()) or 0
                 local remainingCash = cash
                 local batch = {}
 
@@ -5032,13 +5123,20 @@ task.spawn(function()
                         break
                     end
 
-                    local candidateCost = tonumber(candidate.cost)
+                    local candidateCost =
+                        numberFromGameValue(candidate.cost)
 
-                    if not candidateCost or candidateCost <= remainingCash then
+                    if candidateCost == nil
+                        or candidateCost <= remainingCash
+                    then
                         table.insert(batch, candidate)
 
-                        if candidateCost then
-                            remainingCash = math.max(0, remainingCash - candidateCost)
+                        if candidateCost ~= nil then
+                            remainingCash =
+                                math.max(
+                                    0,
+                                    remainingCash - candidateCost
+                                )
                         end
                     end
                 end
@@ -5048,8 +5146,13 @@ task.spawn(function()
                     StatusLabel.Text = string.format(
                         "Upgrade ON | %d match | no affordable batch | first $%s | cash $%s",
                         #upgrades,
-                        tostring(first and first.cost and math.floor(first.cost) or "?"),
-                        tostring(math.floor(cash))
+                        tostring(
+                            first
+                            and numberFromGameValue(first.cost)
+                            and math.floor(numberFromGameValue(first.cost))
+                            or "?"
+                        ),
+                        tostring(math.floor(numberFromGameValue(cash) or 0))
                     )
                     task.wait(0.35)
                     return
