@@ -3379,39 +3379,35 @@ end
 -- ============================================================
 
 local function getStandPlacementCFrame(stand)
+    -- EXACT SAME stand-CFrame resolution used by Place Boxes.
     if not stand or not stand.Parent then
         return nil
     end
 
-    local part = stand.PrimaryPart
-
-    if not part then
-        local main = stand:FindFirstChild("Main")
-
-        if main then
-            if main:IsA("BasePart") then
-                part = main
-            elseif main:IsA("Model") then
-                part =
-                    main.PrimaryPart
-                    or main:FindFirstChildWhichIsA("BasePart", true)
-            end
-        end
-    end
-
-    part =
-        part
+    local part =
+        stand.PrimaryPart
+        or stand:FindFirstChild("Main")
         or stand:FindFirstChildWhichIsA("BasePart", true)
 
     if part and part:IsA("BasePart") then
-        -- A little in front/above the stand, matching the working box placer.
-        return part.CFrame * CFrame.new(0, 3, 3)
+        return part.CFrame
+    end
+
+    if part and part:IsA("Model") then
+        local sub =
+            part.PrimaryPart
+            or part:FindFirstChildWhichIsA("BasePart", true)
+
+        if sub then
+            return sub.CFrame
+        end
     end
 
     return nil
 end
 
 local function teleportBesideStand(stand)
+    -- EXACT SAME movement style used by Place Boxes.
     local char = LocalPlayer.Character
     local root =
         char
@@ -3423,9 +3419,14 @@ local function teleportBesideStand(stand)
         return false, "stand/root unavailable"
     end
 
-    root.CFrame = cf
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
+    root.CFrame =
+        cf * CFrame.new(0, 3, 3)
+
+    root.AssemblyLinearVelocity =
+        Vector3.zero
+
+    root.AssemblyAngularVelocity =
+        Vector3.zero
 
     return true
 end
@@ -3457,8 +3458,6 @@ local function isUIDPlacedInSlot(slotName, uid)
         return tostring(placedUID) == tostring(uid)
     end
 
-    -- Some builds do not replicate UID on PlotSlimes immediately.
-    -- If the slot became occupied, treat that as placement confirmation.
     return true
 end
 
@@ -3474,74 +3473,79 @@ local function placeToolAtSlot(remote, tool, slot, uid)
         return false, "tool unavailable"
     end
 
-    if not slot or not slot.name then
-        return false, "slot unavailable"
+    if not slot
+        or not slot.name
+        or not slot.stand
+    then
+        return false, "slot/stand unavailable"
     end
 
-    -- Make sure the exact player is equipped first.
+    -- Keep the exact slime UID equipped.
     if not equipTool(tool) then
         return false, "equip failed"
     end
 
-    -- Current server placement is proximity-sensitive.
-    local moved, moveErr =
-        teleportBesideStand(slot.stand)
-
-    if not moved then
-        return false, moveErr
-    end
-
-    -- Allow the server to observe the new character position.
-    task.wait(0.08)
-
     local lastErr = nil
 
-    -- A few short retries handle replication/ping without changing order.
-    for attempt = 1, 4 do
-        local fired, fireErr = pcall(function()
-            remote:FireServer(
-                tostring(slot.name),
-                uid
-            )
-        end)
+    -- BOX-STYLE PLACE FLOW:
+    --
+    -- 1. Teleport to exact target stand.
+    -- 2. Tiny server-position settle.
+    -- 3. Fire Place Slime(slotName, slimeUID).
+    -- 4. Confirm PlotSlimes.
+    -- 5. Retry beside the SAME stand if server replication was late.
+    for attempt = 1, 5 do
+        local moved, moveErr =
+            teleportBesideStand(slot.stand)
+
+        if not moved then
+            return false, moveErr
+        end
+
+        -- Same tiny settle used by the working Place Boxes mechanism.
+        task.wait(0.04)
+
+        local fired, fireErr =
+            pcall(function()
+                remote:FireServer(
+                    tostring(slot.name),
+                    uid
+                )
+            end)
 
         if not fired then
             lastErr = fireErr
         end
 
-        local deadline = os.clock() + 0.40
+        local deadline =
+            os.clock() + 0.45
 
         while os.clock() < deadline do
-            if isUIDPlacedInSlot(slot.name, uid) then
+            if isUIDPlacedInSlot(
+                slot.name,
+                uid
+            ) then
                 return true, attempt
-            end
-
-            -- Tool leaving Character/Backpack is another strong success signal.
-            if tool
-                and (
-                    not tool.Parent
-                    or (
-                        tool.Parent ~= LocalPlayer.Character
-                        and tool.Parent ~= LocalPlayer:FindFirstChild("Backpack")
-                    )
-                )
-            then
-                task.wait(0.05)
-
-                if isUIDPlacedInSlot(slot.name, uid) then
-                    return true, attempt
-                end
             end
 
             task.wait(0.05)
         end
 
-        -- Stay beside the same stand before retrying.
-        teleportBesideStand(slot.stand)
-        task.wait(0.05)
+        -- Keep exact tool equipped if the server rejected due to a late
+        -- position/equip replication update.
+        if tool
+            and tool.Parent
+            and tool.Parent ~= LocalPlayer.Character
+        then
+            equipTool(tool)
+        end
+
+        task.wait(0.04)
     end
 
-    return false, lastErr or "server did not confirm placement"
+    return false,
+        lastErr
+        or "server did not confirm box-style placement"
 end
 
 local function findCloakTool()
@@ -5226,7 +5230,7 @@ PlaceBtn.MouseButton1Click:Connect(function()
 
         print("====================================================")
 
-        PlaceBtn.Text = "Placing highest current cash..."
+        PlaceBtn.Text = "Teleport + placing..."
         local placed = 0
 
         for i = 1, total do
@@ -5264,7 +5268,7 @@ PlaceBtn.MouseButton1Click:Connect(function()
                         placed += 1
 
                         StatusLabel.Text = string.format(
-                            "Placed #%d/%d | %.2f cash/s -> slot %s",
+                            "TP + Placed #%d/%d | %.2f cash/s -> slot %s",
                             i,
                             total,
                             tonumber(rankedEntry.value) or 0,
