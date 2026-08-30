@@ -236,7 +236,7 @@ local Status = Instance.new("TextLabel")
 Status.Size = UDim2.new(1, -20, 0, 59)
 Status.Position = UDim2.new(0, 10, 0, 70)
 Status.BackgroundTransparency = 1
-Status.Text = "Ready | 10 per rarity | finish batch before next"
+Status.Text = "Ready | count NEW inventory UIDs | strict rarity cycle"
 Status.TextColor3 = Color3.fromRGB(185, 185, 200)
 Status.TextSize = 10
 Status.Font = Enum.Font.Gotham
@@ -1354,75 +1354,111 @@ local function stealOneWorldLuckyBlock(rarity)
     return nil, "deposited but inventory UID not confirmed"
 end
 
-local function acquireWorldBatch(
-    rarity,
-    wantedCount
-)
+local function acquireWorldBatch(rarity, wantedCount)
     wantedCount =
         math.max(
             1,
             math.min(
                 BATCH_SIZE,
-                tonumber(wantedCount)
-                    or BATCH_SIZE
+                tonumber(wantedCount) or BATCH_SIZE
             )
         )
 
+    -- IMPORTANT:
+    -- Count ONLY genuinely NEW matching Lucky Block UIDs that appear in
+    -- Data.Inventory AFTER this rarity batch begins.
+    --
+    -- Pickup attempts, prompt fires, holdingSlime transitions, etc.
+    -- DO NOT increment the batch count.
+    local baseline =
+        getInventoryLuckyUIDSet(rarity)
+
+    local collectedByUID = {}
     local collected = {}
-    local seen = {}
 
-    local emptyScans = 0
-    local maxEmptyScans = 5
+    local function refreshNewInventoryBoxes()
+        local boxes =
+            getInventoryLuckyBoxesByRarity(rarity)
 
-    while enabled
-        and #collected < wantedCount
-    do
-        local box, reason =
-            stealOneWorldLuckyBlock(
-                rarity
-            )
+        for _, box in ipairs(boxes) do
+            local key = tostring(box.uid)
 
-        if box then
-            local key =
-                tostring(box.uid)
-
-            if not seen[key] then
-                seen[key] = true
+            if not baseline[key]
+                and not collectedByUID[key]
+            then
+                collectedByUID[key] = box
                 table.insert(collected, box)
+
+                Status.Text =
+                    string.format(
+                        "%s | NEW inventory boxes %d/%d",
+                        rarity,
+                        #collected,
+                        wantedCount
+                    )
+
+                if #collected >= wantedCount then
+                    break
+                end
             end
+        end
+    end
 
-            emptyScans = 0
+    refreshNewInventoryBoxes()
 
+    -- DO NOT leave this rarity until the requested number of NEW inventory
+    -- UIDs really exists. If the world currently has none, simply wait/scan.
+    while enabled and #collected < wantedCount do
+        refreshNewInventoryBoxes()
+
+        if #collected >= wantedCount then
+            break
+        end
+
+        local target =
+            findWorldLuckyBlock(rarity)
+
+        if not target then
             Status.Text =
                 string.format(
-                    "%s | stolen %d/%d",
+                    "%s | NEW inventory %d/%d | waiting for world box...",
                     rarity,
                     #collected,
                     wantedCount
                 )
 
-            task.wait(BETWEEN_STEALS)
+            task.wait(NO_TARGET_RETRY_DELAY)
         else
-            emptyScans += 1
-
+            -- The steal helper may succeed/fail/retry internally, but its
+            -- return value DOES NOT count toward the batch.
+            --
+            -- After it finishes, we re-read Inventory and count only actual
+            -- newly-added UIDs.
             Status.Text =
                 string.format(
-                    "%s | no target (%d/%d) | %s",
+                    "%s | NEW inventory %d/%d | stealing...",
                     rarity,
-                    emptyScans,
-                    maxEmptyScans,
-                    tostring(reason)
+                    #collected,
+                    wantedCount
                 )
 
-            if emptyScans >= maxEmptyScans then
-                break
-            end
+            pcall(function()
+                stealOneWorldLuckyBlock(rarity)
+            end)
 
-            task.wait(NO_TARGET_RETRY_DELAY)
+            task.wait(0.05)
+            refreshNewInventoryBoxes()
         end
     end
 
-    return collected
+    -- Return EXACTLY the first wantedCount newly-added boxes.
+    local result = {}
+
+    for i = 1, math.min(wantedCount, #collected) do
+        table.insert(result, collected[i])
+    end
+
+    return result
 end
 
 -- ============================================================
@@ -1635,140 +1671,285 @@ end
 -- PLACE STOLEN BOX
 -- ============================================================
 
-local function placeLuckyBox(box, slot)
-    if not enabled then
-        return false, "stopped"
-    end
+local function placeLuckyBoxBatchSoccerStyle(boxes)
+    -- EXACT mechanism copied from the working soccer.lua Place Boxes flow:
+    --   * bind collected UIDs to currently-free stands
+    --   * repeatedly check PlotSlimes for confirmed UIDs
+    --   * cycle through remaining stands
+    --   * teleport to current stand at CFrame * CFrame.new(0,3,3)
+    --   * wait 0.04
+    --   * fire current UID/slot FIRST
+    --   * spam every other remaining UID/slot while standing there
+    --   * repeat until all are confirmed or the placement phase times out
 
     if not PlaceRemote then
-        return false, "Place Slime missing"
+        return {}
     end
 
-    if not box
-        or box.uid == nil
-        or not slot
-        or not slot.stand
-    then
-        return false, "bad box/slot"
+    local slots = getAvailableSlots()
+
+    if #boxes == 0 or #slots == 0 then
+        return {}
     end
 
-    for attempt = 1, 5 do
-        if not enabled then
-            return false, "stopped"
+    local targets = {}
+    local total =
+        math.min(
+            #boxes,
+            #slots
+        )
+
+    for i = 1, total do
+        table.insert(targets, {
+            uid = boxes[i].uid,
+            box = boxes[i],
+            slot = tostring(slots[i].name),
+            stand = slots[i].stand,
+            done = false,
+        })
+    end
+
+    local deadline =
+        os.clock() + 14
+
+    local hopIndex = 1
+
+    while enabled
+        and os.clock() < deadline
+    do
+        local remainingList = {}
+        local data = getData()
+
+        for _, target in ipairs(targets) do
+            if not target.done then
+                local actualSlot =
+                    findPlacedSlotByUID(
+                        data,
+                        target.uid
+                    )
+
+                if actualSlot then
+                    target.done = true
+                    target.slot =
+                        tostring(actualSlot)
+                else
+                    table.insert(
+                        remainingList,
+                        target
+                    )
+                end
+            end
         end
 
-        if not teleportToStand(slot.stand) then
-            return false, "stand teleport failed"
+        if #remainingList == 0 then
+            break
         end
 
-        task.wait(STAND_TELEPORT_SETTLE)
+        if hopIndex > #remainingList then
+            hopIndex = 1
+        end
 
-        pcall(function()
-            PlaceRemote:FireServer(
-                tostring(slot.name),
-                box.uid
+        local current =
+            remainingList[hopIndex]
+
+        hopIndex += 1
+
+        Status.Text =
+            string.format(
+                "Placing boxes | %d remaining",
+                #remainingList
             )
-        end)
 
-        local deadline =
-            os.clock()
-            + PLACE_CONFIRM_TIMEOUT
+        if current
+            and current.stand
+        then
+            -- Exact soccer.lua stand-hop placement.
+            teleportToStand(current.stand)
 
-        while enabled
-            and os.clock() < deadline
-        do
-            local data = getData()
+            -- Server proximity settle from the working script.
+            task.wait(0.04)
 
-            local placedSlot =
-                findPlacedSlotByUID(
-                    data,
-                    box.uid
-                )
-
-            if placedSlot then
-                return true, placedSlot
+            -- Current stand pair FIRST.
+            if current.uid
+                and current.slot
+            then
+                pcall(function()
+                    PlaceRemote:FireServer(
+                        tostring(current.slot),
+                        current.uid
+                    )
+                end)
             end
 
-            task.wait(0.06)
+            -- Spam all other still-unconfirmed pairs while here.
+            for _, target in ipairs(remainingList) do
+                if target ~= current
+                    and target.uid
+                    and target.slot
+                then
+                    pcall(function()
+                        PlaceRemote:FireServer(
+                            tostring(target.slot),
+                            target.uid
+                        )
+                    end)
+                end
+            end
+        else
+            -- Same fallback as soccer.lua: if a stand ref is missing, still
+            -- spam every remaining pair.
+            for _, target in ipairs(remainingList) do
+                if target.uid
+                    and target.slot
+                then
+                    pcall(function()
+                        PlaceRemote:FireServer(
+                            tostring(target.slot),
+                            target.uid
+                        )
+                    end)
+                end
+            end
+
+            task.wait(0.05)
         end
     end
 
-    return false, "place not confirmed"
+    -- Final confirmation pass.
+    local data = getData()
+    local placedTargets = {}
+
+    for _, target in ipairs(targets) do
+        local actualSlot =
+            findPlacedSlotByUID(
+                data,
+                target.uid
+            )
+
+        if actualSlot then
+            target.done = true
+            target.slot =
+                tostring(actualSlot)
+
+            table.insert(
+                placedTargets,
+                target
+            )
+        end
+    end
+
+    return placedTargets
 end
 
 -- ============================================================
 -- OPEN BATCH
 -- ============================================================
 
-local function openBatch(targets)
-    if not OpenRemote then
-        return false
+local function getGeneratedResultForTarget(target)
+    local entry =
+        getPlacedEntryAtSlot(
+            target.slot
+        )
+
+    if type(entry) ~= "table" then
+        return nil
     end
 
-    for round = 1, OPEN_SPAM_ROUNDS do
-        if not enabled then
-            return false
-        end
+    local currentUID =
+        getEntryUID(entry)
 
-        for _, target in ipairs(targets) do
-            pcall(function()
-                OpenRemote:FireServer(
-                    tostring(target.slot)
-                )
-            end)
-        end
-
-        if round < OPEN_SPAM_ROUNDS then
-            task.wait(OPEN_SPAM_GAP)
-        end
+    if currentUID == nil then
+        return nil
     end
 
-    return true
+    -- Still the original Lucky Block => not opened yet.
+    if tostring(currentUID)
+        == tostring(target.uid or target.boxUID)
+    then
+        return nil
+    end
+
+    local def =
+        resolveSlimeDefinition(entry)
+
+    -- Only accept the final generated normal player/slime.
+    if isLuckyInventoryEntry(
+        entry,
+        def
+    ) then
+        return nil
+    end
+
+    return {
+        slot = tostring(target.slot),
+        uid = currentUID,
+        entry = entry,
+        def = def,
+    }
 end
 
-local function waitForGeneratedSlime(target)
-    local deadline =
-        os.clock()
-        + GENERATED_WAIT_TIMEOUT
+local function openAllPlacedBoxesAndWait(targets)
+    if not OpenRemote or #targets == 0 then
+        return {}
+    end
 
-    while enabled
-        and os.clock() < deadline
-    do
-        local entry =
-            getPlacedEntryAtSlot(
-                target.slot
-            )
+    local generatedBySlot = {}
+    local generated = {}
 
-        if type(entry) == "table" then
-            local currentUID =
-                getEntryUID(entry)
+    -- Strictly remain in OPEN phase until every placed batch box has
+    -- transformed into a generated slime, unless the user switches OFF.
+    while enabled do
+        local remaining = 0
 
-            if currentUID ~= nil
-                and tostring(currentUID)
-                    ~= tostring(target.boxUID)
-            then
-                local def =
-                    resolveSlimeDefinition(entry)
+        for _, target in ipairs(targets) do
+            local slotKey =
+                tostring(target.slot)
 
-                if not isLuckyInventoryEntry(
-                    entry,
-                    def
-                ) then
-                    return {
-                        slot =
-                            tostring(target.slot),
-                        uid = currentUID,
-                        entry = entry,
-                        def = def,
-                    }
+            if not generatedBySlot[slotKey] then
+                local result =
+                    getGeneratedResultForTarget(
+                        target
+                    )
+
+                if result then
+                    generatedBySlot[slotKey] = result
+                    table.insert(generated, result)
+                else
+                    remaining += 1
                 end
             end
         end
 
-        task.wait(0.08)
+        if remaining == 0 then
+            break
+        end
+
+        Status.Text =
+            string.format(
+                "Opening boxes | %d remaining",
+                remaining
+            )
+
+        -- The game's real open call is simply:
+        -- Open Lucky Block(slotName)
+        -- Burst ALL still-pending batch slots.
+        for _, target in ipairs(targets) do
+            local slotKey =
+                tostring(target.slot)
+
+            if not generatedBySlot[slotKey] then
+                pcall(function()
+                    OpenRemote:FireServer(
+                        slotKey
+                    )
+                end)
+            end
+        end
+
+        task.wait(0.05)
     end
 
-    return nil
+    return generated
 end
 
 -- ============================================================
@@ -1918,14 +2099,118 @@ local function sellGeneratedUID(uid)
     return not inventoryHasUID(uid)
 end
 
+local function pickupAllGeneratedStrict(generated)
+    local remaining = {}
+
+    for _, result in ipairs(generated) do
+        remaining[tostring(result.uid)] = result
+    end
+
+    while enabled and next(remaining) ~= nil do
+        local remainingCount = 0
+
+        for _ in pairs(remaining) do
+            remainingCount += 1
+        end
+
+        Status.Text =
+            string.format(
+                "Picking opened slimes | %d remaining",
+                remainingCount
+            )
+
+        for key, result in pairs(remaining) do
+            if inventoryHasUID(result.uid) then
+                remaining[key] = nil
+            else
+                local plot = getMyPlot()
+                local stands =
+                    plot and plot:FindFirstChild("Stands")
+
+                local stand =
+                    stands
+                    and stands:FindFirstChild(
+                        tostring(result.slot)
+                    )
+
+                if stand then
+                    teleportToStand(stand)
+                    task.wait(0.04)
+                end
+
+                pcall(function()
+                    PickupRemote:FireServer(
+                        tostring(result.slot)
+                    )
+                end)
+            end
+        end
+
+        task.wait(0.05)
+    end
+
+    local picked = {}
+
+    for _, result in ipairs(generated) do
+        if inventoryHasUID(result.uid) then
+            table.insert(picked, result)
+        end
+    end
+
+    return picked
+end
+
+local function sellAllGeneratedStrict(generated)
+    local remaining = {}
+
+    for _, result in ipairs(generated) do
+        remaining[tostring(result.uid)] = result
+    end
+
+    while enabled and next(remaining) ~= nil do
+        local remainingCount = 0
+
+        for _ in pairs(remaining) do
+            remainingCount += 1
+        end
+
+        Status.Text =
+            string.format(
+                "Selling opened slimes | %d remaining",
+                remainingCount
+            )
+
+        for key, result in pairs(remaining) do
+            if not inventoryHasUID(result.uid) then
+                remaining[key] = nil
+            else
+                pcall(function()
+                    SellRemote:FireServer(
+                        result.uid
+                    )
+                end)
+            end
+        end
+
+        task.wait(0.05)
+    end
+
+    local sold = 0
+
+    for _, result in ipairs(generated) do
+        if not inventoryHasUID(result.uid) then
+            sold += 1
+        end
+    end
+
+    return sold
+end
+
 -- ============================================================
 -- ONE BATCH
 -- ============================================================
 
-local function processBatch(
-    rarity,
-    wantedCount
-)
+local function processBatch(rarity, wantedCount)
     wantedCount =
         math.max(
             1,
@@ -1936,13 +2221,13 @@ local function processBatch(
             )
         )
 
-    -- --------------------------------------------------------
-    -- STEP 1: STEAL WORLD BOXES
-    -- --------------------------------------------------------
+    -- ========================================================
+    -- PHASE 1: COLLECT EXACTLY N NEW INVENTORY LUCKY BOX UIDs
+    -- ========================================================
 
     Status.Text =
         string.format(
-            "%s | stealing up to %d world boxes",
+            "%s | collecting NEW inventory boxes 0/%d",
             rarity,
             wantedCount
         )
@@ -1953,190 +2238,180 @@ local function processBatch(
             wantedCount
         )
 
-    if #boxes == 0 then
+    if not enabled then
         return 0, 0, 0
     end
 
-    -- --------------------------------------------------------
-    -- STEP 2: FIND FREE STANDS
-    -- --------------------------------------------------------
-
-    local freeSlots =
-        getAvailableSlots()
-
-    if #freeSlots == 0 then
-        Status.Text =
-            rarity
-            .. " | stolen "
-            .. tostring(#boxes)
-            .. " but no free stands"
-
+    -- acquireWorldBatch does not return early based on pickup attempts.
+    -- It only returns after wantedCount NEW matching UIDs exist.
+    if #boxes < wantedCount then
         return 0, 0, 0
     end
 
-    local count =
-        math.min(
+    Status.Text =
+        string.format(
+            "%s | inventory confirmed %d/%d | placing...",
+            rarity,
             #boxes,
-            #freeSlots
+            wantedCount
         )
 
-    local targets = {}
+    -- ========================================================
+    -- PHASE 2: PLACE EXACT COLLECTED BOXES USING soccer.lua
+    --          HOP + CURRENT-FIRST + SPAM-REST MECHANISM
+    -- ========================================================
 
-    -- --------------------------------------------------------
-    -- STEP 3: PLACE STOLEN BOX UIDS
-    -- --------------------------------------------------------
+    local placedTargets =
+        placeLuckyBoxBatchSoccerStyle(
+            boxes
+        )
 
-    for i = 1, count do
-        if not enabled then
-            break
-        end
+    if not enabled then
+        return #placedTargets, 0, 0
+    end
 
-        local box = boxes[i]
-        local slot = freeSlots[i]
-
+    -- Do not open until ALL newly-collected batch boxes are confirmed placed.
+    -- If the 14-second placement pass missed any, repeat the exact same
+    -- soccer.lua style placement on the still-inventory boxes.
+    while enabled
+        and #placedTargets < #boxes
+    do
         Status.Text =
             string.format(
-                "%s | placing stolen box %d/%d",
+                "%s | placed %d/%d | retrying placement...",
                 rarity,
-                i,
-                count
+                #placedTargets,
+                #boxes
             )
 
-        local placed, placedSlot =
-            placeLuckyBox(
-                box,
-                slot
-            )
+        -- Build the still-unplaced NEW boxes only.
+        local data = getData()
+        local retryBoxes = {}
 
-        if placed then
-            table.insert(
-                targets,
-                {
-                    rarity = rarity,
-                    boxUID = box.uid,
-                    boxName = box.name,
-                    slot =
-                        tostring(
-                            placedSlot
-                            or slot.name
-                        ),
-                    stand = slot.stand,
-                }
+        for _, box in ipairs(boxes) do
+            if not findPlacedSlotByUID(
+                data,
+                box.uid
+            ) then
+                table.insert(
+                    retryBoxes,
+                    box
+                )
+            end
+        end
+
+        if #retryBoxes > 0 then
+            placeLuckyBoxBatchSoccerStyle(
+                retryBoxes
             )
         end
 
-        task.wait(BETWEEN_BOXES)
+        -- Reconstruct all confirmed targets from the exact new box UID set.
+        data = getData()
+        placedTargets = {}
+
+        local plot = getMyPlot()
+        local stands =
+            plot and plot:FindFirstChild("Stands")
+
+        for _, box in ipairs(boxes) do
+            local slotName =
+                findPlacedSlotByUID(
+                    data,
+                    box.uid
+                )
+
+            if slotName then
+                table.insert(
+                    placedTargets,
+                    {
+                        uid = box.uid,
+                        box = box,
+                        slot = tostring(slotName),
+                        stand =
+                            stands
+                            and stands:FindFirstChild(
+                                tostring(slotName)
+                            ),
+                        done = true,
+                    }
+                )
+            end
+        end
+
+        task.wait(0.05)
     end
 
-    if #targets == 0 then
-        return 0, 0, 0
+    if not enabled then
+        return #placedTargets, 0, 0
     end
 
-    -- --------------------------------------------------------
-    -- STEP 4: OPEN
-    -- --------------------------------------------------------
+    -- ========================================================
+    -- PHASE 3: OPEN ALL BATCH BOXES
+    -- ========================================================
 
     Status.Text =
         string.format(
-            "%s | opening %d",
+            "%s | all %d placed | opening ALL...",
             rarity,
-            #targets
+            #placedTargets
         )
 
-    openBatch(targets)
+    local generated =
+        openAllPlacedBoxesAndWait(
+            placedTargets
+        )
 
-    -- --------------------------------------------------------
-    -- STEP 5: EXACT 1 SECOND WAIT
-    -- --------------------------------------------------------
+    if not enabled then
+        return #placedTargets, #generated, 0
+    end
 
+    -- User-requested pause AFTER all are opened/generated.
     Status.Text =
         string.format(
-            "%s | opened %d | waiting 1 second",
+            "%s | all %d opened | wait 1s",
             rarity,
-            #targets
+            #generated
         )
 
     task.wait(OPEN_TO_SELL_DELAY)
 
-    -- --------------------------------------------------------
-    -- STEP 6: CAPTURE GENERATED SLIMES
-    -- --------------------------------------------------------
+    -- ========================================================
+    -- PHASE 4: PICK ALL GENERATED SLIMES INTO INVENTORY
+    -- ========================================================
 
-    local generated = {}
+    local picked =
+        pickupAllGeneratedStrict(
+            generated
+        )
 
-    for _, target in ipairs(targets) do
-        if not enabled then
-            break
-        end
-
-        local result =
-            waitForGeneratedSlime(
-                target
-            )
-
-        if result then
-            table.insert(
-                generated,
-                result
-            )
-        end
+    if not enabled then
+        return #placedTargets, #generated, 0
     end
 
-    -- --------------------------------------------------------
-    -- STEP 7: PICK GENERATED SLIMES
-    -- --------------------------------------------------------
+    -- ========================================================
+    -- PHASE 5: SELL ALL GENERATED SLIMES
+    -- ========================================================
 
-    local picked = {}
+    local sold =
+        sellAllGeneratedStrict(
+            picked
+        )
 
-    for i, result in ipairs(generated) do
-        if not enabled then
-            break
-        end
+    Status.Text =
+        string.format(
+            "%s COMPLETE | collected %d | placed %d | opened %d | sold %d",
+            rarity,
+            #boxes,
+            #placedTargets,
+            #generated,
+            sold
+        )
 
-        Status.Text =
-            string.format(
-                "%s | picking result %d/%d",
-                rarity,
-                i,
-                #generated
-            )
-
-        if pickupGenerated(result) then
-            table.insert(
-                picked,
-                result
-            )
-        end
-    end
-
-    -- --------------------------------------------------------
-    -- STEP 8: SELL ONLY THOSE GENERATED UIDS
-    -- --------------------------------------------------------
-
-    local sold = 0
-
-    for i, result in ipairs(picked) do
-        if not enabled then
-            break
-        end
-
-        Status.Text =
-            string.format(
-                "%s | selling result %d/%d",
-                rarity,
-                i,
-                #picked
-            )
-
-        if sellGeneratedUID(
-            result.uid
-        ) then
-            sold += 1
-        end
-    end
-
+    -- processBatch RETURNS only after the sell phase is complete.
+    -- Therefore the main loop cannot start the next rarity early.
     return
-        #targets,
+        #placedTargets,
         #generated,
         sold
 end
@@ -2272,7 +2547,7 @@ print("====================================================")
 print("[LuckyBoxWorldCycle] Loaded")
 print("NO SERVER HOP")
 print("WORLD STEAL = teleport -> ProximityPrompt -> own base -> confirm UID")
-print("ONE batch per rarity | up to 10 boxes")
-print("STRICT: collect rarity -> place -> open -> wait 1s -> pick generated -> sell -> NEXT rarity")
+print("ONE batch per rarity | EXACTLY 10 NEW inventory Lucky Block UIDs")
+print("STRICT: 10 NEW inventory UIDs -> soccer.lua place hop/spam -> open ALL -> wait 1s -> pickup ALL results -> sell ALL -> NEXT rarity")
 print("Dynamic stands | NO 100-slot limit")
 print("====================================================")
