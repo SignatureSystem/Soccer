@@ -1,22 +1,47 @@
--- Lucky Box Rarity Cycle
--- Process up to 20 Lucky Blocks per rarity, 10 at a time.
+-- ============================================================
+-- LUCKY BOX RARITY CYCLE - WORLD STEAL VERSION
+-- NO SERVER HOP
+-- ============================================================
 --
--- Flow:
---   Common -> Rare -> Epic -> ... -> Alternative -> loop back to Common
+-- IMPORTANT CHANGE:
+-- Lucky Blocks are NOT expected to already be in Inventory.
+-- This script first steals/picks them from:
 --
--- For each rarity:
---   1) Select up to 10 matching Lucky Blocks from Inventory
---   2) Teleport beside each free stand and Place Slime(slot, boxUID)
---   3) Open those exact placed Lucky Blocks
---   4) Wait 1 second
---   5) Identify ONLY the new slimes generated in those batch slots
---   6) Pick up those exact generated slimes
---   7) Sell those exact inventory UIDs using "Sell Slime From Inventory"
---   8) Repeat until up to 20 boxes of the current rarity were processed
---   9) Move to the next rarity
+--     workspace.Live.Slimes
+--
+-- using the SAME ProximityPrompt mechanism as the supplied
+-- Alternate Lucky Block stealer:
+--
+--   find world Lucky Block
+--   -> teleport beside it
+--   -> fire Steal/Pick/Take ProximityPrompt
+--   -> teleport back to own base
+--   -> wait for the NEW Lucky Block UID to appear in Inventory
+--
+-- RARITY FLOW:
+-- Common -> Rare -> Epic -> Legendary -> Mythic -> Secret
+-- -> Slime God -> Divine -> Exclusive -> LIMITED -> OG
+-- -> Champions -> Spain -> Icons -> Japan -> Alternative
+-- -> back to Common
+--
+-- PER RARITY:
+--   * process up to 20 boxes total
+--   * acquire/place/open in batches of 10
+--
+-- EACH BATCH:
+--   1) Steal up to 10 world Lucky Blocks of the current rarity
+--   2) Confirm their new Inventory UIDs
+--   3) Teleport to free stands and place those exact UIDs
+--   4) Open those exact slots
+--   5) Wait 1 second
+--   6) Detect only newly-created slimes in those opened slots
+--   7) Pick those generated slimes into Inventory
+--   8) Sell those exact generated UIDs using
+--          Sell Slime From Inventory
 --
 -- Dynamic stands: NO fixed 100-slot limit.
--- Server remains authoritative for placement/open/pickup/sell.
+-- Server authoritative.
+-- ============================================================
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -33,7 +58,16 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 local BOXES_PER_RARITY = 20
 local BATCH_SIZE = 10
 
-local TELEPORT_SETTLE = 0.04
+local WORLD_SCAN_INTERVAL = 0.08
+local NO_TARGET_RETRY_DELAY = 0.20
+
+local WORLD_TELEPORT_OFFSET = CFrame.new(0, 3, 3)
+local WORLD_TELEPORT_SETTLE = 0.06
+
+local BASE_DEPOSIT_SETTLE = 0.20
+local INVENTORY_CONFIRM_TIMEOUT = 4.0
+
+local STAND_TELEPORT_SETTLE = 0.04
 local PLACE_CONFIRM_TIMEOUT = 2.0
 
 local OPEN_SPAM_ROUNDS = 8
@@ -45,12 +79,16 @@ local GENERATED_WAIT_TIMEOUT = 4.0
 local PICKUP_CONFIRM_TIMEOUT = 3.0
 local SELL_CONFIRM_TIMEOUT = 4.0
 
+local BETWEEN_STEALS = 0.05
 local BETWEEN_BOXES = 0.03
 local BETWEEN_BATCHES = 0.20
-local EMPTY_RARITY_DELAY = 0.20
+local EMPTY_RARITY_DELAY = 0.30
 local FULL_LOOP_DELAY = 1.0
 
--- Least Lucky Block sell value -> highest.
+-- If an invis/cloak Tool exists, use it before stealing.
+local USE_CLOAK_IF_AVAILABLE = true
+
+-- Lowest Lucky Block value -> highest.
 local RARITY_ORDER = {
     "Common",
     "Rare",
@@ -89,6 +127,11 @@ local LUCKY_BLOCK_VALUES = {
     Alternative = 9000000,
 }
 
+-- Known exact live target from the supplied stealer.
+local KNOWN_IDS = {
+    Alternative = "1263",
+}
+
 -- ============================================================
 -- STATE
 -- ============================================================
@@ -105,23 +148,19 @@ local PickupRemote = nil
 local SellRemote = nil
 
 -- ============================================================
--- SMALL GUI
+-- GUI
 -- ============================================================
 
 pcall(function()
-    local old = PlayerGui and PlayerGui:FindFirstChild("LuckyBoxRarityCycleGui")
-    if old then
-        old:Destroy()
-    end
+    local old = PlayerGui and PlayerGui:FindFirstChild("LuckyBoxWorldCycleGui")
+    if old then old:Destroy() end
 
-    old = CoreGui:FindFirstChild("LuckyBoxRarityCycleGui")
-    if old then
-        old:Destroy()
-    end
+    old = CoreGui:FindFirstChild("LuckyBoxWorldCycleGui")
+    if old then old:Destroy() end
 end)
 
 local Gui = Instance.new("ScreenGui")
-Gui.Name = "LuckyBoxRarityCycleGui"
+Gui.Name = "LuckyBoxWorldCycleGui"
 Gui.ResetOnSpawn = false
 Gui.DisplayOrder = 1100
 Gui.IgnoreGuiInset = true
@@ -136,8 +175,8 @@ if not Gui.Parent then
 end
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 260, 0, 118)
-Frame.Position = UDim2.new(0, 20, 0.5, -59)
+Frame.Size = UDim2.new(0, 285, 0, 135)
+Frame.Position = UDim2.new(0, 20, 0.5, -67)
 Frame.BackgroundColor3 = Color3.fromRGB(24, 24, 31)
 Frame.BorderSizePixel = 0
 Frame.Active = true
@@ -154,7 +193,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -12, 0, 24)
 Title.Position = UDim2.new(0, 6, 0, 4)
 Title.BackgroundTransparency = 1
-Title.Text = "Lucky Box Rarity Cycle"
+Title.Text = "Lucky Box World Steal Cycle"
 Title.TextColor3 = Color3.fromRGB(245, 245, 250)
 Title.TextSize = 13
 Title.Font = Enum.Font.GothamBold
@@ -170,14 +209,13 @@ Toggle.TextColor3 = Color3.fromRGB(255, 110, 120)
 Toggle.TextSize = 12
 Toggle.Font = Enum.Font.GothamBold
 Toggle.Parent = Frame
-
 Instance.new("UICorner", Toggle).CornerRadius = UDim.new(0, 7)
 
 local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -20, 0, 42)
+Status.Size = UDim2.new(1, -20, 0, 59)
 Status.Position = UDim2.new(0, 10, 0, 70)
 Status.BackgroundTransparency = 1
-Status.Text = "Ready | 20 per rarity | batches of 10"
+Status.Text = "Ready | world steal -> place -> open -> sell"
 Status.TextColor3 = Color3.fromRGB(185, 185, 200)
 Status.TextSize = 10
 Status.Font = Enum.Font.Gotham
@@ -204,34 +242,69 @@ Toggle.MouseButton1Click:Connect(function()
 
     if enabled then
         Status.Text =
-            "Starting from "
+            "Starting world steal: "
             .. tostring(RARITY_ORDER[currentRarityIndex])
-            .. "..."
     else
         Status.Text = "Stopped"
     end
 end)
 
 -- ============================================================
--- REMOTE / DATA HELPERS
+-- BASIC HELPERS
 -- ============================================================
 
+local function root()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function normalizeRarity(value)
+    local s = tostring(value or "")
+
+    if s == "" then
+        return ""
+    end
+
+    local lower = s:lower()
+
+    if lower == "player god"
+        or lower == "soccer god"
+        or lower == "slime god"
+    then
+        return "Slime God"
+    end
+
+    if lower == "limited" then
+        return "LIMITED"
+    end
+
+    if lower == "alternative"
+        or lower == "alternate"
+    then
+        return "Alternative"
+    end
+
+    for _, rarity in ipairs(RARITY_ORDER) do
+        if lower == rarity:lower() then
+            return rarity
+        end
+    end
+
+    return s
+end
+
 local function resolveExactRemoteEvent(name)
+    local shared =
+        ReplicatedStorage:FindFirstChild("SharedModules")
+
+    local network =
+        shared and shared:FindFirstChild("Network")
+
+    local remotes =
+        network and network:FindFirstChild("Remotes")
+
     local direct =
-        ReplicatedStorage
-        :FindFirstChild("SharedModules")
-
-    direct =
-        direct
-        and direct:FindFirstChild("Network")
-
-    direct =
-        direct
-        and direct:FindFirstChild("Remotes")
-
-    direct =
-        direct
-        and direct:FindFirstChild(name)
+        remotes and remotes:FindFirstChild(name)
 
     if direct and direct:IsA("RemoteEvent") then
         return direct
@@ -330,6 +403,7 @@ local function getMyPlot()
     end
 
     local plots = Workspace:FindFirstChild("Plots")
+
     if not plots then
         return nil
     end
@@ -365,7 +439,184 @@ local function getEntryUID(entry)
 end
 
 -- ============================================================
--- CURRENT CATALOG / LUCKY BLOCK IDENTIFICATION
+-- OWN BASE TELEPORT - FROM SUPPLIED STEALER
+-- ============================================================
+
+local function toBase()
+    local r = root()
+
+    if not r then
+        return false
+    end
+
+    local tp =
+        _G.MyPlot
+        and _G.MyPlot.Base
+        and _G.MyPlot.Base.Teleport
+
+    if tp and tp.WorldCFrame then
+        r.CFrame =
+            tp.WorldCFrame
+            + Vector3.new(0, 3, 0)
+
+        r.AssemblyLinearVelocity =
+            Vector3.zero
+
+        r.AssemblyAngularVelocity =
+            Vector3.zero
+
+        return true
+    end
+
+    local plots =
+        Workspace:FindFirstChild("Plots")
+
+    if not plots then
+        return false
+    end
+
+    for _, plot in ipairs(plots:GetChildren()) do
+        local owner =
+            plot:FindFirstChild("owner")
+
+        if owner
+            and tostring(owner.Value) == LocalPlayer.Name
+        then
+            local base =
+                plot:FindFirstChild("Base")
+
+            local attachment =
+                base and base:FindFirstChild("Teleport")
+
+            if attachment
+                and attachment:IsA("Attachment")
+                and attachment.WorldCFrame
+            then
+                r.CFrame =
+                    attachment.WorldCFrame
+                    + Vector3.new(0, 3, 0)
+
+                r.AssemblyLinearVelocity =
+                    Vector3.zero
+
+                r.AssemblyAngularVelocity =
+                    Vector3.zero
+
+                return true
+            end
+
+            local basePart =
+                base
+                and (
+                    base.PrimaryPart
+                    or base:FindFirstChildWhichIsA("BasePart", true)
+                )
+
+            if basePart then
+                r.CFrame =
+                    basePart.CFrame
+                    * CFrame.new(0, 4, 0)
+
+                r.AssemblyLinearVelocity =
+                    Vector3.zero
+
+                r.AssemblyAngularVelocity =
+                    Vector3.zero
+
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+-- ============================================================
+-- OPTIONAL INVIS CLOAK - SAME IDEA AS SUPPLIED STEALER
+-- ============================================================
+
+local function activateCloak()
+    if not USE_CLOAK_IF_AVAILABLE then
+        return false
+    end
+
+    local char = LocalPlayer.Character
+    local hum =
+        char and char:FindFirstChildOfClass("Humanoid")
+
+    if not hum then
+        return false
+    end
+
+    local tool = nil
+
+    for _, container in ipairs({
+        char,
+        LocalPlayer:FindFirstChild("Backpack"),
+    }) do
+        if container then
+            for _, obj in ipairs(container:GetChildren()) do
+                if obj:IsA("Tool") then
+                    local n =
+                        tostring(obj.Name):lower()
+
+                    if n:find("invis", 1, true)
+                        or n:find("cloak", 1, true)
+                    then
+                        tool = obj
+                        break
+                    end
+                end
+            end
+        end
+
+        if tool then
+            break
+        end
+    end
+
+    if not tool then
+        return false
+    end
+
+    if tool.Parent ~= char then
+        pcall(function()
+            hum:UnequipTools()
+        end)
+
+        task.wait(0.04)
+
+        pcall(function()
+            hum:EquipTool(tool)
+        end)
+
+        if tool.Parent ~= char then
+            pcall(function()
+                tool.Parent = char
+            end)
+        end
+
+        task.wait(0.08)
+    end
+
+    local canActivate =
+        tool:FindFirstChild("CanActivate")
+
+    if canActivate
+        and canActivate:IsA("BoolValue")
+    then
+        canActivate.Value = true
+    end
+
+    pcall(function()
+        tool:Activate()
+    end)
+
+    return true
+end
+
+-- ============================================================
+-- CURRENT CATALOG / INVENTORY LUCKY BLOCK HELPERS
 -- ============================================================
 
 local function resolveSlimeDefinition(entry)
@@ -385,56 +636,48 @@ local function resolveSlimeDefinition(entry)
         return nil
     end
 
-    -- Current game catalog.
-    local catalog =
+    local currentCatalog =
         _Lib
         and _Lib.SoccerGameCatalog
         and _Lib.SoccerGameCatalog.SoccerPlayerCatalog
 
-    if type(catalog) == "table" then
+    if type(currentCatalog) == "table" then
         local def =
-            catalog[id]
-            or catalog[tostring(id)]
-            or catalog[tonumber(id)]
+            currentCatalog[id]
+            or currentCatalog[tostring(id)]
+            or currentCatalog[tonumber(id)]
 
         if def then
             return def
         end
     end
 
-    -- Legacy database fallback.
-    local db =
+    local legacy =
         _Lib
         and _Lib.Database
         and _Lib.Database.Slimes
 
-    if type(db) == "table" then
+    if type(legacy) == "table" then
         return
-            db[id]
-            or db[tostring(id)]
-            or db[tonumber(id)]
+            legacy[id]
+            or legacy[tostring(id)]
+            or legacy[tonumber(id)]
     end
 
     return nil
 end
 
-local function normalizeRarity(value)
-    local rarity = tostring(value or "")
+local function hasLuckyWord(value)
+    local s = tostring(value or ""):lower()
 
-    if rarity == "Player God"
-        or rarity == "Soccer God"
-    then
-        return "Slime God"
-    end
-
-    if string.lower(rarity) == "limited" then
-        return "LIMITED"
-    end
-
-    return rarity
+    return
+        s:find("lucky block", 1, true) ~= nil
+        or s:find("lucky", 1, true) ~= nil
+        or s:find("box", 1, true) ~= nil
+        or s:find("crate", 1, true) ~= nil
 end
 
-local function isLuckyBlockEntry(entry, def)
+local function isLuckyInventoryEntry(entry, def)
     if type(entry) ~= "table" then
         return false
     end
@@ -444,37 +687,62 @@ local function isLuckyBlockEntry(entry, def)
     end
 
     if def
-        and string.lower(tostring(def.Type or ""))
+        and tostring(def.Type or ""):lower()
             == "lucky block"
     then
         return true
     end
 
-    local function hasLucky(value)
-        local s = string.lower(tostring(value or ""))
-
-        return
-            s:find("lucky block", 1, true) ~= nil
-            or s:find("lucky", 1, true) ~= nil
-            or s:find("box", 1, true) ~= nil
-            or s:find("crate", 1, true) ~= nil
-    end
-
     return
-        hasLucky(def and def.Type)
-        or hasLucky(def and def.Name)
-        or hasLucky(entry.Type)
-        or hasLucky(entry.type)
-        or hasLucky(entry.Name)
-        or hasLucky(entry.name)
+        hasLuckyWord(def and def.Type)
+        or hasLuckyWord(def and def.Name)
+        or hasLuckyWord(entry.Type)
+        or hasLuckyWord(entry.type)
+        or hasLuckyWord(entry.Name)
+        or hasLuckyWord(entry.name)
 end
 
-local function getLuckyBlockRarity(entry, def)
+local function getInventoryEntryRarity(entry, def)
     return normalizeRarity(
         (def and (def.Rarity or def.rarity))
         or entry.Rarity
         or entry.rarity
     )
+end
+
+local function getInventoryLuckyUIDSet(rarity)
+    local data = getData()
+    local inventory = data and data.Inventory
+    local set = {}
+
+    if type(inventory) ~= "table" then
+        return set
+    end
+
+    local wanted =
+        normalizeRarity(rarity):lower()
+
+    for _, entry in pairs(inventory) do
+        if type(entry) == "table" then
+            local uid = getEntryUID(entry)
+
+            if uid ~= nil then
+                local def =
+                    resolveSlimeDefinition(entry)
+
+                if isLuckyInventoryEntry(entry, def) then
+                    local r =
+                        getInventoryEntryRarity(entry, def)
+
+                    if r:lower() == wanted then
+                        set[tostring(uid)] = true
+                    end
+                end
+            end
+        end
+    end
+
+    return set
 end
 
 local function getInventoryLuckyBoxesByRarity(rarity)
@@ -488,9 +756,7 @@ local function getInventoryLuckyBoxesByRarity(rarity)
     end
 
     local wanted =
-        string.lower(
-            normalizeRarity(rarity)
-        )
+        normalizeRarity(rarity):lower()
 
     for _, entry in pairs(inventory) do
         if type(entry) == "table" then
@@ -502,16 +768,11 @@ local function getInventoryLuckyBoxesByRarity(rarity)
                 local def =
                     resolveSlimeDefinition(entry)
 
-                if isLuckyBlockEntry(entry, def) then
-                    local entryRarity =
-                        string.lower(
-                            getLuckyBlockRarity(
-                                entry,
-                                def
-                            )
-                        )
+                if isLuckyInventoryEntry(entry, def) then
+                    local r =
+                        getInventoryEntryRarity(entry, def)
 
-                    if entryRarity == wanted then
+                    if r:lower() == wanted then
                         seen[tostring(uid)] = true
 
                         table.insert(result, {
@@ -540,8 +801,562 @@ local function getInventoryLuckyBoxesByRarity(rarity)
     return result
 end
 
+local function waitForNewLuckyInventoryUID(
+    rarity,
+    beforeSet,
+    timeout
+)
+    timeout =
+        tonumber(timeout)
+        or INVENTORY_CONFIRM_TIMEOUT
+
+    local deadline =
+        os.clock() + timeout
+
+    while enabled
+        and os.clock() < deadline
+    do
+        local boxes =
+            getInventoryLuckyBoxesByRarity(
+                rarity
+            )
+
+        for _, box in ipairs(boxes) do
+            local key =
+                tostring(box.uid)
+
+            if not beforeSet[key] then
+                return box
+            end
+        end
+
+        task.wait(0.08)
+    end
+
+    return nil
+end
+
 -- ============================================================
--- DYNAMIC STANDS / OCCUPANCY
+-- WORLD LUCKY BLOCK DETECTION
+-- ============================================================
+
+local function readModelIdentifier(model)
+    if not model then
+        return nil
+    end
+
+    return
+        model:GetAttribute("ID")
+        or model:GetAttribute("Id")
+        or model:GetAttribute("id")
+        or model:GetAttribute("_RegisteredID")
+        or model:GetAttribute("RegisteredID")
+        or model:GetAttribute("LuckyBlockID")
+end
+
+local function readModelRarity(model)
+    if not model then
+        return ""
+    end
+
+    local rarity =
+        model:GetAttribute("Rarity")
+        or model:GetAttribute("_Rarity")
+        or model:GetAttribute("rarity")
+
+    if rarity ~= nil then
+        return normalizeRarity(rarity)
+    end
+
+    for _, name in ipairs({
+        "Rarity",
+        "_Rarity",
+    }) do
+        local obj =
+            model:FindFirstChild(name)
+
+        if obj and obj:IsA("ValueBase") then
+            return normalizeRarity(obj.Value)
+        end
+    end
+
+    return ""
+end
+
+local function readWorldDisplayName(model)
+    if not model then
+        return ""
+    end
+
+    local attrName =
+        model:GetAttribute("LuckyBlockName")
+        or model:GetAttribute("BlockName")
+        or model:GetAttribute("DisplayName")
+        or model:GetAttribute("Name")
+
+    if attrName ~= nil then
+        return tostring(attrName)
+    end
+
+    for _, childName in ipairs({
+        "LuckyBlockName",
+        "BlockName",
+        "DisplayName",
+    }) do
+        local obj =
+            model:FindFirstChild(childName)
+
+        if obj and obj:IsA("ValueBase") then
+            return tostring(obj.Value)
+        end
+    end
+
+    return tostring(model.Name or "")
+end
+
+local function modelNameMatchesRarity(model, rarity)
+    local wanted =
+        normalizeRarity(rarity)
+
+    local lowerWanted =
+        wanted:lower()
+
+    local allText =
+        (
+            tostring(model.Name or "")
+            .. " "
+            .. readWorldDisplayName(model)
+        ):lower()
+
+    if wanted == "Alternative" then
+        return
+            allText:find("alternative", 1, true) ~= nil
+            or allText:find("alternate lucky block", 1, true) ~= nil
+    end
+
+    if wanted == "Slime God" then
+        return
+            allText:find("slime god", 1, true) ~= nil
+            or allText:find("player god", 1, true) ~= nil
+            or allText:find("soccer god", 1, true) ~= nil
+    end
+
+    if wanted == "LIMITED" then
+        return
+            allText:find("limited", 1, true) ~= nil
+    end
+
+    return
+        allText:find(
+            lowerWanted,
+            1,
+            true
+        ) ~= nil
+end
+
+local function isWorldLuckyBlockOfRarity(model, rarity)
+    if not model
+        or not model:IsA("Model")
+    then
+        return false
+    end
+
+    if model:GetAttribute("Carrying") then
+        return false
+    end
+
+    local wanted =
+        normalizeRarity(rarity)
+
+    -- 1) Exact rarity attrs/values.
+    local modelRarity =
+        readModelRarity(model)
+
+    if modelRarity ~= ""
+        and modelRarity:lower()
+            == wanted:lower()
+    then
+        return true
+    end
+
+    -- 2) Known exact ID when available.
+    local knownID =
+        KNOWN_IDS[wanted]
+
+    if knownID then
+        local id =
+            readModelIdentifier(model)
+
+        if id
+            and tostring(id)
+                == tostring(knownID)
+        then
+            return true
+        end
+
+        for _, childName in ipairs({
+            "ID",
+            "Id",
+            "RegisteredID",
+            "_RegisteredID",
+            "LuckyBlockID",
+        }) do
+            local obj =
+                model:FindFirstChild(childName)
+
+            if obj
+                and obj:IsA("ValueBase")
+                and tostring(obj.Value)
+                    == tostring(knownID)
+            then
+                return true
+            end
+        end
+    end
+
+    -- 3) Model/display name.
+    if modelNameMatchesRarity(
+        model,
+        wanted
+    ) then
+        -- Keep this constrained to objects that look like Lucky Blocks.
+        local text =
+            (
+                tostring(model.Name or "")
+                .. " "
+                .. readWorldDisplayName(model)
+            ):lower()
+
+        if text:find("lucky", 1, true)
+            or text:find("block", 1, true)
+            or model:GetAttribute("LuckyBlockID")
+            or model:GetAttribute("Rarity")
+        then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function findStealPrompt(model)
+    if not model then
+        return nil
+    end
+
+    local fallback = nil
+
+    for _, obj in ipairs(model:GetDescendants()) do
+        if obj:IsA("ProximityPrompt")
+            and obj.Enabled
+        then
+            fallback = fallback or obj
+
+            local action =
+                tostring(
+                    obj.ActionText or ""
+                ):lower()
+
+            if action:find("steal", 1, true)
+                or action:find("pick", 1, true)
+                or action:find("take", 1, true)
+                or action:find("grab", 1, true)
+                or action:find("collect", 1, true)
+            then
+                return obj
+            end
+        end
+    end
+
+    return fallback
+end
+
+local function getWorldBlockPart(model)
+    if not model then
+        return nil
+    end
+
+    return
+        model.PrimaryPart
+        or model:FindFirstChildWhichIsA(
+            "BasePart",
+            true
+        )
+end
+
+local function findWorldLuckyBlock(rarity)
+    local live =
+        Workspace:FindFirstChild("Live")
+
+    local folder =
+        live and live:FindFirstChild("Slimes")
+
+    if not folder then
+        return nil
+    end
+
+    local best = nil
+    local bestDistance = math.huge
+
+    local r = root()
+
+    for _, model in ipairs(folder:GetChildren()) do
+        if isWorldLuckyBlockOfRarity(
+            model,
+            rarity
+        ) then
+            local part =
+                getWorldBlockPart(model)
+
+            local prompt =
+                findStealPrompt(model)
+
+            if part and prompt then
+                local dist = 0
+
+                if r then
+                    dist =
+                        (
+                            r.Position
+                            - part.Position
+                        ).Magnitude
+                end
+
+                if not best
+                    or dist < bestDistance
+                then
+                    bestDistance = dist
+
+                    best = {
+                        model = model,
+                        part = part,
+                        prompt = prompt,
+                        rarity =
+                            normalizeRarity(rarity),
+                        id =
+                            readModelIdentifier(model),
+                        name =
+                            readWorldDisplayName(model),
+                    }
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+-- ============================================================
+-- EXACT STEAL MECHANISM FROM SUPPLIED SCRIPT
+-- ============================================================
+
+local function triggerStealPrompt(prompt)
+    if not prompt then
+        return false
+    end
+
+    local hold =
+        tonumber(prompt.HoldDuration)
+        or 0
+
+    if typeof(fireproximityprompt)
+        == "function"
+    then
+        local ok =
+            pcall(
+                fireproximityprompt,
+                prompt
+            )
+
+        if ok then
+            task.wait(hold + 0.15)
+            return true
+        end
+    end
+
+    -- Executor/game fallback.
+    local ok =
+        pcall(function()
+            prompt:Trigger()
+        end)
+
+    if ok then
+        task.wait(hold + 0.15)
+        return true
+    end
+
+    return false
+end
+
+local function teleportToWorldBlock(target)
+    local r = root()
+
+    if not r
+        or not target
+        or not target.part
+        or not target.part.Parent
+    then
+        return false
+    end
+
+    r.CFrame =
+        target.part.CFrame
+        * WORLD_TELEPORT_OFFSET
+
+    r.AssemblyLinearVelocity =
+        Vector3.zero
+
+    r.AssemblyAngularVelocity =
+        Vector3.zero
+
+    task.wait(WORLD_TELEPORT_SETTLE)
+
+    return true
+end
+
+local function stealOneWorldLuckyBlock(rarity)
+    if not enabled then
+        return nil, "stopped"
+    end
+
+    local before =
+        getInventoryLuckyUIDSet(
+            rarity
+        )
+
+    local target =
+        findWorldLuckyBlock(
+            rarity
+        )
+
+    if not target then
+        return nil, "no world target"
+    end
+
+    Status.Text =
+        tostring(rarity)
+        .. " | teleporting to "
+        .. tostring(target.name)
+
+    activateCloak()
+
+    if not teleportToWorldBlock(
+        target
+    ) then
+        return nil, "teleport failed"
+    end
+
+    Status.Text =
+        tostring(rarity)
+        .. " | stealing "
+        .. tostring(target.name)
+
+    local triggered =
+        triggerStealPrompt(
+            target.prompt
+        )
+
+    if not triggered then
+        return nil, "prompt failed"
+    end
+
+    -- SAME deposited-steal concept:
+    -- after taking the box, go to our base so the carried object is banked.
+    Status.Text =
+        tostring(rarity)
+        .. " | returning to base"
+
+    toBase()
+
+    task.wait(BASE_DEPOSIT_SETTLE)
+
+    local newBox =
+        waitForNewLuckyInventoryUID(
+            rarity,
+            before,
+            INVENTORY_CONFIRM_TIMEOUT
+        )
+
+    if newBox then
+        return newBox, "collected"
+    end
+
+    return nil, "inventory UID not confirmed"
+end
+
+local function acquireWorldBatch(
+    rarity,
+    wantedCount
+)
+    wantedCount =
+        math.max(
+            1,
+            math.min(
+                BATCH_SIZE,
+                tonumber(wantedCount)
+                    or BATCH_SIZE
+            )
+        )
+
+    local collected = {}
+    local seen = {}
+
+    local emptyScans = 0
+    local maxEmptyScans = 5
+
+    while enabled
+        and #collected < wantedCount
+    do
+        local box, reason =
+            stealOneWorldLuckyBlock(
+                rarity
+            )
+
+        if box then
+            local key =
+                tostring(box.uid)
+
+            if not seen[key] then
+                seen[key] = true
+                table.insert(collected, box)
+            end
+
+            emptyScans = 0
+
+            Status.Text =
+                string.format(
+                    "%s | stolen %d/%d",
+                    rarity,
+                    #collected,
+                    wantedCount
+                )
+
+            task.wait(BETWEEN_STEALS)
+        else
+            emptyScans += 1
+
+            Status.Text =
+                string.format(
+                    "%s | no target (%d/%d) | %s",
+                    rarity,
+                    emptyScans,
+                    maxEmptyScans,
+                    tostring(reason)
+                )
+
+            if emptyScans >= maxEmptyScans then
+                break
+            end
+
+            task.wait(NO_TARGET_RETRY_DELAY)
+        end
+    end
+
+    return collected
+end
+
+-- ============================================================
+-- DYNAMIC FREE STANDS
 -- ============================================================
 
 local function isOccupied(
@@ -592,13 +1407,15 @@ local function isOccupied(
 end
 
 local function getAvailableSlots()
-    -- NO fixed numeric limit.
+    -- NO 1-100 cap.
     local data = getData()
+
     local plotSlimes =
         (data and data.PlotSlimes)
         or {}
 
     local plot = getMyPlot()
+
     local liveFolder =
         getPlayerSlimesFolder()
 
@@ -650,7 +1467,6 @@ local function getAvailableSlots()
 end
 
 local function getStandCFrame(stand)
-    -- Same mechanism as the working Place Boxes script.
     if not stand or not stand.Parent then
         return nil
     end
@@ -684,28 +1500,20 @@ local function getStandCFrame(stand)
 end
 
 local function teleportToStand(stand)
-    local char = LocalPlayer.Character
+    local r = root()
+    local cf = getStandCFrame(stand)
 
-    local root =
-        char
-        and char:FindFirstChild(
-            "HumanoidRootPart"
-        )
-
-    local cf =
-        getStandCFrame(stand)
-
-    if not root or not cf then
+    if not r or not cf then
         return false
     end
 
-    root.CFrame =
+    r.CFrame =
         cf * CFrame.new(0, 3, 3)
 
-    root.AssemblyLinearVelocity =
+    r.AssemblyLinearVelocity =
         Vector3.zero
 
-    root.AssemblyAngularVelocity =
+    r.AssemblyAngularVelocity =
         Vector3.zero
 
     return true
@@ -754,7 +1562,7 @@ local function getPlacedEntryAtSlot(slotName)
 end
 
 -- ============================================================
--- PLACE BOX
+-- PLACE STOLEN BOX
 -- ============================================================
 
 local function placeLuckyBox(box, slot)
@@ -774,18 +1582,16 @@ local function placeLuckyBox(box, slot)
         return false, "bad box/slot"
     end
 
-    -- Exact working box mechanism:
-    -- teleport near target stand -> tiny settle -> fire slot + UID.
     for attempt = 1, 5 do
         if not enabled then
             return false, "stopped"
         end
 
         if not teleportToStand(slot.stand) then
-            return false, "teleport failed"
+            return false, "stand teleport failed"
         end
 
-        task.wait(TELEPORT_SETTLE)
+        task.wait(STAND_TELEPORT_SETTLE)
 
         pcall(function()
             PlaceRemote:FireServer(
@@ -867,7 +1673,6 @@ local function waitForGeneratedSlime(target)
             local currentUID =
                 getEntryUID(entry)
 
-            -- The opened result must not be the original box UID.
             if currentUID ~= nil
                 and tostring(currentUID)
                     ~= tostring(target.boxUID)
@@ -875,7 +1680,7 @@ local function waitForGeneratedSlime(target)
                 local def =
                     resolveSlimeDefinition(entry)
 
-                if not isLuckyBlockEntry(
+                if not isLuckyInventoryEntry(
                     entry,
                     def
                 ) then
@@ -897,7 +1702,7 @@ local function waitForGeneratedSlime(target)
 end
 
 -- ============================================================
--- PICK GENERATED SLIME -> INVENTORY
+-- PICK GENERATED SLIME
 -- ============================================================
 
 local function inventoryHasUID(uid)
@@ -936,6 +1741,7 @@ local function pickupGenerated(generated)
     end
 
     local plot = getMyPlot()
+
     local stands =
         plot and plot:FindFirstChild("Stands")
 
@@ -950,10 +1756,9 @@ local function pickupGenerated(generated)
             return false
         end
 
-        -- Teleport beside the exact generated slime stand for reliability.
         if stand then
             teleportToStand(stand)
-            task.wait(TELEPORT_SETTLE)
+            task.wait(STAND_TELEPORT_SETTLE)
         end
 
         pcall(function()
@@ -976,6 +1781,7 @@ local function pickupGenerated(generated)
             end
 
             local data = getData()
+
             local stillPlaced =
                 findPlacedSlotByUID(
                     data,
@@ -983,7 +1789,6 @@ local function pickupGenerated(generated)
                 )
 
             if not stillPlaced then
-                -- Allow inventory replication a short moment.
                 local small =
                     os.clock() + 0.40
 
@@ -1008,7 +1813,7 @@ local function pickupGenerated(generated)
 end
 
 -- ============================================================
--- SELL EXACT GENERATED INVENTORY UID
+-- SELL EXACT GENERATED UID
 -- ============================================================
 
 local function sellGeneratedUID(uid)
@@ -1044,7 +1849,7 @@ local function sellGeneratedUID(uid)
 end
 
 -- ============================================================
--- ONE BATCH: up to 10 boxes
+-- ONE BATCH
 -- ============================================================
 
 local function processBatch(
@@ -1061,14 +1866,30 @@ local function processBatch(
             )
         )
 
+    -- --------------------------------------------------------
+    -- STEP 1: STEAL WORLD BOXES
+    -- --------------------------------------------------------
+
+    Status.Text =
+        string.format(
+            "%s | stealing up to %d world boxes",
+            rarity,
+            wantedCount
+        )
+
     local boxes =
-        getInventoryLuckyBoxesByRarity(
-            rarity
+        acquireWorldBatch(
+            rarity,
+            wantedCount
         )
 
     if #boxes == 0 then
         return 0, 0, 0
     end
+
+    -- --------------------------------------------------------
+    -- STEP 2: FIND FREE STANDS
+    -- --------------------------------------------------------
 
     local freeSlots =
         getAvailableSlots()
@@ -1076,35 +1897,36 @@ local function processBatch(
     if #freeSlots == 0 then
         Status.Text =
             rarity
-            .. " | no free stands"
+            .. " | stolen "
+            .. tostring(#boxes)
+            .. " but no free stands"
 
         return 0, 0, 0
     end
 
     local count =
         math.min(
-            wantedCount,
             #boxes,
             #freeSlots
         )
 
     local targets = {}
 
-    -- PLACE
+    -- --------------------------------------------------------
+    -- STEP 3: PLACE STOLEN BOX UIDS
+    -- --------------------------------------------------------
+
     for i = 1, count do
         if not enabled then
             break
         end
 
-        local box =
-            boxes[i]
-
-        local slot =
-            freeSlots[i]
+        local box = boxes[i]
+        local slot = freeSlots[i]
 
         Status.Text =
             string.format(
-                "%s | placing %d/%d",
+                "%s | placing stolen box %d/%d",
                 rarity,
                 i,
                 count
@@ -1140,27 +1962,36 @@ local function processBatch(
         return 0, 0, 0
     end
 
-    -- OPEN exact batch slots
+    -- --------------------------------------------------------
+    -- STEP 4: OPEN
+    -- --------------------------------------------------------
+
     Status.Text =
         string.format(
-            "%s | opening %d boxes",
+            "%s | opening %d",
             rarity,
             #targets
         )
 
     openBatch(targets)
 
-    -- User-requested wait after opening.
+    -- --------------------------------------------------------
+    -- STEP 5: EXACT 1 SECOND WAIT
+    -- --------------------------------------------------------
+
     Status.Text =
         string.format(
-            "%s | opened %d | wait 1s",
+            "%s | opened %d | waiting 1 second",
             rarity,
             #targets
         )
 
     task.wait(OPEN_TO_SELL_DELAY)
 
-    -- Find only the newly-generated slimes in this batch's formerly-free slots.
+    -- --------------------------------------------------------
+    -- STEP 6: CAPTURE GENERATED SLIMES
+    -- --------------------------------------------------------
+
     local generated = {}
 
     for _, target in ipairs(targets) do
@@ -1169,14 +2000,22 @@ local function processBatch(
         end
 
         local result =
-            waitForGeneratedSlime(target)
+            waitForGeneratedSlime(
+                target
+            )
 
         if result then
-            table.insert(generated, result)
+            table.insert(
+                generated,
+                result
+            )
         end
     end
 
-    -- PICK UP generated slimes so the inventory-only sell remote can be used.
+    -- --------------------------------------------------------
+    -- STEP 7: PICK GENERATED SLIMES
+    -- --------------------------------------------------------
+
     local picked = {}
 
     for i, result in ipairs(generated) do
@@ -1186,7 +2025,7 @@ local function processBatch(
 
         Status.Text =
             string.format(
-                "%s | pickup result %d/%d",
+                "%s | picking result %d/%d",
                 rarity,
                 i,
                 #generated
@@ -1200,7 +2039,10 @@ local function processBatch(
         end
     end
 
-    -- SELL exact generated UIDs only.
+    -- --------------------------------------------------------
+    -- STEP 8: SELL ONLY THOSE GENERATED UIDS
+    -- --------------------------------------------------------
+
     local sold = 0
 
     for i, result in ipairs(picked) do
@@ -1210,13 +2052,15 @@ local function processBatch(
 
         Status.Text =
             string.format(
-                "%s | selling %d/%d",
+                "%s | selling result %d/%d",
                 rarity,
                 i,
                 #picked
             )
 
-        if sellGeneratedUID(result.uid) then
+        if sellGeneratedUID(
+            result.uid
+        ) then
             sold += 1
         end
     end
@@ -1228,7 +2072,7 @@ local function processBatch(
 end
 
 -- ============================================================
--- RARITY CYCLE WORKER
+-- MAIN RARITY LOOP
 -- ============================================================
 
 task.spawn(function()
@@ -1266,18 +2110,17 @@ task.spawn(function()
                 local processedForRarity = 0
                 local soldForRarity = 0
 
-                local value =
-                    LUCKY_BLOCK_VALUES[rarity]
-                    or 0
-
                 Status.Text =
                     string.format(
-                        "%s ($%s) | starting",
+                        "%s | world steal cycle | value %s",
                         rarity,
-                        tostring(value)
+                        tostring(
+                            LUCKY_BLOCK_VALUES[rarity]
+                            or "?"
+                        )
                     )
 
-                -- Up to 20 per rarity, 10 at a time.
+                -- 20 total per rarity, batches of 10.
                 while enabled
                     and processedForRarity
                         < BOXES_PER_RARITY
@@ -1291,15 +2134,6 @@ task.spawn(function()
                             BATCH_SIZE,
                             remaining
                         )
-
-                    local available =
-                        getInventoryLuckyBoxesByRarity(
-                            rarity
-                        )
-
-                    if #available == 0 then
-                        break
-                    end
 
                     local placedCount,
                         generatedCount,
@@ -1317,10 +2151,11 @@ task.spawn(function()
 
                     Status.Text =
                         string.format(
-                            "%s | %d/%d boxes | sold %d",
+                            "%s | boxes %d/%d | generated %d | sold %d",
                             rarity,
                             processedForRarity,
                             BOXES_PER_RARITY,
+                            generatedCount,
                             soldForRarity
                         )
 
@@ -1334,7 +2169,7 @@ task.spawn(function()
                 if enabled then
                     Status.Text =
                         string.format(
-                            "%s done | boxes %d/%d | sold %d | next...",
+                            "%s done | processed %d/%d | sold %d | next rarity",
                             rarity,
                             processedForRarity,
                             BOXES_PER_RARITY,
@@ -1342,13 +2177,9 @@ task.spawn(function()
                         )
 
                     if processedForRarity == 0 then
-                        task.wait(
-                            EMPTY_RARITY_DELAY
-                        )
+                        task.wait(EMPTY_RARITY_DELAY)
                     else
-                        task.wait(
-                            BETWEEN_BATCHES
-                        )
+                        task.wait(BETWEEN_BATCHES)
                     end
 
                     currentRarityIndex += 1
@@ -1361,24 +2192,20 @@ task.spawn(function()
                         Status.Text =
                             "Full rarity loop complete -> Common"
 
-                        task.wait(
-                            FULL_LOOP_DELAY
-                        )
+                        task.wait(FULL_LOOP_DELAY)
                     end
                 end
             end, debug.traceback)
 
         if not ok then
             warn(
-                "[LuckyBoxRarityCycle] ERROR:",
+                "[LuckyBoxWorldCycle] ERROR:",
                 err
             )
 
             Status.Text =
                 "Error: "
-                .. tostring(err):match(
-                    "^[^\n]+"
-                )
+                .. tostring(err):match("^[^\n]+")
 
             task.wait(0.50)
         end
@@ -1391,8 +2218,10 @@ end)
 updateToggle()
 
 print("====================================================")
-print("[LuckyBoxRarityCycle] Loaded")
-print("20 boxes per rarity | 10 per batch")
-print("Place -> Open -> wait 1s -> Pickup generated -> Sell exact UID")
-print("Dynamic stands | no fixed 100-slot limit")
+print("[LuckyBoxWorldCycle] Loaded")
+print("NO SERVER HOP")
+print("WORLD STEAL = teleport -> ProximityPrompt -> own base -> confirm UID")
+print("20 per rarity | 10 per batch")
+print("Then: place -> open -> wait 1s -> pick generated -> sell exact UID")
+print("Dynamic stands | NO 100-slot limit")
 print("====================================================")
