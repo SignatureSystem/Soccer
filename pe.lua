@@ -1,51 +1,77 @@
 --==============================================================
--- PERFECT PENALTY V2 - ROBUST SERVER-TIMED AUTO LOCK
+-- PERFECT PENALTY V3 - REAL INPUT TRIGGER
 --
--- Mirrors PenaltyMinigameViewController's real LockAxis flow.
--- It DOES NOT fake isGoal/chance.
+-- Why V3:
+-- The game's PenaltyMinigameViewController only performs its normal
+-- pointer lock path when InputBegan occurs. Instead of bypassing that
+-- controller, this script waits for a guaranteed corner and then
+-- generates a real MouseButton1 input through VirtualInputManager.
 --
--- Server guarantee:
---   abs(horizontal) >= 0.85
---   abs(vertical)   >= 0.85
--- => CalculateGoalChance() == 1
+-- The ORIGINAL game controller then:
+--   1) reads workspace:GetServerTimeNow()
+--   2) updates the pointer
+--   3) builds nonce / shotIndex / axis / lockedAt
+--   4) invokes "Penalty Minigame Action" -> "LockAxis"
 --
--- This version:
---   * kills an older copy when re-executed
---   * listens to Penalty Minigame State
---   * polls GetState so missed events do not break it
---   * evaluates the REAL server-provided motion every RenderStepped
---   * sends the REAL workspace:GetServerTimeNow() timestamp
---   * retries rejected inputs
---   * handles Horizontal -> Vertical -> next shot automatically
+-- So this uses the exact normal client flow.
 --==============================================================
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local SharedModules = ReplicatedStorage:WaitForChild("SharedModules")
 
-local GameRemoteRegistry =
-    require(SharedModules:WaitForChild("GameRemoteRegistry"))
+local SharedModules =
+    ReplicatedStorage:WaitForChild("SharedModules")
 
 local Config =
-    require(SharedModules:WaitForChild("PenaltyMinigameConfig"))
+    require(
+        SharedModules:WaitForChild(
+            "PenaltyMinigameConfig"
+        )
+    )
+
+-- EXACT RAW PATH shown by the remote spy.
+local Remotes =
+    SharedModules
+        :WaitForChild("Network")
+        :WaitForChild("Remotes")
 
 local Action =
-    GameRemoteRegistry.new(
-        "Penalty Minigame Action",
-        "RemoteFunction"
+    Remotes:WaitForChild(
+        "Penalty Minigame Action"
     )
 
 local State =
-    GameRemoteRegistry.new(
-        "Penalty Minigame State",
-        "RemoteEvent"
+    Remotes:WaitForChild(
+        "Penalty Minigame State"
     )
 
-assert(Action, "Penalty Minigame Action missing")
-assert(State, "Penalty Minigame State missing")
+assert(
+    Action:IsA("RemoteFunction"),
+    "Penalty Minigame Action is not a RemoteFunction"
+)
+
+assert(
+    State:IsA("RemoteEvent"),
+    "Penalty Minigame State is not a RemoteEvent"
+)
+
+--==============================================================
+-- SETTINGS
+--==============================================================
+
+-- Guaranteed goal starts at 0.85.
+-- Aim deeper into corner for margin.
+local TARGET_ABS = 0.92
+
+-- Don't trigger multiple clicks while waiting for server response.
+local CLICK_COOLDOWN = 0.40
+
+-- Backup state poll, not spammed.
+local POLL_INTERVAL = 0.75
 
 --==============================================================
 -- SINGLE INSTANCE
@@ -55,603 +81,814 @@ local env =
     (getgenv and getgenv())
     or _G
 
-if env.__PerfectPenaltyV2 then
-    local old = env.__PerfectPenaltyV2
+if env.__PerfectPenaltyV4 then
+    local old =
+        env.__PerfectPenaltyV4
 
     old.running = false
 
     if old.connections then
-        for _, c in ipairs(old.connections) do
+        for _, c in ipairs(
+            old.connections
+        ) do
             pcall(function()
                 c:Disconnect()
             end)
         end
     end
-
-    print("[PerfectPenaltyV2] Previous copy stopped")
 end
 
-local controller = {
+local control = {
     running = true,
     connections = {},
 }
 
-env.__PerfectPenaltyV2 = controller
+env.__PerfectPenaltyV4 =
+    control
 
 --==============================================================
--- SETTINGS
+-- ON-SCREEN LOG GUI
 --==============================================================
 
--- 0.85 is guaranteed.
--- 0.90 leaves a comfortable guaranteed-goal margin.
-local TARGET_ABS = 0.90
+local CoreGui = game:GetService("CoreGui")
 
--- If a call is rejected, don't spam immediately.
-local RETRY_DELAY = 0.06
+local guiParent = CoreGui
+pcall(function()
+    if typeof(gethui) == "function" then
+        guiParent = gethui()
+    end
+end)
 
--- Poll authoritative state in case a State packet was missed.
-local STATE_POLL_INTERVAL = 0.15
+-- Remove an older visible log GUI.
+pcall(function()
+    local oldGui = guiParent:FindFirstChild("PerfectPenaltyLogV4")
+    if oldGui then
+        oldGui:Destroy()
+    end
+end)
 
--- Request-in-flight failsafe.
-local REQUEST_TIMEOUT = 0.75
+local LogGui = Instance.new("ScreenGui")
+LogGui.Name = "PerfectPenaltyLogV4"
+LogGui.ResetOnSpawn = false
+LogGui.IgnoreGuiInset = true
+LogGui.DisplayOrder = 999999
+LogGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+LogGui.Parent = guiParent
+
+local LogFrame = Instance.new("Frame")
+LogFrame.Name = "Main"
+LogFrame.Size = UDim2.new(0, 330, 0, 210)
+LogFrame.Position = UDim2.new(0.5, -165, 0, 55)
+LogFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+LogFrame.BackgroundTransparency = 0.10
+LogFrame.BorderSizePixel = 0
+LogFrame.Active = true
+LogFrame.Draggable = true
+LogFrame.Parent = LogGui
+Instance.new("UICorner", LogFrame).CornerRadius = UDim.new(0, 10)
+
+local Stroke = Instance.new("UIStroke")
+Stroke.Thickness = 1
+Stroke.Transparency = 0.25
+Stroke.Color = Color3.fromRGB(160, 160, 180)
+Stroke.Parent = LogFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -38, 0, 28)
+Title.Position = UDim2.new(0, 10, 0, 2)
+Title.BackgroundTransparency = 1
+Title.Text = "Perfect Penalty V4"
+Title.TextColor3 = Color3.fromRGB(240, 240, 245)
+Title.TextSize = 14
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = LogFrame
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 28, 0, 24)
+MinBtn.Position = UDim2.new(1, -32, 0, 4)
+MinBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+MinBtn.BorderSizePixel = 0
+MinBtn.Text = "—"
+MinBtn.TextColor3 = Color3.fromRGB(235, 235, 240)
+MinBtn.TextSize = 14
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.Parent = LogFrame
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, -20, 0, 40)
+Status.Position = UDim2.new(0, 10, 0, 31)
+Status.BackgroundTransparency = 1
+Status.Text = "Status: loading..."
+Status.TextColor3 = Color3.fromRGB(130, 220, 255)
+Status.TextSize = 12
+Status.Font = Enum.Font.GothamBold
+Status.TextXAlignment = Enum.TextXAlignment.Left
+Status.TextYAlignment = Enum.TextYAlignment.Top
+Status.TextWrapped = true
+Status.Parent = LogFrame
+
+local Live = Instance.new("TextLabel")
+Live.Size = UDim2.new(1, -20, 0, 34)
+Live.Position = UDim2.new(0, 10, 0, 70)
+Live.BackgroundTransparency = 1
+Live.Text = "Shot: - | Axis: - | Aim: -"
+Live.TextColor3 = Color3.fromRGB(235, 235, 240)
+Live.TextSize = 11
+Live.Font = Enum.Font.Code
+Live.TextXAlignment = Enum.TextXAlignment.Left
+Live.TextYAlignment = Enum.TextYAlignment.Top
+Live.TextWrapped = true
+Live.Parent = LogFrame
+
+local LogText = Instance.new("TextLabel")
+LogText.Size = UDim2.new(1, -20, 1, -112)
+LogText.Position = UDim2.new(0, 10, 0, 105)
+LogText.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
+LogText.BackgroundTransparency = 0.20
+LogText.BorderSizePixel = 0
+LogText.Text = ""
+LogText.TextColor3 = Color3.fromRGB(210, 210, 220)
+LogText.TextSize = 10
+LogText.Font = Enum.Font.Code
+LogText.TextXAlignment = Enum.TextXAlignment.Left
+LogText.TextYAlignment = Enum.TextYAlignment.Top
+LogText.TextWrapped = true
+LogText.Parent = LogFrame
+Instance.new("UICorner", LogText).CornerRadius = UDim.new(0, 7)
+
+local logLines = {}
+local minimized = false
+
+local function setStatus(text)
+    Status.Text = "Status: " .. tostring(text)
+end
+
+local function setLive(shot, axis, value)
+    local valueText = "-"
+    if type(value) == "number" then
+        valueText = string.format("%+.4f", value)
+    end
+
+    Live.Text =
+        string.format(
+            "Shot: %s | Axis: %s | Aim: %s | Target: %.2f",
+            tostring(shot or "-"),
+            tostring(axis or "-"),
+            valueText,
+            0.92
+        )
+end
+
+local function guiLog(message)
+    local stamp = string.format("%.2f", os.clock() % 1000)
+    table.insert(logLines, "[" .. stamp .. "] " .. tostring(message))
+
+    while #logLines > 8 do
+        table.remove(logLines, 1)
+    end
+
+    LogText.Text = table.concat(logLines, "\n")
+    print("[PerfectPenaltyV4]", message)
+end
+
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+
+    if minimized then
+        LogFrame.Size = UDim2.new(0, 330, 0, 34)
+        Status.Visible = false
+        Live.Visible = false
+        LogText.Visible = false
+        MinBtn.Text = "+"
+    else
+        LogFrame.Size = UDim2.new(0, 330, 0, 210)
+        Status.Visible = true
+        Live.Visible = true
+        LogText.Visible = true
+        MinBtn.Text = "—"
+    end
+end)
 
 --==============================================================
--- LOCAL STATE
+-- STATE
 --==============================================================
 
 local session = nil
-local requestBusy = false
-local requestStartedClock = 0
+
+local waitingServer = false
+local lastClickClock = 0
 local lastPollClock = 0
-local lastAttemptKey = nil
-local lastAttemptClock = 0
+
+-- Tracks the exact state we clicked for.
+local clickedNonce = nil
+local clickedShot = nil
+local clickedAxis = nil
 
 --==============================================================
--- HELPERS
+-- RAW REMOTE
 --==============================================================
 
-local function safeInvoke(actionName, payload)
-    local success, result = pcall(function()
-        return Action:Fire(
-            actionName,
-            payload
-        )
-    end)
+local function getState()
+    local ok, result =
+        pcall(function()
+            return Action:InvokeServer(
+                "GetState"
+            )
+        end)
 
-    if not success then
-        return {
-            ok = false,
-            code = "NETWORK_ERROR",
-            detail = tostring(result),
-        }
+    if not ok then
+        return nil
     end
 
-    if type(result) ~= "table" then
-        return {
-            ok = false,
-            code = "INVALID_RESPONSE",
-            detail = tostring(result),
-        }
+    if type(result) ~= "table"
+        or result.ok ~= true
+    then
+        return nil
     end
 
     return result
 end
 
-local function describeMotion(m)
-    if type(m) ~= "table" then
-        return "nil"
+--==============================================================
+-- APPLY SESSION
+--==============================================================
+
+local function applySession(s, source)
+    if type(s) ~= "table"
+        or type(s.nonce) ~= "string"
+    then
+        return
     end
 
-    return string.format(
-        "start=%.3f dur=%.3f phase=%.3f dir=%s",
-        tonumber(m.startedAt) or -1,
-        tonumber(m.duration) or -1,
-        tonumber(m.phase) or -1,
-        tostring(m.direction)
-    )
-end
-
-local function sameSessionState(serverSession)
-    if not session then
-        return false
-    end
-
-    if type(serverSession) ~= "table" then
-        return false
-    end
-
-    return
-        serverSession.nonce == session.nonce
-        and (tonumber(serverSession.shotIndex) or 1) == session.shotIndex
-        and (serverSession.expectedAxis or "Horizontal") == session.expectedAxis
-end
-
-local function applyServerSession(serverSession, source)
-    if type(serverSession) ~= "table" then
-        return false
-    end
-
-    if type(serverSession.nonce) ~= "string" then
-        return false
-    end
-
-    local oldNonce =
+    local previousNonce =
         session and session.nonce
 
-    local oldShot =
+    local previousShot =
         session and session.shotIndex
 
-    local oldAxis =
+    local previousAxis =
         session and session.expectedAxis
 
-    session = session or {}
-
-    session.nonce =
-        serverSession.nonce
-
-    session.shotIndex =
-        tonumber(serverSession.shotIndex)
-        or session.shotIndex
-        or 1
-
-    session.expectedAxis =
-        serverSession.expectedAxis
-        or session.expectedAxis
-        or "Horizontal"
-
-    if type(serverSession.motion) == "table" then
-        session.motion =
-            serverSession.motion
-    end
-
-    session.goals =
-        tonumber(serverSession.goals)
-        or session.goals
-        or 0
-
-    session.completed =
-        serverSession.completed == true
-
-    local changed =
-        oldNonce ~= session.nonce
-        or oldShot ~= session.shotIndex
-        or oldAxis ~= session.expectedAxis
-
-    if changed then
-        requestBusy = false
-        lastAttemptKey = nil
-
-        print(
-            string.format(
-                "[PerfectPenaltyV2] %s | shot=%d axis=%s goals=%d | %s",
-                tostring(source or "STATE"),
-                session.shotIndex,
-                tostring(session.expectedAxis),
-                session.goals,
-                describeMotion(session.motion)
-            )
-        )
-    end
-
-    return true
-end
-
-local function clearSession(reason)
-    if session then
-        print(
-            "[PerfectPenaltyV2] Session cleared:",
-            tostring(reason or "")
-        )
-    end
-
-    session = nil
-    requestBusy = false
-    lastAttemptKey = nil
-end
-
---==============================================================
--- AUTHORITATIVE STATE POLL
---==============================================================
-
-local function pollState()
-    if not controller.running then
-        return
-    end
-
-    task.spawn(function()
-        local response =
-            safeInvoke("GetState")
-
-        if not controller.running then
-            return
-        end
-
-        if response.ok ~= true then
-            return
-        end
-
-        local serverSession =
-            response.session
-
-        if type(serverSession) == "table"
-            and serverSession.completed ~= true
-        then
-            applyServerSession(
-                serverSession,
-                "GetState"
-            )
-        elseif session
-            and session.completed
-        then
-            -- keep completed local state until the server has cleared it
-        end
-    end)
-end
-
---==============================================================
--- SEND PERFECT LOCK
---==============================================================
-
-local function sendLock(s, axis, now, value)
-    if requestBusy
-        or not controller.running
-        or session ~= s
-    then
-        return
-    end
-
-    local key =
-        tostring(s.nonce)
-        .. ":"
-        .. tostring(s.shotIndex)
-        .. ":"
-        .. tostring(axis)
-
-    -- Small anti-double-fire guard.
-    if lastAttemptKey == key
-        and os.clock() - lastAttemptClock < 0.08
-    then
-        return
-    end
-
-    lastAttemptKey = key
-    lastAttemptClock = os.clock()
-
-    requestBusy = true
-    requestStartedClock = os.clock()
-
-    local payload = {
+    session = {
         nonce = s.nonce,
-        shotIndex = s.shotIndex,
-        axis = axis,
-        lockedAt = now,
+
+        shotIndex =
+            tonumber(s.shotIndex)
+            or 1,
+
+        expectedAxis =
+            s.expectedAxis
+            or "Horizontal",
+
+        motion =
+            s.motion,
+
+        goals =
+            tonumber(s.goals)
+            or 0,
+
+        completed =
+            s.completed == true,
     }
 
-    print(
+    if previousNonce ~= session.nonce
+        or previousShot ~= session.shotIndex
+        or previousAxis ~= session.expectedAxis
+    then
+        waitingServer = false
+
+        setStatus(
+            string.format(
+                "session active | shot %d | %s",
+                session.shotIndex,
+                tostring(session.expectedAxis)
+            )
+        )
+        setLive(session.shotIndex, session.expectedAxis, nil)
+        guiLog(
+            string.format(
+                "%s -> shot %d / %s",
+                tostring(source),
+                session.shotIndex,
+                tostring(session.expectedAxis)
+            )
+        )
+    end
+end
+
+--==============================================================
+-- SAFE CLICK POSITION
+--==============================================================
+
+local function pointInside(gui, x, y)
+    if not gui
+        or not gui:IsA("GuiObject")
+        or not gui.Visible
+    then
+        return false
+    end
+
+    local p =
+        gui.AbsolutePosition
+
+    local s =
+        gui.AbsoluteSize
+
+    return
+        x >= p.X
+        and x <= p.X + s.X
+        and y >= p.Y
+        and y <= p.Y + s.Y
+end
+
+local function getSafeClickPoint()
+    local camera =
+        workspace.CurrentCamera
+
+    if not camera then
+        return 100, 100
+    end
+
+    local size =
+        camera.ViewportSize
+
+    -- Start at screen center.
+    local x =
+        math.floor(size.X * 0.50)
+
+    local y =
+        math.floor(size.Y * 0.50)
+
+    -- The real controller ignores clicks only when they are over CancelButton.
+    local penaltyGui =
+        LocalPlayer
+            :FindFirstChild("PlayerGui")
+
+    if penaltyGui then
+        penaltyGui =
+            penaltyGui:FindFirstChild(
+                "PenaltyMinigameViewController"
+            )
+    end
+
+    local cancel =
+        penaltyGui
+        and penaltyGui:FindFirstChild(
+            "CancelButton",
+            true
+        )
+
+    if pointInside(
+        cancel,
+        x,
+        y
+    ) then
+        x =
+            math.floor(size.X * 0.20)
+
+        y =
+            math.floor(size.Y * 0.25)
+    end
+
+    return x, y
+end
+
+--==============================================================
+-- REAL INPUT
+--==============================================================
+
+local function performRealClick()
+    local x, y =
+        getSafeClickPoint()
+
+    setStatus("sending real input")
+    guiLog(
         string.format(
-            "[PerfectPenaltyV2] >>> LOCK %s | shot=%d | value=%+.4f | time=%.4f",
-            tostring(axis),
-            s.shotIndex,
-            value,
-            now
+            "REAL INPUT at %d,%d",
+            x,
+            y
         )
     )
 
-    task.spawn(function()
-        local response =
-            safeInvoke(
-                "LockAxis",
-                payload
-            )
+    -- This produces MouseButton1 InputBegan.
+    -- PenaltyMinigameViewController accepts:
+    --   MouseButton1
+    --   Touch
+    --
+    -- Therefore its own v_u_915() path should run.
+    VirtualInputManager:SendMouseButtonEvent(
+        x,
+        y,
+        0,
+        true,
+        game,
+        0
+    )
 
-        if not controller.running then
-            return
-        end
+    task.wait(0.035)
 
-        if session ~= s then
-            return
-        end
-
-        print(
-            "[PerfectPenaltyV2] Lock response:",
-            "ok=" .. tostring(response.ok),
-            "code=" .. tostring(response.code)
-        )
-
-        if response.ok ~= true then
-            requestBusy = false
-
-            warn(
-                "[PerfectPenaltyV2] Rejected:",
-                tostring(response.code),
-                tostring(response.detail or "")
-            )
-
-            task.wait(RETRY_DELAY)
-
-            -- Force a fresh authoritative state sync before retrying.
-            pollState()
-            return
-        end
-
-        -- Normally AxisLocked / ShotResolved will arrive immediately.
-        -- Poll as a backup in case the RemoteEvent packet is missed.
-        task.delay(0.08, function()
-            if controller.running
-                and session == s
-            then
-                pollState()
-            end
-        end)
-    end)
+    VirtualInputManager:SendMouseButtonEvent(
+        x,
+        y,
+        0,
+        false,
+        game,
+        0
+    )
 end
 
 --==============================================================
--- SERVER EVENT LISTENER
+-- PENALTY STATE EVENTS
 --==============================================================
 
-local stateConnection =
-    State:Connect(function(packet)
-        if not controller.running then
-            return
-        end
-
-        if type(packet) ~= "table"
-            or type(packet.kind) ~= "string"
-        then
-            return
-        end
-
-        local kind =
-            packet.kind
-
-        if kind == "SessionStarted" then
-            applyServerSession(
-                packet.session,
-                "SessionStarted"
-            )
-            return
-        end
-
-        if kind == "SessionCancelled" then
-            if not session
-                or packet.nonce == session.nonce
+local stateConn =
+    State.OnClientEvent:Connect(
+        function(packet)
+            if not control.running
+                or type(packet) ~= "table"
             then
-                clearSession(
-                    "SessionCancelled"
-                )
+                return
             end
-            return
-        end
 
-        local s =
-            session
+            local kind =
+                packet.kind
 
-        if not s then
-            pollState()
-            return
-        end
-
-        if packet.nonce
-            and packet.nonce ~= s.nonce
-        then
-            return
-        end
-
-        ------------------------------------------------------
-        -- SERVER CONFIRMED HORIZONTAL
-        ------------------------------------------------------
-
-        if kind == "AxisLocked" then
-            requestBusy = false
-            lastAttemptKey = nil
-
-            local confirmed =
-                tonumber(packet.value)
-                or 0
-
-            print(
-                string.format(
-                    "[PerfectPenaltyV2] <<< H confirmed %+.4f",
-                    confirmed
+            if kind ==
+                "SessionStarted"
+            then
+                applySession(
+                    packet.session,
+                    "SessionStarted"
                 )
-            )
 
-            s.expectedAxis = "Vertical"
-            s.motion = packet.nextMotion
+                return
+            end
 
-            return
-        end
+            if kind ==
+                "SessionCancelled"
+            then
+                session = nil
+                waitingServer = false
+                setStatus("session cancelled")
+                setLive(nil, nil, nil)
+                guiLog("Session cancelled")
+                return
+            end
 
-        ------------------------------------------------------
-        -- SERVER RESOLVED SHOT
-        ------------------------------------------------------
+            if not session then
+                return
+            end
 
-        if kind == "ShotResolved" then
-            requestBusy = false
-            lastAttemptKey = nil
+            if packet.nonce
+                and packet.nonce
+                    ~= session.nonce
+            then
+                return
+            end
 
-            local shot =
-                tonumber(packet.shotIndex)
-                or s.shotIndex
+            ------------------------------------------
+            -- HORIZONTAL LOCK CONFIRMED
+            ------------------------------------------
 
-            local h =
-                tonumber(packet.horizontal)
-                or 0
+            if kind == "AxisLocked" then
+                waitingServer = false
 
-            local v =
-                tonumber(packet.vertical)
-                or 0
-
-            local chance =
-                tonumber(packet.chance)
-                or 0
-
-            print(
-                string.format(
-                    "[PerfectPenaltyV2] <<< SHOT %d | H=%+.4f V=%+.4f chance=%.1f%% | %s",
-                    shot,
-                    h,
-                    v,
-                    chance * 100,
-                    packet.isGoal and "GOAL" or "SAVED"
+                local confirmedH = tonumber(packet.value) or 0
+                setStatus("horizontal confirmed -> waiting vertical")
+                setLive(session.shotIndex, "Vertical", confirmedH)
+                guiLog(
+                    string.format(
+                        "H confirmed %+.4f",
+                        confirmedH
+                    )
                 )
-            )
 
-            s.goals =
-                tonumber(packet.goals)
-                or s.goals
-                or 0
+                session.expectedAxis =
+                    "Vertical"
 
-            if type(packet.nextMotion) == "table" then
-                s.shotIndex =
-                    shot + 1
-
-                s.expectedAxis =
-                    "Horizontal"
-
-                s.motion =
+                session.motion =
                     packet.nextMotion
+
+                return
             end
 
-            return
-        end
+            ------------------------------------------
+            -- SHOT RESOLVED
+            ------------------------------------------
 
-        ------------------------------------------------------
-        -- SESSION COMPLETE
-        ------------------------------------------------------
+            if kind == "ShotResolved" then
+                waitingServer = false
 
-        if kind == "SessionCompleted" then
-            requestBusy = false
+                local shot =
+                    tonumber(
+                        packet.shotIndex
+                    )
+                    or session.shotIndex
 
-            local goals =
-                tonumber(packet.goals)
-                or s.goals
-                or 0
+                local h = tonumber(packet.horizontal) or 0
+                local v = tonumber(packet.vertical) or 0
+                local chance = (tonumber(packet.chance) or 0) * 100
+                local resultText = packet.isGoal and "GOAL" or "SAVED"
 
-            print(
-                string.format(
-                    "[PerfectPenaltyV2] COMPLETE %d/%d",
-                    goals,
-                    Config.ShotsPerSession
+                setStatus(
+                    string.format(
+                        "%s | chance %.1f%%",
+                        resultText,
+                        chance
+                    )
                 )
-            )
+                setLive(shot, "Resolved", v)
+                guiLog(
+                    string.format(
+                        "SHOT %d | H=%+.4f V=%+.4f | %.1f%% | %s",
+                        shot,
+                        h,
+                        v,
+                        chance,
+                        resultText
+                    )
+                )
 
-            s.completed = true
-            return
+                session.goals =
+                    tonumber(
+                        packet.goals
+                    )
+                    or session.goals
+
+                if type(
+                    packet.nextMotion
+                ) == "table" then
+                    session.shotIndex =
+                        shot + 1
+
+                    session.expectedAxis =
+                        "Horizontal"
+
+                    session.motion =
+                        packet.nextMotion
+                end
+
+                return
+            end
+
+            ------------------------------------------
+            -- COMPLETE
+            ------------------------------------------
+
+            if kind ==
+                "SessionCompleted"
+            then
+                waitingServer = false
+                session.completed = true
+
+                local finalGoals =
+                    tonumber(packet.goals)
+                    or session.goals
+                    or 0
+
+                setStatus(
+                    string.format(
+                        "COMPLETE %d/%d",
+                        finalGoals,
+                        Config.ShotsPerSession
+                    )
+                )
+                guiLog(
+                    string.format(
+                        "COMPLETE %d/%d",
+                        finalGoals,
+                        Config.ShotsPerSession
+                    )
+                )
+
+                return
+            end
         end
-    end)
+    )
 
 table.insert(
-    controller.connections,
-    stateConnection
+    control.connections,
+    stateConn
 )
 
 --==============================================================
--- EXACT CONTROLLER-STYLE RENDER LOOP
+-- PERFECT TIMING LOOP
 --==============================================================
 
-local renderConnection =
-    RunService.RenderStepped:Connect(function()
-        if not controller.running then
-            return
-        end
+local renderConn =
+    RunService.RenderStepped:Connect(
+        function()
+            if not control.running then
+                return
+            end
 
-        ------------------------------------------------------
-        -- periodic GetState recovery
-        ------------------------------------------------------
+            local clockNow =
+                os.clock()
 
-        local clockNow =
-            os.clock()
+            ------------------------------------------
+            -- BACKUP GETSTATE SYNC
+            ------------------------------------------
 
-        if clockNow - lastPollClock
-            >= STATE_POLL_INTERVAL
-        then
-            lastPollClock =
-                clockNow
+            if clockNow - lastPollClock
+                >= POLL_INTERVAL
+            then
+                lastPollClock =
+                    clockNow
 
-            pollState()
-        end
+                task.spawn(function()
+                    local state =
+                        getState()
 
-        ------------------------------------------------------
-        -- request timeout recovery
-        ------------------------------------------------------
+                    if not control.running
+                        or not state
+                    then
+                        return
+                    end
 
-        if requestBusy
-            and clockNow - requestStartedClock
-                >= REQUEST_TIMEOUT
-        then
-            requestBusy = false
-            lastAttemptKey = nil
+                    if type(
+                        state.session
+                    ) == "table"
+                        and state.session.completed
+                            ~= true
+                    then
+                        if not session
+                            or state.session.nonce
+                                ~= session.nonce
+                            or tonumber(
+                                state.session.shotIndex
+                            )
+                                ~= session.shotIndex
+                            or (
+                                state.session.expectedAxis
+                                or "Horizontal"
+                            )
+                                ~= session.expectedAxis
+                        then
+                            applySession(
+                                state.session,
+                                "GetState"
+                            )
+                        end
+                    end
+                end)
+            end
 
-            print(
-                "[PerfectPenaltyV2] Request timeout -> resync"
-            )
+            ------------------------------------------
+            -- ACTIVE MOTION
+            ------------------------------------------
 
-            pollState()
-        end
+            local s =
+                session
 
-        ------------------------------------------------------
-        -- active axis
-        ------------------------------------------------------
+            if not s
+                or s.completed
+                or waitingServer
+                or type(s.motion)
+                    ~= "table"
+            then
+                return
+            end
 
-        local s =
-            session
+            if clockNow - lastClickClock
+                < CLICK_COOLDOWN
+            then
+                return
+            end
 
-        if not s
-            or s.completed
-            or requestBusy
-            or type(s.motion) ~= "table"
-        then
-            return
-        end
+            local serverNow =
+                workspace:GetServerTimeNow()
 
-        local now =
-            workspace:GetServerTimeNow()
+            local startedAt =
+                tonumber(
+                    s.motion.startedAt
+                )
+                or math.huge
 
-        local startedAt =
-            tonumber(s.motion.startedAt)
-            or math.huge
+            if serverNow < startedAt then
+                return
+            end
 
-        if now < startedAt then
-            return
-        end
+            local value =
+                Config.EvaluateMotion(
+                    s.motion,
+                    serverNow
+                )
 
-        local value =
-            Config.EvaluateMotion(
-                s.motion,
-                now
-            )
-
-        ------------------------------------------------------
-        -- GUARANTEED CORNER
-        ------------------------------------------------------
-
-        if math.abs(value) >= TARGET_ABS then
-            sendLock(
-                s,
+            -- Keep the on-screen monitor live every frame.
+            setLive(
+                s.shotIndex,
                 s.expectedAxis,
-                now,
                 value
             )
+
+            ------------------------------------------
+            -- GUARANTEED CORNER
+            ------------------------------------------
+
+            if math.abs(value)
+                >= TARGET_ABS
+            then
+                waitingServer = true
+                lastClickClock = clockNow
+
+                clickedNonce =
+                    s.nonce
+
+                clickedShot =
+                    s.shotIndex
+
+                clickedAxis =
+                    s.expectedAxis
+
+                setStatus(
+                    string.format(
+                        "TARGET HIT -> %s",
+                        tostring(s.expectedAxis)
+                    )
+                )
+                setLive(s.shotIndex, s.expectedAxis, value)
+                guiLog(
+                    string.format(
+                        "TARGET %s %+.4f | shot %d",
+                        tostring(s.expectedAxis),
+                        value,
+                        s.shotIndex
+                    )
+                )
+
+                -- IMPORTANT:
+                -- no manual InvokeServer("LockAxis") here.
+                --
+                -- We trigger the SAME input event the
+                -- original controller expects.
+                task.spawn(
+                    performRealClick
+                )
+
+                -- If no state change arrives, allow
+                -- another attempt after a short delay.
+                task.delay(
+                    0.55,
+                    function()
+                        if not control.running
+                            or not session
+                        then
+                            return
+                        end
+
+                        if waitingServer
+                            and session.nonce
+                                == clickedNonce
+                            and session.shotIndex
+                                == clickedShot
+                            and session.expectedAxis
+                                == clickedAxis
+                        then
+                            waitingServer = false
+
+                            setStatus("no confirmation -> retrying")
+                            guiLog("No lock confirmation -> retrying")
+                        end
+                    end
+                )
+            end
         end
-    end)
+    )
 
 table.insert(
-    controller.connections,
-    renderConnection
+    control.connections,
+    renderConn
 )
 
 --==============================================================
--- INITIAL STATE
+-- INITIAL SYNC
 --==============================================================
 
-pollState()
+task.spawn(function()
+    local state =
+        getState()
 
-print("======================================================")
-print("[PerfectPenaltyV2] LOADED")
-print("[PerfectPenaltyV2] Target corner:", TARGET_ABS)
-print("[PerfectPenaltyV2] Guaranteed threshold:", Config.Aim.GuaranteedGoalCorner)
-print("[PerfectPenaltyV2] Start/play the penalty session normally.")
-print("[PerfectPenaltyV2] It will lock H + V automatically.")
-print("======================================================")
+    if state
+        and type(state.session)
+            == "table"
+        and state.session.completed
+            ~= true
+    then
+        applySession(
+            state.session,
+            "Initial GetState"
+        )
+    else
+        setStatus("waiting for penalty session")
+        guiLog("Loaded. Start the penalty minigame normally.")
+    end
+end)
+
+setStatus("loaded | waiting for session")
+setLive(nil, nil, nil)
+guiLog("V4 GUI logger loaded")
+guiLog("Target = " .. tostring(TARGET_ABS))
+guiLog("Guaranteed corner = " .. tostring(Config.Aim.GuaranteedGoalCorner))
+guiLog("Using game's own input handler")
