@@ -49,34 +49,132 @@ end)
 local gui = Instance.new("ScreenGui")
 gui.Name = "SimpleLowestCostUpgradeGUI"
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.DisplayOrder = 999
+gui.IgnoreGuiInset = false
+gui.DisplayOrder = 999999
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Enabled = true
 
--- PlayerGui first is more reliable on mobile executors.
-local PlayerGui = player:WaitForChild("PlayerGui", 10)
+-- Executor GUI parenting:
+-- 1) gethui() (best for Delta/mobile executors)
+-- 2) CoreGui
+-- 3) PlayerGui
+local guiParent = nil
 
-if PlayerGui then
-    gui.Parent = PlayerGui
-else
-    pcall(function()
+if typeof(gethui) == "function" then
+    local okHui, hui = pcall(function()
+        return gethui()
+    end)
+
+    if okHui and hui then
+        guiParent = hui
+    end
+end
+
+if not guiParent then
+    local okCore = pcall(function()
         gui.Parent = CoreGui
     end)
+
+    if okCore and gui.Parent then
+        guiParent = CoreGui
+    end
 end
+
+if not guiParent then
+    local PlayerGui = player:FindFirstChildOfClass("PlayerGui")
+        or player:FindFirstChild("PlayerGui")
+
+    if not PlayerGui then
+        PlayerGui = player:WaitForChild("PlayerGui", 5)
+    end
+
+    if PlayerGui then
+        guiParent = PlayerGui
+    end
+end
+
+if guiParent then
+    if typeof(syn) == "table"
+        and typeof(syn.protect_gui) == "function"
+    then
+        pcall(function()
+            syn.protect_gui(gui)
+        end)
+    end
+
+    gui.Parent = guiParent
+else
+    error("[SimpleAutoUpgrade] Could not find a usable GUI parent")
+end
+
+print(
+    "[SimpleAutoUpgrade] GUI parent:",
+    gui.Parent and gui.Parent:GetFullName() or "nil"
+)
 
 local button = Instance.new("TextButton")
 button.Name = "AutoUpgradeButton"
-button.Size = UDim2.new(0, 220, 0, 48)
-button.Position = UDim2.new(0, 20, 0, 120)
+button.Size = UDim2.fromOffset(230, 52)
+button.Position = UDim2.fromOffset(25, 80)
 button.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+button.BackgroundTransparency = 0
 button.BorderSizePixel = 0
 button.Text = "Auto Upgrade: LOADING..."
-button.TextColor3 = Color3.fromRGB(255, 100, 100)
-button.TextSize = 15
+button.TextColor3 = Color3.fromRGB(255, 210, 100)
+button.TextTransparency = 0
+button.TextSize = 16
 button.Font = Enum.Font.GothamBold
+button.Visible = true
 button.Active = true
-button.Draggable = true
+button.AutoButtonColor = true
+button.ZIndex = 999999
 button.Parent = gui
+
+-- Simple touch/mouse dragging that works on mobile.
+do
+    local UIS = game:GetService("UserInputService")
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    local dragInput = nil
+
+    button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch
+        then
+            dragging = true
+            dragStart = input.Position
+            startPos = button.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    button.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch
+        then
+            dragInput = input
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if dragging and input == dragInput and dragStart and startPos then
+            local delta = input.Position - dragStart
+
+            button.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
 
 Instance.new("UICorner", button).CornerRadius = UDim.new(0, 9)
 
