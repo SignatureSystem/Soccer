@@ -1961,21 +1961,54 @@ local function getOccupiedSlotsInRange(firstSlot, lastSlot)
 end
 
 local function getAllOccupiedSlots()
+    -- DYNAMIC: every occupied current slot, including 101+.
     local data = getData()
     local plotSlimes = (data and data.PlotSlimes) or {}
     local plot = getMyPlot()
     local liveFolder = getPlayerSlimesFolder()
-    local list = {}
+    local list, seen = {}, {}
+
     if not plot then return list end
+
     local stands = plot:FindFirstChild("Stands")
     if not stands then return list end
+
     for _, stand in ipairs(stands:GetChildren()) do
-        local name = stand.Name
-        if isOccupied(name, plotSlimes, liveFolder, stand) then
-            table.insert(list, { name = name, num = tonumber(name) or 9999, stand = stand })
+        local slotName = tostring(stand.Name)
+
+        if not seen[slotName]
+            and isOccupied(slotName, plotSlimes, liveFolder, stand)
+        then
+            seen[slotName] = true
+            table.insert(list, {
+                name = slotName,
+                num = tonumber(slotName) or math.huge,
+                stand = stand,
+            })
         end
     end
-    table.sort(list, function(a, b) return a.num < b.num end)
+
+    -- Open Lucky Block only needs a slot ID, so include any placed slot
+    -- that exists in PlotSlimes even if its stand is not currently streamed.
+    if type(plotSlimes) == "table" then
+        for slotName, entry in pairs(plotSlimes) do
+            local name = tostring(slotName)
+            if entry ~= nil and not seen[name] then
+                seen[name] = true
+                table.insert(list, {
+                    name = name,
+                    num = tonumber(name) or math.huge,
+                    stand = stands:FindFirstChild(name),
+                })
+            end
+        end
+    end
+
+    table.sort(list, function(a, b)
+        if a.num ~= b.num then return a.num < b.num end
+        return tostring(a.name) < tostring(b.name)
+    end)
+
     return list
 end
 
@@ -2166,23 +2199,51 @@ local function getOccupiedSlotsByDualFilter(rarityFilter, mutationFilter)
 end
 
 local function getAvailableSlots()
+    -- UNIVERSAL DYNAMIC FREE-SLOT SCAN
+    -- NO 1-100 LIMIT.
+    -- Used by normal Place Slimes, filtered placement, and Place Boxes.
+
     local data = getData()
     local baseLevel = getBaseLevel(data)
     local plotSlimes = (data and data.PlotSlimes) or {}
     local plot = getMyPlot()
     local liveFolder = getPlayerSlimesFolder()
     local free = {}
+
     if not plot then return free end
+
     local stands = plot:FindFirstChild("Stands")
     if not stands then return free end
+
     for _, stand in ipairs(stands:GetChildren()) do
-        local n = tonumber(stand.Name)
-        if n == nil and not stand:FindFirstChild("Main") then continue end
-        if isUnlocked(stand.Name, baseLevel) and not isOccupied(stand.Name, plotSlimes, liveFolder, stand) then
-            table.insert(free, { name = stand.Name, num = n or 999, stand = stand })
+        local slotName = tostring(stand.Name)
+
+        if isUnlocked(slotName, baseLevel)
+            and not isOccupied(slotName, plotSlimes, liveFolder, stand)
+        then
+            table.insert(free, {
+                name = slotName,
+                num = tonumber(slotName) or math.huge,
+                stand = stand,
+            })
         end
     end
-    table.sort(free, function(a, b) return a.num < b.num end)
+
+    table.sort(free, function(a, b)
+        local an = tonumber(a.name)
+        local bn = tonumber(b.name)
+
+        if an and bn then
+            return an < bn
+        elseif an then
+            return true
+        elseif bn then
+            return false
+        end
+
+        return tostring(a.name) < tostring(b.name)
+    end)
+
     return free
 end
 
@@ -4005,9 +4066,9 @@ end
 
 -- ============================================================
 -- UNIVERSAL LUCKY BOX PLACE / OPEN (ALL types)
--- Place Boxes  -> hop-teleport to each free slot + spam Place Slime
---                 (server requires player near stand to place)
--- Open Boxes   -> Open Lucky Block on every occupied stand (all types)
+-- NO FIXED SLOT LIMIT: supports every current slot, including 100+.
+-- Place Boxes  -> every available free stand dynamically.
+-- Open Boxes   -> every occupied/placed slot dynamically.
 -- Does NOT use selectedLuckyBlockType filter.
 -- ============================================================
 
@@ -4545,6 +4606,8 @@ ManualFilters.placeButton.MouseButton1Click:Connect(function()
             rarityFilter,
             mutationFilter
         )
+
+        -- Dynamic free slots, no 100-slot cap.
         local slots = getAvailableSlots()
 
         if #tools == 0 then
@@ -4722,6 +4785,8 @@ PlaceBtn.MouseButton1Click:Connect(function()
         end
 
         local tools = getSlimeTools()
+
+        -- Dynamic free slots, no 100-slot cap.
         local slots = getAvailableSlots()
 
         if #tools == 0 then
