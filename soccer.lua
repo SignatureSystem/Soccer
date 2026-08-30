@@ -6235,12 +6235,14 @@ task.spawn(function()
 
                 StatusLabel.Text =
                     string.format(
-                        "%s HOLDING confirmed (#%d) -> base",
+                        "%s HOLDING confirmed (#%d) -> base in 1s",
                         tostring(selectedLuckyBlockType),
                         totalCollected
                     )
 
-                task.wait(0.25)
+                -- After holdingSlime is TRUE, wait exactly 1 second
+                -- before teleporting back to base.
+                task.wait(1.0)
 
                 -- This can only execute after authoritative holding confirmation.
                 teleportToBase()
