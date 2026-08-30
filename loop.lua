@@ -31,19 +31,21 @@
 -- -> back to Common
 --
 -- PER RARITY:
---   * process up to 20 boxes total
---   * acquire/place/open in batches of 10
+--   * process ONE batch of up to 10 boxes
+--   * fully finish that batch before touching the next rarity
 --
--- EACH BATCH:
---   1) Steal up to 10 world Lucky Blocks of the current rarity
+-- EACH RARITY MUST COMPLETE THIS ENTIRE FLOW:
+--   1) Steal up to 10 world Lucky Blocks of the CURRENT rarity
 --   2) Confirm their new Inventory UIDs
---   3) Teleport to free stands and place those exact UIDs
---   4) Open those exact slots
---   5) Wait 1 second
---   6) Detect only newly-created slimes in those opened slots
---   7) Pick those generated slimes into Inventory
---   8) Sell those exact generated UIDs using
+--   3) STOP STEALING
+--   4) Teleport to free stands and place those exact UIDs
+--   5) Open those exact slots
+--   6) Wait 1 second
+--   7) Detect only newly-created slimes in those opened slots
+--   8) Pick those generated slimes into Inventory
+--   9) Sell those exact generated UIDs using
 --          Sell Slime From Inventory
+--  10) ONLY AFTER SELLING is complete, advance to next rarity
 --
 -- Dynamic stands: NO fixed 100-slot limit.
 -- Server authoritative.
@@ -61,7 +63,10 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 -- CONFIG
 -- ============================================================
 
-local BOXES_PER_RARITY = 20
+-- One complete batch per rarity.
+-- The script MUST finish steal -> place -> open -> sell
+-- before it starts collecting the next rarity.
+local BOXES_PER_RARITY = 10
 local BATCH_SIZE = 10
 
 local WORLD_SCAN_INTERVAL = 0.08
@@ -231,7 +236,7 @@ local Status = Instance.new("TextLabel")
 Status.Size = UDim2.new(1, -20, 0, 59)
 Status.Position = UDim2.new(0, 10, 0, 70)
 Status.BackgroundTransparency = 1
-Status.Text = "Ready | world steal -> place -> open -> sell"
+Status.Text = "Ready | 10 per rarity | finish batch before next"
 Status.TextColor3 = Color3.fromRGB(185, 185, 200)
 Status.TextSize = 10
 Status.Font = Enum.Font.Gotham
@@ -2172,93 +2177,74 @@ task.spawn(function()
                         currentRarityIndex
                     ]
 
-                local processedForRarity = 0
-                local soldForRarity = 0
+                Status.Text =
+                    string.format(
+                        "%s | collect up to %d -> place -> open -> sell",
+                        rarity,
+                        BATCH_SIZE
+                    )
+
+                -- EXACT SEQUENCE:
+                -- ONE rarity only.
+                -- processBatch() itself blocks until the entire current batch
+                -- has completed:
+                --
+                -- steal current rarity
+                -- -> place
+                -- -> open
+                -- -> wait 1 second
+                -- -> identify generated slimes
+                -- -> pick generated slimes
+                -- -> sell generated UIDs
+                --
+                -- No next-rarity pickup can start before this returns.
+                local placedCount,
+                    generatedCount,
+                    soldCount =
+                    processBatch(
+                        rarity,
+                        BATCH_SIZE
+                    )
+
+                if not enabled then
+                    return
+                end
 
                 Status.Text =
                     string.format(
-                        "%s | world steal cycle | value %s",
+                        "%s COMPLETE | boxes %d | generated %d | sold %d",
                         rarity,
-                        tostring(
-                            LUCKY_BLOCK_VALUES[rarity]
-                            or "?"
-                        )
+                        placedCount,
+                        generatedCount,
+                        soldCount
                     )
 
-                -- 20 total per rarity, batches of 10.
-                while enabled
-                    and processedForRarity
-                        < BOXES_PER_RARITY
-                do
-                    local remaining =
-                        BOXES_PER_RARITY
-                        - processedForRarity
-
-                    local wanted =
-                        math.min(
-                            BATCH_SIZE,
-                            remaining
-                        )
-
-                    local placedCount,
-                        generatedCount,
-                        soldCount =
-                        processBatch(
-                            rarity,
-                            wanted
-                        )
-
-                    processedForRarity +=
-                        placedCount
-
-                    soldForRarity +=
-                        soldCount
-
-                    Status.Text =
-                        string.format(
-                            "%s | boxes %d/%d | generated %d | sold %d",
-                            rarity,
-                            processedForRarity,
-                            BOXES_PER_RARITY,
-                            generatedCount,
-                            soldForRarity
-                        )
-
-                    if placedCount == 0 then
-                        break
-                    end
-
+                -- Only NOW can the next rarity begin.
+                if placedCount == 0 then
+                    task.wait(EMPTY_RARITY_DELAY)
+                else
                     task.wait(BETWEEN_BATCHES)
                 end
 
-                if enabled then
+                currentRarityIndex += 1
+
+                if currentRarityIndex
+                    > #RARITY_ORDER
+                then
+                    currentRarityIndex = 1
+
                     Status.Text =
-                        string.format(
-                            "%s done | processed %d/%d | sold %d | next rarity",
-                            rarity,
-                            processedForRarity,
-                            BOXES_PER_RARITY,
-                            soldForRarity
+                        "All rarities complete -> restarting Common"
+
+                    task.wait(FULL_LOOP_DELAY)
+                else
+                    Status.Text =
+                        "Next rarity -> "
+                        .. tostring(
+                            RARITY_ORDER[
+                                currentRarityIndex
+                            ]
                         )
-
-                    if processedForRarity == 0 then
-                        task.wait(EMPTY_RARITY_DELAY)
-                    else
-                        task.wait(BETWEEN_BATCHES)
-                    end
-
-                    currentRarityIndex += 1
-
-                    if currentRarityIndex
-                        > #RARITY_ORDER
-                    then
-                        currentRarityIndex = 1
-
-                        Status.Text =
-                            "Full rarity loop complete -> Common"
-
-                        task.wait(FULL_LOOP_DELAY)
-                    end
                 end
             end, debug.traceback)
 
@@ -2286,7 +2272,7 @@ print("====================================================")
 print("[LuckyBoxWorldCycle] Loaded")
 print("NO SERVER HOP")
 print("WORLD STEAL = teleport -> ProximityPrompt -> own base -> confirm UID")
-print("20 per rarity | 10 per batch")
-print("Then: place -> open -> wait 1s -> pick generated -> sell exact UID")
+print("ONE batch per rarity | up to 10 boxes")
+print("STRICT: collect rarity -> place -> open -> wait 1s -> pick generated -> sell -> NEXT rarity")
 print("Dynamic stands | NO 100-slot limit")
 print("====================================================")
