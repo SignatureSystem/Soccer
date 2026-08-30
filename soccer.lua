@@ -50,22 +50,34 @@ local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
 local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
-    ["Japan"] = 10000000, ["Icons"] = 5000000, ["Spain"] = 2500000, ["Champions"] = 1000000,
-    ["OG"] = 500000, ["Exclusive"] = 75000, ["LIMITED"] = 75000,
-    ["Divine"] = 50000, ["Slime God"] = 30000, ["Secret"] = 10000,
-    ["Mythic"] = 2500, ["Legendary"] = 750, ["Epic"] = 250,
-    ["Rare"] = 100, ["Common"] = 25,
+    ["Alternative"] = 9000000,
+    ["Japan"] = 7000000,
+    ["Icons"] = 5000000,
+    ["Spain"] = 2500000,
+    ["Champions"] = 1000000,
+    ["OG"] = 500000,
+    ["Exclusive"] = 75000,
+    ["LIMITED"] = 75000,
+    ["Divine"] = 50000,
+    ["Slime God"] = 30000,
+    ["Secret"] = 10000,
+    ["Mythic"] = 2500,
+    ["Legendary"] = 750,
+    ["Epic"] = 250,
+    ["Rare"] = 100,
+    ["Common"] = 25,
 }
 
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
-    "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan",
+    "Slime God", "Divine", "Exclusive", "OG", "Champions",
+    "Spain", "Icons", "Japan", "Alternative", "LIMITED",
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
 local ALL_MUTATIONS = {
     "Golden", "Diamond", "Rainbow", "Cursed", "Divine", "Fallen",
+    "Joker", "Stellar",
     "Volcanic", "Toxic", "Taco", "Cosmic", "Slimey",
 }
 local PICK_OPTIONS = {}
@@ -78,7 +90,7 @@ local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan",
+    "Spain", "Icons", "Japan", "Alternative",
 }
 
 local selectedUpgradeRarity = "All"
@@ -120,6 +132,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Spain",
     "Icons",
     "Japan",
+    "Alternative",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -148,6 +161,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
     ["Japan"] = { ["Japan Lucky Block"] = true },
+    ["Alternative"] = { ["Alternative Lucky Block"] = true },
 }
 
 -- Default to the newest live tier.
@@ -2428,9 +2442,12 @@ end
 --   1) Match each current inventory record to its Tool by slimeUID
 --   2) Resolve that exact slime definition by inventoryEntry.id
 --   3) Use THAT individual slime's inventoryEntry.level
---   4) Apply THAT individual slime's mutation + event_mutations
---   5) Apply current rebirth CashMulti
---   6) Sort the final calculated earnings DESCENDING
+--   4) Apply current rebirth CashMulti
+--   5) Apply getItemEconomyMultiplier(entry), including mutation/event
+--      mutation and current economy traits such as Huge
+--   6) Apply Invite/Friend bonus exactly like PlotStandInteractionController
+--   7) Apply AdminProductionMult
+--   8) Sort the final calculated earnings DESCENDING
 --
 -- Therefore:
 --   A highly-upgraded NORMAL slime can rank above a low-level CURSED slime.
@@ -2456,13 +2473,37 @@ local function getRebirthCashMultiplier(playerData)
     end
 
     local rebirth = playerData.Rebirth
-    local rebirths =
+
+    -- CURRENT GAME:
+    -- PlotStandInteractionController reads:
+    -- SoccerGameCatalog.RebirthProgressionTable[data.Rebirth].CashMulti
+    local progression =
+        _Lib
+        and _Lib.SoccerGameCatalog
+        and _Lib.SoccerGameCatalog.RebirthProgressionTable
+
+    if type(progression) == "table" then
+        local def =
+            progression[rebirth]
+            or progression[tostring(rebirth)]
+            or progression[tonumber(rebirth)]
+
+        if def and tonumber(def.CashMulti) then
+            return tonumber(def.CashMulti)
+        end
+    end
+
+    -- Legacy fallback.
+    local legacyRebirths =
         _Lib
         and _Lib.Database
         and _Lib.Database.Rebirths
 
-    if rebirths then
-        local def = rebirths[rebirth] or rebirths[tostring(rebirth)]
+    if type(legacyRebirths) == "table" then
+        local def =
+            legacyRebirths[rebirth]
+            or legacyRebirths[tostring(rebirth)]
+            or legacyRebirths[tonumber(rebirth)]
 
         if def and tonumber(def.CashMulti) then
             return tonumber(def.CashMulti)
@@ -2477,21 +2518,44 @@ local function resolveSlimeDefinition(inventoryEntry)
         return nil
     end
 
-    local slimeId = inventoryEntry.id or inventoryEntry.Id
+    local slimeId =
+        inventoryEntry.id
+        or inventoryEntry.Id
+        or inventoryEntry.slimeId
+        or inventoryEntry.slimeID
 
-    if slimeId == nil
-        or not _Lib
-        or not _Lib.Database
-        or not _Lib.Database.Slimes
-    then
+    if slimeId == nil or not _Lib then
         return nil
     end
 
-    local db = _Lib.Database.Slimes
+    -- CURRENT GAME catalog.
+    local catalog =
+        _Lib.SoccerGameCatalog
+        and _Lib.SoccerGameCatalog.SoccerPlayerCatalog
 
-    return db[slimeId]
-        or db[tostring(slimeId)]
-        or db[tonumber(slimeId)]
+    if type(catalog) == "table" then
+        local def =
+            catalog[slimeId]
+            or catalog[tostring(slimeId)]
+            or catalog[tonumber(slimeId)]
+
+        if def then
+            return def
+        end
+    end
+
+    -- Legacy database fallback.
+    local db =
+        _Lib.Database
+        and _Lib.Database.Slimes
+
+    if type(db) == "table" then
+        return db[slimeId]
+            or db[tostring(slimeId)]
+            or db[tonumber(slimeId)]
+    end
+
+    return nil
 end
 
 local function isLuckyInventoryEntry(tool, inventoryEntry, def)
@@ -2573,68 +2637,210 @@ local function calculateOwnedSlimeEarnings(inventoryEntry, def, playerData)
         return 0
     end
 
+    playerData = playerData or getData()
+
     local baseMps = getBaseProductionMPS(inventoryEntry, def)
-    local level = math.max(1, tonumber(inventoryEntry.level) or 1)
-    local rebirthMulti = getRebirthCashMultiplier(playerData)
+    local level = math.max(
+        1,
+        tonumber(inventoryEntry.level)
+        or tonumber(inventoryEntry.Level)
+        or 1
+    )
 
-    local earnings = baseMps
+    local rebirthCashMulti =
+        getRebirthCashMultiplier(playerData)
 
-    -- Game's own level + rebirth earnings formula.
-    if _Lib
+    -- CURRENT GAME registry used by PlotStandInteractionController.
+    local gameplay =
+        _Lib
+        and _Lib.GameplaySharedRegistry
+
+    -- Legacy alias fallback for older game builds.
+    local legacyShared =
+        _Lib
         and _Lib.Shared
-        and typeof(_Lib.Shared.getRebirthScaledEarnings) == "function"
+
+    local mainScaled = baseMps
+    local baseScaled = baseMps
+
+    -- EXACT CURRENT FLOW:
+    -- main = getRebirthScaledEarnings(baseMps, level, rebirthCashMulti)
+    -- base = getRebirthScaledEarnings(baseMps, level, 1)
+    local earningsFunction =
+        gameplay
+        and gameplay.getRebirthScaledEarnings
+
+    if typeof(earningsFunction) ~= "function"
+        and legacyShared
     then
-        local ok, result = pcall(function()
-            return _Lib.Shared.getRebirthScaledEarnings(
+        earningsFunction =
+            legacyShared.getRebirthScaledEarnings
+    end
+
+    if typeof(earningsFunction) == "function" then
+        local okMain, mainResult = pcall(function()
+            return earningsFunction(
                 baseMps,
                 level,
-                rebirthMulti
+                rebirthCashMulti
             )
         end)
 
-        if ok and tonumber(result) then
-            earnings = tonumber(result)
+        if okMain and tonumber(mainResult) then
+            mainScaled = tonumber(mainResult)
+        end
+
+        local okBase, baseResult = pcall(function()
+            return earningsFunction(
+                baseMps,
+                level,
+                1
+            )
+        end)
+
+        if okBase and tonumber(baseResult) then
+            baseScaled = tonumber(baseResult)
         end
     end
 
-    -- Game's own mutation calculation.
-    local mutation = inventoryEntry.mutation or "None"
-    local eventMutations = inventoryEntry.event_mutations or {}
-    local mutationMulti = 1
+    -- CURRENT GAME:
+    -- getItemEconomyMultiplier(entry) is the authoritative per-item economy
+    -- multiplier. It covers the item's mutations/event mutations and current
+    -- economy traits such as Huge.
+    local economyMulti = 1
 
-    if _Lib
-        and _Lib.Shared
-        and typeof(_Lib.Shared.getMutationMulti) == "function"
+    if gameplay
+        and typeof(
+            gameplay.getItemEconomyMultiplier
+        ) == "function"
     then
-        local ok, result = pcall(function()
-            return _Lib.Shared.getMutationMulti(
-                mutation,
-                eventMutations
-            )
-        end)
+        local okEconomy, resultEconomy =
+            pcall(function()
+                return gameplay.getItemEconomyMultiplier(
+                    inventoryEntry
+                )
+            end)
 
-        if ok and tonumber(result) then
-            mutationMulti = tonumber(result)
+        if okEconomy and tonumber(resultEconomy) then
+            economyMulti =
+                math.max(
+                    0,
+                    tonumber(resultEconomy)
+                )
+        end
+    else
+        -- Legacy fallback if the current economy helper is unavailable.
+        local mutation =
+            inventoryEntry.mutation
+            or inventoryEntry.Mutation
+            or "None"
+
+        local eventMutations =
+            inventoryEntry.event_mutations
+            or inventoryEntry.EventMutations
+            or {}
+
+        local mutationFunction =
+            legacyShared
+            and legacyShared.getMutationMulti
+
+        if typeof(mutationFunction) ~= "function"
+            and gameplay
+        then
+            mutationFunction =
+                gameplay.getMutationMulti
+        end
+
+        if typeof(mutationFunction) == "function" then
+            local okMutation, mutationResult =
+                pcall(function()
+                    return mutationFunction(
+                        mutation,
+                        eventMutations
+                    )
+                end)
+
+            if okMutation
+                and tonumber(mutationResult)
+            then
+                economyMulti =
+                    tonumber(mutationResult)
+            end
+        end
+
+        -- Huge fallback from GameplayRuntimeDefinitions when the newer
+        -- getItemEconomyMultiplier helper itself is unavailable.
+        local isHuge =
+            inventoryEntry.is_huge == true
+            or inventoryEntry.isHuge == true
+
+        if isHuge then
+            local hugeEconomy = 3
+
+            if gameplay
+                and type(gameplay.HUGE_TRAIT) == "table"
+                and tonumber(
+                    gameplay.HUGE_TRAIT.EconomyMultiplier
+                )
+            then
+                hugeEconomy =
+                    tonumber(
+                        gameplay.HUGE_TRAIT.EconomyMultiplier
+                    )
+            end
+
+            economyMulti =
+                economyMulti
+                * math.max(1, hugeEconomy)
         end
     end
 
-    earnings = earnings * mutationMulti
+    local inviteBonus =
+        tonumber(
+            playerData
+            and playerData.InviteBonusMult
+        )
+        or 0
 
-    -- These are current global/player production multipliers.
-    -- They do not change the relative order because they apply equally
-    -- to every owned slime, but applying them makes the debug Cash/s
-    -- closer to the game's current production display.
-    local inviteBonus = tonumber(playerData and playerData.InviteBonusMult) or 0
-    local friendBonus = tonumber(LocalPlayer:GetAttribute("FriendPresenceBonus")) or 0
-    local productionBonus = 1 + inviteBonus + friendBonus
+    local friendBonus =
+        tonumber(
+            LocalPlayer:GetAttribute(
+                "FriendPresenceBonus"
+            )
+        )
+        or 0
+
     local adminProductionMult =
-        tonumber(workspace:GetAttribute("AdminProductionMult")) or 1
+        tonumber(
+            workspace:GetAttribute(
+                "AdminProductionMult"
+            )
+        )
+        or 1
 
-    earnings = earnings * productionBonus * adminProductionMult
+    -- EXACT CURRENT PlotStandInteractionController formula:
+    --
+    -- (mainScaled + baseScaled * (inviteBonus + friendBonus))
+    --     * economyMulti
+    --     * adminProductionMult
+    local earnings =
+        (
+            mainScaled
+            + baseScaled
+                * (
+                    inviteBonus
+                    + friendBonus
+                )
+        )
+        * economyMulti
+        * adminProductionMult
 
     earnings = tonumber(earnings) or 0
 
-    if earnings ~= earnings then
+    if earnings ~= earnings
+        or earnings == math.huge
+        or earnings == -math.huge
+    then
         earnings = 0
     end
 
@@ -2642,8 +2848,9 @@ local function calculateOwnedSlimeEarnings(inventoryEntry, def, playerData)
 end
 
 -- Gift queue ordered by the EXACT same final CURRENT cash/s used by Place Slimes.
--- This means level + rebirth + base production + mutation/event mutation +
--- invite/friend/admin production multipliers are already included.
+-- This uses the same CURRENT calculator as Place Slimes:
+-- level + rebirth + invite/friend bonus + getItemEconomyMultiplier(entry)
+-- (mutations/event mutations/Huge) + AdminProductionMult.
 local function getGiftableInventoryUIDs()
     local data = getData()
     local inventory = data and data.Inventory
