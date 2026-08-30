@@ -1,4 +1,4 @@
--- Combined Script: JAPAN + ICONS UPDATE + LOWEST-COST Auto Upgrade (NO FILTERS) + FILTERED Lucky Block Collector
+-- Combined Script: JAPAN + ICONS UPDATE + 20x20 LOWEST-COST BATCH-SPAM Auto Upgrade (NO FILTERS) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
@@ -18,9 +18,15 @@ local COLLECT_INTERVAL = 0.35
 local COLLECT_SCAN = 1.5
 local ONLY_WHEN_PADGUI_ENABLED = true
 
-local UPGRADE_DELAY = 0.25
-local UPGRADE_SCAN = 1.0
+local UPGRADE_DELAY = 0.08
+local UPGRADE_SCAN = 0.20
 local MAX_LEVEL = 100
+
+-- Auto Upgrade batch-spam settings
+local UPGRADE_BATCH_SIZE = 20
+local UPGRADE_SPAM_ROUNDS = 2
+local UPGRADE_SPAM_GAP = 0.06
+local UPGRADE_BATCH_SETTLE = 0.22
 
 local REBIRTH_INTERVAL = 5
 local JUMP_UPGRADE_INTERVAL = 0.5
@@ -1508,7 +1514,7 @@ local function setUpgradeState(on)
 
     StatusLabel.Text =
         on
-        and "Auto Upgrade ON | Lowest next cost first"
+        and "Auto Upgrade ON | 20x20 lowest-cost batch spam"
         or "Auto Upgrade OFF"
 end
 local function setLuckyState(on)
@@ -5145,12 +5151,9 @@ task.spawn(function()
                         tonumber(stats.lucky) or 0
                     )
 
-                task.wait(0.35)
+                task.wait(0.20)
                 return
             end
-
-            local cheapest =
-                upgrades[1]
 
             local cash =
                 numberFromGameValue(
@@ -5159,58 +5162,120 @@ task.spawn(function()
                 or getCash()
                 or 0
 
-            local cost =
-                tonumber(cheapest.cost)
-                or math.huge
+            -- Build one LOWEST-COST batch of up to 20 DIFFERENT slots.
+            -- Reserve known costs from the current cash budget so the batch
+            -- does not intentionally exceed available cash.
+            local remainingCash = cash
+            local batch = {}
 
-            -- Since the list is sorted ascending, if the cheapest
-            -- upgrade cannot be afforded, none of the others can.
-            if cost > cash then
+            for _, candidate in ipairs(upgrades) do
+                if #batch >= UPGRADE_BATCH_SIZE then
+                    break
+                end
+
+                local cost =
+                    tonumber(candidate.cost)
+
+                if cost
+                    and cost <= remainingCash
+                then
+                    table.insert(batch, candidate)
+                    remainingCash =
+                        math.max(
+                            0,
+                            remainingCash - cost
+                        )
+                end
+            end
+
+            if #batch == 0 then
+                local cheapest = upgrades[1]
+                local cost =
+                    cheapest
+                    and tonumber(cheapest.cost)
+                    or math.huge
+
                 StatusLabel.Text =
                     string.format(
-                        "Upgrade ON | Cheapest slot %s costs $%s | waiting for cash",
-                        tostring(cheapest.id),
-                        tostring(math.floor(cost))
+                        "Upgrade ON | cheapest $%s | waiting for cash",
+                        cost ~= math.huge
+                            and tostring(math.floor(cost))
+                            or "?"
                     )
 
-                task.wait(0.30)
+                task.wait(0.20)
                 return
             end
 
             StatusLabel.Text =
                 string.format(
-                    "Upgrading cheapest | Slot %s | Lv %d | Cost $%s",
-                    tostring(cheapest.id),
-                    tonumber(cheapest.level) or 1,
-                    tostring(math.floor(cost))
+                    "20x20 Upgrade Spam | firing %d/%d lowest-cost slots",
+                    #batch,
+                    UPGRADE_BATCH_SIZE
                 )
 
-            local success, routeOrErr =
-                performUpgradeCandidate(
-                    cheapest
-                )
+            print("====================================================")
+            print(
+                "[AutoUpgrade] 20x20 LOWEST-COST BATCH",
+                "| Slots:", #batch,
+                "| Spam rounds:", UPGRADE_SPAM_ROUNDS
+            )
 
-            if success then
-                StatusLabel.Text =
+            for i, candidate in ipairs(batch) do
+                print(
                     string.format(
-                        "✓ Upgraded slot %s | rescanning lowest cost...",
-                        tostring(cheapest.id)
+                        "#%d Slot %s | Cost=%s | Lv=%d",
+                        i,
+                        tostring(candidate.id),
+                        tostring(
+                            candidate.cost
+                            and math.floor(candidate.cost)
+                            or "?"
+                        ),
+                        tonumber(candidate.level) or 1
                     )
-            else
-                warn(
-                    "[AutoUpgrade] Cheapest slot",
-                    tostring(cheapest.id),
-                    "did not level:",
-                    tostring(routeOrErr)
                 )
+            end
+            print("====================================================")
 
-                StatusLabel.Text =
-                    "Upgrade retry | slot "
-                    .. tostring(cheapest.id)
+            -- Rapid concurrent upgrade waves.
+            -- Each wave hits all 20 slots almost at once.
+            local firedCount = 0
+
+            for round = 1, UPGRADE_SPAM_ROUNDS do
+                if not upgradeEnabled then
+                    break
+                end
+
+                for _, candidate in ipairs(batch) do
+                    task.spawn(function()
+                        local fired =
+                            FireUpgradeSlot(
+                                candidate.id
+                            )
+
+                        if fired then
+                            firedCount += 1
+                        end
+                    end)
+                end
+
+                if round < UPGRADE_SPAM_ROUNDS then
+                    task.wait(UPGRADE_SPAM_GAP)
+                end
             end
 
-            -- The game's own stand upgrade callback uses a ~0.2s debounce.
-            task.wait(math.max(UPGRADE_DELAY, 0.22))
+            -- Brief settle only; do not serialize 20 verification waits.
+            task.wait(UPGRADE_BATCH_SETTLE)
+
+            StatusLabel.Text =
+                string.format(
+                    "20x20 Batch fired | %d requests | rescanning cheapest 20...",
+                    firedCount
+                )
+
+            -- Immediately rebuild the next globally cheapest batch.
+            task.wait(UPGRADE_DELAY)
         end, debug.traceback)
 
         if not ok then
@@ -5223,10 +5288,10 @@ task.spawn(function()
                 "Auto Upgrade error: "
                 .. tostring(err):match("^[^\\n]+")
 
-            task.wait(0.45)
+            task.wait(0.30)
         end
 
-        task.wait(0.05)
+        task.wait(0.02)
     end
 end)
 
