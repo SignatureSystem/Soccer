@@ -9,24 +9,13 @@ local CoreGui = game:GetService("CoreGui")
 
 local player = Players.LocalPlayer
 
--- Same startup condition used by PlotStandInteractionController
-repeat
-    task.wait()
-until _G._loaded == true
-    and _G.MyPlot
-    and _G._Lib
-
-local Lib = _G._Lib
-local MyPlot = _G.MyPlot
-local Stands = MyPlot:WaitForChild("Stands")
-
--- Current game's exact upgrade channel:
--- PlotStandInteractionController:
--- GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent")
-local UpgradeRemote = Lib.GameRemoteRegistry.new(
-    "Upgrade Slime",
-    "RemoteEvent"
-)
+-- GUI must appear immediately.
+-- Game references are resolved in the background after the button exists.
+local Lib = nil
+local MyPlot = nil
+local Stands = nil
+local UpgradeRemote = nil
+local gameReady = false
 
 local enabled = false
 
@@ -62,22 +51,26 @@ gui.Name = "SimpleLowestCostUpgradeGUI"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-local ok = pcall(function()
-    gui.Parent = CoreGui
-end)
+-- PlayerGui first is more reliable on mobile executors.
+local PlayerGui = player:WaitForChild("PlayerGui", 10)
 
-if not ok then
-    gui.Parent = player:WaitForChild("PlayerGui")
+if PlayerGui then
+    gui.Parent = PlayerGui
+else
+    pcall(function()
+        gui.Parent = CoreGui
+    end)
 end
 
 local button = Instance.new("TextButton")
 button.Name = "AutoUpgradeButton"
 button.Size = UDim2.new(0, 220, 0, 48)
-button.Position = UDim2.new(0, 20, 0.5, -24)
+button.Position = UDim2.new(0, 20, 0, 120)
 button.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
 button.BorderSizePixel = 0
-button.Text = "Auto Upgrade: OFF"
+button.Text = "Auto Upgrade: LOADING..."
 button.TextColor3 = Color3.fromRGB(255, 100, 100)
 button.TextSize = 15
 button.Font = Enum.Font.GothamBold
@@ -93,6 +86,13 @@ stroke.Thickness = 1.5
 stroke.Parent = button
 
 local function updateButton()
+    if not gameReady then
+        button.Text = "Auto Upgrade: LOADING..."
+        button.TextColor3 = Color3.fromRGB(255, 210, 100)
+        button.BackgroundColor3 = Color3.fromRGB(60, 52, 30)
+        return
+    end
+
     if enabled then
         button.Text = "Auto Upgrade: ON"
         button.TextColor3 = Color3.fromRGB(100, 255, 135)
@@ -105,8 +105,58 @@ local function updateButton()
 end
 
 button.MouseButton1Click:Connect(function()
+    if not gameReady then
+        updateButton()
+        return
+    end
+
     enabled = not enabled
     updateButton()
+end)
+
+-- Resolve the live game objects AFTER GUI creation.
+task.spawn(function()
+    local started = os.clock()
+
+    while running() and os.clock() - started < 60 do
+        local lib = rawget(_G, "_Lib")
+        local plot = rawget(_G, "MyPlot")
+
+        if lib and plot then
+            local stands = plot:FindFirstChild("Stands")
+
+            if stands
+                and lib.GameRemoteRegistry
+                and typeof(lib.GameRemoteRegistry.new) == "function"
+            then
+                local okRemote, remote = pcall(function()
+                    return lib.GameRemoteRegistry.new(
+                        "Upgrade Slime",
+                        "RemoteEvent"
+                    )
+                end)
+
+                if okRemote and remote then
+                    Lib = lib
+                    MyPlot = plot
+                    Stands = stands
+                    UpgradeRemote = remote
+                    gameReady = true
+                    updateButton()
+                    print("[SimpleAutoUpgrade] Game systems ready")
+                    return
+                end
+            end
+        end
+
+        task.wait(0.25)
+    end
+
+    if running() and not gameReady then
+        button.Text = "Auto Upgrade: GAME NOT READY"
+        button.TextColor3 = Color3.fromRGB(255, 120, 120)
+        warn("[SimpleAutoUpgrade] _G._Lib / _G.MyPlot / Upgrade Slime route not ready")
+    end
 end)
 
 -- ============================================================
@@ -114,6 +164,10 @@ end)
 -- ============================================================
 
 local function getData()
+    if not gameReady or not Lib or not Lib.Data then
+        return nil
+    end
+
     local okData, data = pcall(function()
         return Lib.Data:Get()
     end)
@@ -126,6 +180,10 @@ local function getData()
 end
 
 local function getCatalogDefinition(id)
+    if not gameReady or not Lib then
+        return nil
+    end
+
     local catalog =
         Lib.SoccerGameCatalog
         and Lib.SoccerGameCatalog.SoccerPlayerCatalog
@@ -140,7 +198,10 @@ local function getCatalogDefinition(id)
 end
 
 local function getLiveLevel(slotName, entry)
-    local stand = Stands:FindFirstChild(tostring(slotName))
+    local stand =
+        Stands
+        and Stands:FindFirstChild(tostring(slotName))
+        or nil
 
     -- PlotStandInteractionController writes the current level
     -- onto the Stand's "level" attribute.
@@ -290,7 +351,7 @@ end
 
 task.spawn(function()
     while running() do
-        if not enabled then
+        if not gameReady or not enabled then
             task.wait(0.25)
             continue
         end
@@ -339,5 +400,5 @@ end)
 updateButton()
 
 print(
-    "[SimpleAutoUpgrade] VERIFIED | lowest next-upgrade cost first"
+    "[SimpleAutoUpgrade] GUI loaded | waiting for game systems..."
 )
