@@ -1,7 +1,7 @@
 -- Combined Script: JAPAN + ICONS UPDATE + ALL-AVAILABLE DYNAMIC SPAM Auto Upgrade (NO FILTERS / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
--- + WORKING Lucky Box collector preserved; invisibility is best-effort/non-blocking
+-- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -1102,7 +1102,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] NO INVISIBILITY GATE BUILD")
+print("[LuckyCollector] EXACT reference steal flow | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -5772,26 +5772,29 @@ task.spawn(function()
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            -- If we are already carrying a stolen Lucky Block,
-            -- finish returning/depositing it before looking for another.
+            -- Exact reference behavior if already carrying.
             if LocalPlayer:GetAttribute("holdingSlime") == true then
-                StatusLabel.Text = "Lucky Block: carrying -> returning to base"
-                teleportToBase()
-                task.wait(0.35)
+                StatusLabel.Text =
+                    "Lucky Block: carrying -> returning to base"
 
-                local depositDeadline = os.clock() + 5
+                teleportToBase()
+
+                local t = os.clock() + 1
+
                 while luckyEnabled
-                    and LocalPlayer:GetAttribute("holdingSlime") == true
-                    and os.clock() < depositDeadline
+                    and LocalPlayer:GetAttribute("holdingSlime")
+                    and os.clock() < t
                 do
-                    task.wait(0.10)
+                    task.wait(0.1)
                 end
 
                 luckyBlockBusy = false
-                task.wait(0.10)
+                task.wait(0.1)
                 continue
             end
 
+            -- Keep the combined script's selected-type target detection.
+            -- ONLY the steal movement/prompt/deposit flow is replaced.
             local block = getTargetLuckyBlock()
 
             if not block then
@@ -5800,186 +5803,147 @@ task.spawn(function()
                     selectedLuckyBlockType,
                     totalCollected
                 )
+
                 luckyBlockBusy = false
-                task.wait(0.50)
+                task.wait(0.15)
                 continue
             end
 
-            -- ===================================================
-            -- WORKING LUCKY BLOCK ORDER (kept intact):
-            -- 1) FIRE invisibility attempt first
-            -- 2) Do NOT require invisibility to succeed/confirm
-            -- 3) Teleport to Lucky Block
-            -- 4) Pick it up / retry using the original prompt mechanism
-            -- 5) Wait until holdingSlime == true
-            -- 6) ONLY THEN return to base
-            -- ===================================================
+            StatusLabel.Text =
+                tostring(selectedLuckyBlockType)
+                .. " Lucky Block found - stealing..."
 
-            StatusLabel.Text = "Lucky Block: cloak fire (NON-BLOCKING) -> collecting..."
-
-            -- Invisibility is best-effort only. It MUST be attempted, but a
-            -- missing cloak / failed activation must never block collection.
+            -- EXACT reference cloak step.
             pcall(function()
                 activateCloak()
             end)
-            task.wait(0.12)
 
+            task.wait(0.2)
+
+            -- EXACT reference teleport:
+            -- directly under the target.
             local root = getRoot()
 
             if not root
                 or not block.part
                 or not block.part.Parent
             then
-                StatusLabel.Text = "Lucky Block: target disappeared"
                 luckyBlockBusy = false
-                task.wait(0.25)
+                task.wait(0.15)
                 continue
             end
 
-            -- Go to the Lucky Block after the best-effort invisibility fire.
-            root.CFrame = block.part.CFrame * CFrame.new(0, 3, 4)
-            root.AssemblyLinearVelocity = Vector3.zero
-            root.AssemblyAngularVelocity = Vector3.zero
-            task.wait(0.18)
+            root.CFrame =
+                block.part.CFrame
+                * CFrame.new(0, -1, 0)
 
-            local collected = false
+            root.AssemblyLinearVelocity =
+                Vector3.zero
 
-            for pickupTry = 1, 5 do
-                if not luckyEnabled then
-                    break
-                end
+            -- EXACT reference BodyVelocity float.
+            local bv = Instance.new("BodyVelocity")
+            bv.Name = "LuckyFloat"
+            bv.Velocity = Vector3.zero
+            bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+            bv.P = 1250
+            bv.Parent = root
 
-                -- Game's actual success state.
-                if LocalPlayer:GetAttribute("holdingSlime") == true then
-                    collected = true
-                    break
-                end
+            task.wait(0.15)
 
-                -- Do NOT retry/verify invisibility here. Collection must proceed
-                -- regardless of cloak state once the initial fire was attempted.
+            -- EXACT reference prompt lookup.
+            local prompt = block.prompt
 
-                -- Stay beside the same target while retrying.
-                if block.part and block.part.Parent then
-                    local retryRoot = getRoot()
-
-                    if retryRoot then
-                        retryRoot.CFrame =
-                            block.part.CFrame * CFrame.new(0, 3, 4)
-
-                        retryRoot.AssemblyLinearVelocity = Vector3.zero
-                        retryRoot.AssemblyAngularVelocity = Vector3.zero
-                    end
-                end
-
-                -- Re-find a live prompt every attempt.
-                local prompt = nil
-
-                if block.model and block.model.Parent then
-                    for _, d in ipairs(block.model:GetDescendants()) do
-                        if d:IsA("ProximityPrompt") and d.Enabled then
-                            local action =
-                                string.lower(
-                                    tostring(d.ActionText or "")
-                                )
-
-                            if action:find("steal", 1, true)
-                                or action:find("pick", 1, true)
-                                or action:find("take", 1, true)
-                                or action:find("open", 1, true)
-                            then
-                                prompt = d
-                                break
-                            end
-
-                            if not prompt then
-                                prompt = d
-                            end
-                        end
-                    end
-                end
-
-                prompt = prompt or block.prompt
-
-                if prompt and prompt.Parent then
-                    StatusLabel.Text = string.format(
-                        "Lucky Block: pickup attempt %d/5",
-                        pickupTry
-                    )
-
-                    attemptSteal(prompt)
-
-                    -- DO NOT return home based on attemptSteal().
-                    -- Wait for the game's own holding state instead.
-                    local pickupDeadline = os.clock() + 1.50
-
-                    while luckyEnabled
-                        and os.clock() < pickupDeadline
-                    do
-                        if LocalPlayer:GetAttribute("holdingSlime") == true then
-                            collected = true
-                            break
-                        end
-
-                        task.wait(0.05)
-                    end
-
-                    if collected then
+            if (
+                not prompt
+                or not prompt.Parent
+            )
+                and block.model
+            then
+                for _, d in ipairs(
+                    block.model:GetDescendants()
+                ) do
+                    if d:IsA("ProximityPrompt")
+                        and d.Enabled
+                    then
+                        prompt = d
                         break
                     end
-                else
-                    StatusLabel.Text = string.format(
-                        "Lucky Block: prompt missing %d/5",
-                        pickupTry
+                end
+            end
+
+            -- EXACT reference steal call.
+            local ok =
+                prompt
+                and attemptSteal(prompt)
+
+            -- Same reference fallback.
+            if not ok
+                and LocalPlayer:GetAttribute("holdingSlime") == true
+            then
+                ok = true
+            end
+
+            -- EXACT reference float cleanup.
+            if bv and bv.Parent then
+                bv:Destroy()
+            end
+
+            root = getRoot()
+
+            if root then
+                root.AssemblyLinearVelocity =
+                    Vector3.zero
+            end
+
+            -- EXACT reference deposit flow.
+            if ok then
+                totalCollected += 1
+
+                StatusLabel.Text =
+                    string.format(
+                        "%s stolen (#%d) - depositing...",
+                        tostring(selectedLuckyBlockType),
+                        totalCollected
                     )
+
+                task.wait(0.25)
+
+                teleportToBase()
+
+                task.wait(0.3)
+
+                local t = os.clock() + 1
+
+                while luckyEnabled
+                    and LocalPlayer:GetAttribute("holdingSlime")
+                    and os.clock() < t
+                do
+                    task.wait(0.1)
                 end
 
-                task.wait(0.20)
-            end
-
-            if not collected then
-                -- Failed pickup: DO NOT teleport home.
-                StatusLabel.Text =
-                    "Lucky Block: pickup not confirmed - retrying"
-                luckyBlockBusy = false
-                task.wait(0.25)
-                continue
-            end
-
-            totalCollected += 1
-
-            StatusLabel.Text = string.format(
-                "✓ Lucky Block confirmed (#%d) -> Base",
-                totalCollected
-            )
-
-            -- ONLY NOW, after holdingSlime is true, return to base.
-            teleportToBase()
-            task.wait(0.35)
-
-            -- Wait for deposit/release before searching for the next block.
-            local clearDeadline = os.clock() + 5
-
-            while luckyEnabled
-                and LocalPlayer:GetAttribute("holdingSlime") == true
-                and os.clock() < clearDeadline
-            do
-                task.wait(0.10)
-            end
-
-            if LocalPlayer:GetAttribute("holdingSlime") == true then
-                StatusLabel.Text =
-                    "Lucky Block: still carrying at base - retrying base"
+                if LocalPlayer:GetAttribute("holdingSlime") == true then
+                    StatusLabel.Text =
+                        "Lucky Block: still carrying at base"
+                else
+                    StatusLabel.Text =
+                        string.format(
+                            "Deposited #%d | scanning %s...",
+                            totalCollected,
+                            tostring(selectedLuckyBlockType)
+                        )
+                end
             else
-                StatusLabel.Text = string.format(
-                    "✓ Deposited (#%d) | finding next...",
-                    totalCollected
-                )
+                StatusLabel.Text =
+                    "Steal failed - retry"
+
+                task.wait(0.2)
             end
 
             luckyBlockBusy = false
         end
 
-        task.wait(0.10)
+        -- Same reference loop cadence.
+        task.wait(0.08)
     end
 end)
 
