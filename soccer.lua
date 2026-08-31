@@ -1202,7 +1202,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] NO CLOAK / NO Lucky waits | HoldDuration=0.09 | exact underneath teleport -> pickup -> base | All ordered cycle")
+print("[LuckyCollector] global HoldDuration=0.09 | exact teleport -> zero-hold pickup -> base | All = ordered equal-batch cycle")
 
 -- ============================================
 -- STATE
@@ -4585,12 +4585,12 @@ local function attemptSteal(prompt)
         return false
     end
 
-    -- Keep the requested proximity duration.
+    -- Prompt hold is globally forced to zero.
     pcall(function()
-        prompt.HoldDuration = 0.09
+        prompt.HoldDuration = 0
     end)
 
-    -- Trigger the prompt immediately; HoldDuration remains 0.09.
+    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
         local ok = pcall(function()
             fireproximityprompt(prompt)
@@ -6093,9 +6093,11 @@ task.spawn(function()
                     and LocalPlayer:GetAttribute("holdingSlime")
                     and os.clock() < t
                 do
+                    task.wait(0.1)
                 end
 
                 luckyBlockBusy = false
+                task.wait(0.1)
                 continue
             end
 
@@ -6163,6 +6165,7 @@ task.spawn(function()
                         )
 
                     luckyBlockBusy = false
+                    task.wait(0.15)
                     continue
                 end
             end
@@ -6190,6 +6193,7 @@ task.spawn(function()
                 end
 
                 luckyBlockBusy = false
+                task.wait(0.15)
                 continue
             end
 
@@ -6207,6 +6211,13 @@ task.spawn(function()
                     .. " Lucky Block found - stealing..."
             end
 
+            -- EXACT reference cloak step.
+            pcall(function()
+                activateCloak()
+            end)
+
+            task.wait(0.2)
+
             -- EXACT reference teleport:
             -- directly under the target.
             local root = getRoot()
@@ -6216,6 +6227,7 @@ task.spawn(function()
                 or not block.part.Parent
             then
                 luckyBlockBusy = false
+                task.wait(0.15)
                 continue
             end
 
@@ -6234,6 +6246,7 @@ task.spawn(function()
             bv.P = 1250
             bv.Parent = root
 
+            task.wait(0.15)
 
             -- EXACT reference prompt lookup.
             local prompt = block.prompt
@@ -6257,23 +6270,23 @@ task.spawn(function()
             end
 
             --------------------------------------------------
-            -- NO 1S WAIT -> 0.09 HOLD -> PICKUP -> BASE
+            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
             --
             -- Exact reference teleport already completed above.
             -- Immediately after arriving underneath the target:
-            -- 1) Force ALL current proximity prompts HoldDuration = 0.09
+            -- 1) Force ALL current proximity prompts HoldDuration = 0
             -- 2) Trigger the Lucky Block prompt / pick up
             -- 3) Return to base
             --------------------------------------------------
 
             StatusLabel.Text =
                 tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> 0.09 hold + pickup"
+                .. " Lucky Block -> zero hold + pickup"
 
             -- Exact loop requested by user, run immediately after teleport.
             for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0.09
+                    v.HoldDuration = 0
                 end
             end
 
@@ -6289,7 +6302,7 @@ task.spawn(function()
             end
 
             if prompt and prompt.Parent then
-                prompt.HoldDuration = 0.09
+                prompt.HoldDuration = 0
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
@@ -6343,7 +6356,8 @@ task.spawn(function()
             luckyBlockBusy = false
         end
 
-        -- No Lucky collector wait/cadence delay.
+        -- Same reference loop cadence.
+        task.wait(0.08)
     end
 end)
 
