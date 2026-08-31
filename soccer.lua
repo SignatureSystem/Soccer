@@ -1156,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] global HoldDuration=0.09 | exact teleport -> immediate zero-hold pass -> pickup -> base | NO SERVER HOP")
+print("[LuckyCollector] NO steal waits | HoldDuration=0.09 only | exact underneath teleport -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -3665,6 +3665,46 @@ local function deactivateCloak()
     if hum then pcall(function() hum:UnequipTools() end) end
 end
 
+-- Lucky collector cloak path with NO scripted waits.
+-- Normal Invis toggle still uses activateCloak() unchanged.
+local function activateCloakNoWait()
+    local tool = findCloakTool()
+    local hum = getHumanoid()
+    local char = LocalPlayer.Character
+
+    if not tool or not hum or not char then
+        return false
+    end
+
+    if tool.Parent ~= char then
+        pcall(function()
+            hum:UnequipTools()
+        end)
+
+        pcall(function()
+            hum:EquipTool(tool)
+        end)
+
+        if tool.Parent ~= char then
+            pcall(function()
+                tool.Parent = char
+            end)
+        end
+    end
+
+    local canAct = tool:FindFirstChild("CanActivate")
+    if canAct and canAct:IsA("BoolValue") then
+        canAct.Value = true
+    end
+
+    pcall(function()
+        tool:Activate()
+    end)
+
+    setLocalInvisible(true)
+    return true
+end
+
 local function getUpgradeCost(sellPrice, level)
     sellPrice = tonumber(sellPrice)
     level = tonumber(level)
@@ -4497,12 +4537,12 @@ local function attemptSteal(prompt)
         return false
     end
 
-    -- Prompt hold is globally forced to zero.
+    -- The ONLY steal timing setting:
+    -- ProximityPrompt HoldDuration stays at 0.09 seconds.
     pcall(function()
-        prompt.HoldDuration = 0
+        prompt.HoldDuration = 0.09
     end)
 
-    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
         local ok = pcall(function()
             fireproximityprompt(prompt)
@@ -4513,7 +4553,7 @@ local function attemptSteal(prompt)
         end
     end
 
-    -- Fallback.
+    -- Fallback: no extra scripted delay is added.
     local ok = pcall(function()
         prompt:InputHoldBegin()
         prompt:InputHoldEnd()
@@ -5992,29 +6032,25 @@ task.spawn(function()
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            -- Exact reference behavior if already carrying.
+            --------------------------------------------------
+            -- ALREADY CARRYING
+            -- No holding-clear wait: return to base immediately.
+            --------------------------------------------------
+
             if LocalPlayer:GetAttribute("holdingSlime") == true then
                 StatusLabel.Text =
                     "Lucky Block: carrying -> returning to base"
 
                 teleportToBase()
 
-                local t = os.clock() + 1
-
-                while luckyEnabled
-                    and LocalPlayer:GetAttribute("holdingSlime")
-                    and os.clock() < t
-                do
-                    task.wait(0.1)
-                end
-
                 luckyBlockBusy = false
-                task.wait(0.1)
                 continue
             end
 
-            -- Keep the combined script's selected-type target detection.
-            -- ONLY the steal movement/prompt/deposit flow is replaced.
+            --------------------------------------------------
+            -- TARGET
+            --------------------------------------------------
+
             local block = getTargetLuckyBlock()
 
             if not block then
@@ -6025,7 +6061,10 @@ task.spawn(function()
                 )
 
                 luckyBlockBusy = false
-                task.wait(0.15)
+
+                -- Idle scanning yield only.
+                -- This is outside an active steal sequence.
+                task.wait(0.08)
                 continue
             end
 
@@ -6033,15 +6072,19 @@ task.spawn(function()
                 tostring(selectedLuckyBlockType)
                 .. " Lucky Block found - stealing..."
 
-            -- EXACT reference cloak step.
+            --------------------------------------------------
+            -- NO-WAIT CLOAK
+            --------------------------------------------------
+
             pcall(function()
-                activateCloak()
+                activateCloakNoWait()
             end)
 
-            task.wait(0.2)
+            --------------------------------------------------
+            -- EXACT UNDER-TARGET TELEPORT
+            -- NO 0.2 / 0.15 SETTLE WAITS
+            --------------------------------------------------
 
-            -- EXACT reference teleport:
-            -- directly under the target.
             local root = getRoot()
 
             if not root
@@ -6049,7 +6092,6 @@ task.spawn(function()
                 or not block.part.Parent
             then
                 luckyBlockBusy = false
-                task.wait(0.15)
                 continue
             end
 
@@ -6060,7 +6102,10 @@ task.spawn(function()
             root.AssemblyLinearVelocity =
                 Vector3.zero
 
-            -- EXACT reference BodyVelocity float.
+            --------------------------------------------------
+            -- REFERENCE BODYVELOCITY FLOAT
+            --------------------------------------------------
+
             local bv = Instance.new("BodyVelocity")
             bv.Name = "LuckyFloat"
             bv.Velocity = Vector3.zero
@@ -6068,49 +6113,22 @@ task.spawn(function()
             bv.P = 1250
             bv.Parent = root
 
-            task.wait(0.15)
-
-            -- EXACT reference prompt lookup.
-            local prompt = block.prompt
-
-            if (
-                not prompt
-                or not prompt.Parent
-            )
-                and block.model
-            then
-                for _, d in ipairs(
-                    block.model:GetDescendants()
-                ) do
-                    if d:IsA("ProximityPrompt")
-                        and d.Enabled
-                    then
-                        prompt = d
-                        break
-                    end
-                end
-            end
-
             --------------------------------------------------
-            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
-            --
-            -- Exact reference teleport already completed above.
-            -- Immediately after arriving underneath the target:
-            -- 1) Force ALL current proximity prompts HoldDuration = 0
-            -- 2) Trigger the Lucky Block prompt / pick up
-            -- 3) Return to base
+            -- KEEP ALL PROXIMITY PROMPTS AT 0.09
+            -- No zero-hold override anywhere in stealing.
             --------------------------------------------------
 
-            StatusLabel.Text =
-                tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> zero hold + pickup"
-
-            -- Exact loop requested by user, run immediately after teleport.
-            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
+            for _, v in ipairs(
+                game:GetService("Workspace"):GetDescendants()
+            ) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0
+                    v.HoldDuration = 0.09
                 end
             end
+
+            --------------------------------------------------
+            -- PROMPT LOOKUP
+            --------------------------------------------------
 
             local prompt = block.prompt
 
@@ -6123,14 +6141,18 @@ task.spawn(function()
                 end
             end
 
+            --------------------------------------------------
+            -- STEAL -> BASE
+            -- NO SCRIPTED WAIT BETWEEN ANY OF THESE STEPS.
+            --------------------------------------------------
+
             if prompt and prompt.Parent then
-                prompt.HoldDuration = 0
+                prompt.HoldDuration = 0.09
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> picking up"
+                    .. " Lucky Block -> 0.09s pickup"
 
-                -- Instant pickup / steal.
                 attemptSteal(prompt)
 
                 if bv and bv.Parent then
@@ -6143,7 +6165,6 @@ task.spawn(function()
                     root.AssemblyLinearVelocity = Vector3.zero
                 end
 
-                -- Return immediately after the pickup tap.
                 teleportToBase()
 
                 totalCollected += 1
@@ -6163,10 +6184,10 @@ task.spawn(function()
             end
 
             luckyBlockBusy = false
+        else
+            -- Idle yield only when collector is OFF/busy.
+            task.wait(0.08)
         end
-
-        -- Same reference loop cadence.
-        task.wait(0.08)
     end
 end)
 
