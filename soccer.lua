@@ -1156,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] NO steal waits | HoldDuration=0.09 only | exact underneath teleport -> pickup -> base | NO SERVER HOP")
+print("[LuckyCollector] FAST NO-FREEZE | HoldDuration=0.09 | teleport -> pickup -> base -> 0.03s cycle yield | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -6044,6 +6044,7 @@ task.spawn(function()
                 teleportToBase()
 
                 luckyBlockBusy = false
+                task.wait(0.03)
                 continue
             end
 
@@ -6114,17 +6115,10 @@ task.spawn(function()
             bv.Parent = root
 
             --------------------------------------------------
-            -- KEEP ALL PROXIMITY PROMPTS AT 0.09
-            -- No zero-hold override anywhere in stealing.
+            -- PROMPTS STAY AT 0.09 GLOBALLY
+            -- Existing prompts were set at startup and new prompts
+            -- are handled by workspace.DescendantAdded.
             --------------------------------------------------
-
-            for _, v in ipairs(
-                game:GetService("Workspace"):GetDescendants()
-            ) do
-                if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0.09
-                end
-            end
 
             --------------------------------------------------
             -- PROMPT LOOKUP
@@ -6184,6 +6178,10 @@ task.spawn(function()
             end
 
             luckyBlockBusy = false
+
+            -- Tiny cycle yield prevents a hard loop / client freeze.
+            -- No delay is inserted between teleport -> prompt -> steal -> base.
+            task.wait(0.03)
         else
             -- Idle yield only when collector is OFF/busy.
             task.wait(0.08)
