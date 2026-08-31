@@ -1,4 +1,4 @@
--- Combined Script: JAPAN + ICONS UPDATE + ALL-AVAILABLE DYNAMIC SPAM Auto Upgrade (NO FILTERS / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
+-- Combined Script: JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
@@ -99,8 +99,8 @@ local PICK_OPTIONS = {}
 for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
 for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
 
--- Legacy Auto Upgrade rarity options retained internally only.
--- They are hidden and NOT used by Auto Upgrade.
+-- Auto Upgrade rarity filter options.
+-- Includes all current rarities, including LIMITED, Japan, Icons and Alternative.
 local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
@@ -110,10 +110,12 @@ local UPGRADE_RARITY_OPTIONS = {
 
 local selectedUpgradeRarity = "All"
 
--- Legacy Auto Upgrade mutation options retained internally only.
+-- Auto Upgrade mutation filter options.
 -- "All" = any mutation.
 -- "Common" is displayed as "Common (No Mutation)" and means
 -- NO base mutation AND NO event mutation.
+-- Includes current mutations/event mutations such as Divine, Fallen,
+-- Joker, Stellar, Volcanic, Toxic, Taco, Cosmic and Slimey.
 local UPGRADE_MUTATION_OPTIONS = { "All", "Common" }
 for _, mutationName in ipairs(ALL_MUTATIONS) do
     table.insert(UPGRADE_MUTATION_OPTIONS, mutationName)
@@ -528,7 +530,7 @@ UpgradeRarityDropBtn.Size = UDim2.new(0, 106, 0, 30)
 UpgradeRarityDropBtn.Position = UDim2.new(0, 15, 0, 98)
 UpgradeRarityDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
 UpgradeRarityDropBtn.BorderSizePixel = 0
-UpgradeRarityDropBtn.Text = "Rarity: â–¼ All"
+UpgradeRarityDropBtn.Text = "Rarity: ▼ All"
 UpgradeRarityDropBtn.TextColor3 = Color3.fromRGB(150, 205, 255)
 UpgradeRarityDropBtn.TextSize = 10
 UpgradeRarityDropBtn.Font = Enum.Font.GothamBold
@@ -542,7 +544,7 @@ UpgradeMutationDropBtn.Size = UDim2.new(0, 106, 0, 30)
 UpgradeMutationDropBtn.Position = UDim2.new(0, 129, 0, 98)
 UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(48, 34, 62)
 UpgradeMutationDropBtn.BorderSizePixel = 0
-UpgradeMutationDropBtn.Text = "Mutation: â–¼ All"
+UpgradeMutationDropBtn.Text = "Mutation: ▼ All"
 UpgradeMutationDropBtn.TextColor3 = Color3.fromRGB(220, 180, 255)
 UpgradeMutationDropBtn.TextSize = 10
 UpgradeMutationDropBtn.Font = Enum.Font.GothamBold
@@ -550,11 +552,12 @@ UpgradeMutationDropBtn.ZIndex = 50
 UpgradeMutationDropBtn.Parent = MainFrame
 Instance.new("UICorner", UpgradeMutationDropBtn).CornerRadius = UDim.new(0, 8)
 
--- AUTO UPGRADE FILTERS DISABLED:
--- Auto Upgrade now scans EVERY placed normal player and always chooses
--- the globally LOWEST current next-upgrade cost.
-UpgradeRarityDropBtn.Visible = false
-UpgradeMutationDropBtn.Visible = false
+-- AUTO UPGRADE FILTERS ENABLED:
+-- Auto Upgrade now reads BOTH dropdowns live.
+-- A placed player must match the selected Rarity AND Mutation.
+-- "All" on either dropdown disables only that specific filter.
+UpgradeRarityDropBtn.Visible = true
+UpgradeMutationDropBtn.Visible = true
 
 local UpgradeRarityDropList = Instance.new("ScrollingFrame")
 UpgradeRarityDropList.Name = "UpgradeRarityDropList"
@@ -620,7 +623,7 @@ for i, rarityName in ipairs(UPGRADE_RARITY_OPTIONS) do
     item.MouseButton1Click:Connect(function()
         selectedUpgradeRarity = rarityName
         UpgradeRarityDropBtn.Text =
-            "Rarity: â–¼ " .. upgradeRarityDisplayName(rarityName)
+            "Rarity: ▼ " .. upgradeRarityDisplayName(rarityName)
 
         UpgradeRarityDropList.Visible = false
 
@@ -655,7 +658,7 @@ for i, mutationName in ipairs(UPGRADE_MUTATION_OPTIONS) do
             or tostring(mutationName)
 
         UpgradeMutationDropBtn.Text =
-            "Mutation: â–¼ " .. shortName
+            "Mutation: ▼ " .. shortName
 
         UpgradeMutationDropList.Visible = false
 
@@ -682,7 +685,7 @@ UpgradeRarityDropBtn.MouseButton1Click:Connect(function()
         not UpgradeRarityDropList.Visible
 
     UpgradeRarityDropBtn.Text =
-        (UpgradeRarityDropList.Visible and "Rarity: â–² " or "Rarity: â–¼ ")
+        (UpgradeRarityDropList.Visible and "Rarity: ▲ " or "Rarity: ▼ ")
         .. upgradeRarityDisplayName(selectedUpgradeRarity)
 end)
 
@@ -706,7 +709,7 @@ UpgradeMutationDropBtn.MouseButton1Click:Connect(function()
         or upgradeMutationDisplayName(selectedUpgradeMutation)
 
     UpgradeMutationDropBtn.Text =
-        (UpgradeMutationDropList.Visible and "Mutation: â–² " or "Mutation: â–¼ ")
+        (UpgradeMutationDropList.Visible and "Mutation: ▲ " or "Mutation: ▼ ")
         .. mutationLabel
 end)
 
@@ -722,7 +725,7 @@ LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
 LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
 LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
 LuckyTypeDropBtn.BorderSizePixel = 0
-LuckyTypeDropBtn.Text = "Lucky Type: â–¼  " .. selectedLuckyBlockType
+LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. selectedLuckyBlockType
 LuckyTypeDropBtn.TextColor3 = Color3.fromRGB(255, 214, 125)
 LuckyTypeDropBtn.TextSize = 11
 LuckyTypeDropBtn.Font = Enum.Font.GothamBold
@@ -763,7 +766,7 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
 
     item.MouseButton1Click:Connect(function()
         selectedLuckyBlockType = boxType
-        LuckyTypeDropBtn.Text = "Lucky Type: â–¼  " .. boxType
+        LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. boxType
         LuckyTypeDropList.Visible = false
 
         StatusLabel.Text =
@@ -805,7 +808,7 @@ PickupRangeDropBtn.Size = UDim2.new(0, 140, 0, 30)
 PickupRangeDropBtn.Position = UDim2.new(0, 15, 0, 344)
 PickupRangeDropBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
 PickupRangeDropBtn.BorderSizePixel = 0
-PickupRangeDropBtn.Text = "â–¼  " .. selectedPickupRange.label
+PickupRangeDropBtn.Text = "▼  " .. selectedPickupRange.label
 PickupRangeDropBtn.TextColor3 = Color3.fromRGB(190, 190, 255)
 PickupRangeDropBtn.TextSize = 12
 PickupRangeDropBtn.Font = Enum.Font.GothamBold
@@ -860,7 +863,7 @@ for i, rangeInfo in ipairs(PICKUP_RANGE_OPTIONS) do
 
     item.MouseButton1Click:Connect(function()
         selectedPickupRange = rangeInfo
-        PickupRangeDropBtn.Text = "â–¼  " .. rangeInfo.label
+        PickupRangeDropBtn.Text = "▼  " .. rangeInfo.label
         PickupRangeDropList.Visible = false
         StatusLabel.Text = "Pickup range selected: " .. rangeInfo.label
     end)
@@ -872,7 +875,7 @@ PickupRangeDropBtn.MouseButton1Click:Connect(function()
     if LuckyTypeDropList then LuckyTypeDropList.Visible = false end
     PickupRangeDropList.Visible = not PickupRangeDropList.Visible
     PickupRangeDropBtn.Text =
-        (PickupRangeDropList.Visible and "â–²  " or "â–¼  ")
+        (PickupRangeDropList.Visible and "▲  " or "▼  ")
         .. selectedPickupRange.label
 end)
 
@@ -1020,7 +1023,7 @@ do
         btn.Position = UDim2.new(0, x, 0, y)
         btn.BackgroundColor3 = bg
         btn.BorderSizePixel = 0
-        btn.Text = labelPrefix .. ": â–¼ All"
+        btn.Text = labelPrefix .. ": ▼ All"
         btn.TextColor3 = fg
         btn.TextSize = 10
         btn.Font = Enum.Font.GothamBold
@@ -1058,7 +1061,7 @@ do
 
             item.MouseButton1Click:Connect(function()
                 ManualFilters[stateKey] = option
-                btn.Text = labelPrefix .. ": â–¼ " .. tostring(option)
+                btn.Text = labelPrefix .. ": ▼ " .. tostring(option)
                 list.Visible = false
                 StatusLabel.Text = string.format(
                     "%s filter = %s",
@@ -1072,7 +1075,7 @@ do
             closeManualLists(list)
             list.Visible = not list.Visible
             btn.Text = labelPrefix
-                .. (list.Visible and ": â–² " or ": â–¼ ")
+                .. (list.Visible and ": ▲ " or ": ▼ ")
                 .. tostring(ManualFilters[stateKey])
         end)
 
@@ -1155,7 +1158,7 @@ PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
-print("[AutoFarm] GUI â€” JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
 print("[LuckyCollector] global HoldDuration=0.09 | exact teleport -> immediate zero-hold pass -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
@@ -1586,7 +1589,12 @@ local function setUpgradeState(on)
 
     StatusLabel.Text =
         on
-        and "Auto Upgrade ON | ALL available placed slots"
+        and (
+            "Auto Upgrade ON | Rarity: "
+            .. upgradeRarityDisplayName(selectedUpgradeRarity)
+            .. " | Mutation: "
+            .. upgradeMutationDisplayName(selectedUpgradeMutation)
+        )
         or "Auto Upgrade OFF"
 end
 local function setLuckyState(on)
@@ -1639,8 +1647,18 @@ UpgradeBtn.MouseButton1Click:Connect(function()
             local channel = ResolveUpgradeChannel()
             local remote = ResolveUpgradeRemote()
 
+            local upgrades, stats = getPrioritizedUpgrades()
+
             print(
-                "[AutoUpgrade] ON | Mode: LOWEST COST FIRST | Route:",
+                "[AutoUpgrade] ON | Rarity:",
+                upgradeRarityDisplayName(selectedUpgradeRarity),
+                "| Mutation:",
+                upgradeMutationDisplayName(selectedUpgradeMutation),
+                "| Matching:",
+                #upgrades,
+                "| Occupied:",
+                stats and stats.occupied or 0,
+                "| Route:",
                 channel and "Game/Network registry"
                     or (
                         remote
@@ -5493,7 +5511,7 @@ PlaceBtn.MouseButton1Click:Connect(function()
         end
 
         StatusLabel.Text = string.format(
-            "Placed %d/%d â€” CURRENT cash descending",
+            "Placed %d/%d — CURRENT cash descending",
             placed,
             total
         )
@@ -5910,12 +5928,46 @@ task.spawn(function()
         end
 
         local ok, err = xpcall(function()
-            local slots =
-                getAllDynamicUpgradeSlots()
+            -- Read BOTH dropdown filters LIVE every cycle.
+            -- getPrioritizedUpgrades() already:
+            --   * scans the player's currently placed stands
+            --   * excludes Lucky Blocks
+            --   * excludes max-level entries
+            --   * matches selectedUpgradeRarity
+            --   * matches selectedUpgradeMutation, including event mutations
+            local rarityAtDecision = selectedUpgradeRarity
+            local mutationAtDecision = selectedUpgradeMutation
+
+            local upgrades, stats =
+                getPrioritizedUpgrades()
+
+            -- If the user changed a dropdown while the scan was running,
+            -- discard this cycle and immediately rebuild from the new filters.
+            if rarityAtDecision ~= selectedUpgradeRarity
+                or mutationAtDecision ~= selectedUpgradeMutation
+            then
+                return
+            end
+
+            local slots = {}
+
+            for _, info in ipairs(upgrades) do
+                if info and info.id then
+                    table.insert(
+                        slots,
+                        tostring(info.id)
+                    )
+                end
+            end
 
             if #slots == 0 then
                 StatusLabel.Text =
-                    "Auto Upgrade | no placed slots found"
+                    string.format(
+                        "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
+                        upgradeRarityDisplayName(rarityAtDecision),
+                        upgradeMutationDisplayName(mutationAtDecision),
+                        stats and stats.occupied or 0
+                    )
 
                 task.wait(0.15)
                 return
@@ -5923,27 +5975,38 @@ task.spawn(function()
 
             StatusLabel.Text =
                 string.format(
-                    "Auto Upgrade | SPAM ALL %d placed slots",
+                    "Auto Upgrade | R:%s + M:%s | SPAM %d matching slots",
+                    upgradeRarityDisplayName(rarityAtDecision),
+                    upgradeMutationDisplayName(mutationAtDecision),
                     #slots
                 )
 
             local firedCount = 0
 
-            -- NO fixed slot/floor limit.
-            -- NO rarity/mutation filter.
-            -- NO cost sorting/check.
-            -- NO max-level pre-check.
-            --
-            -- Fire every CURRENT placed slot and let the game's
-            -- authoritative upgrade handler accept whichever entries
-            -- are actually upgradeable/affordable.
+            -- Keep the CURRENT fast all-available spam behavior,
+            -- but ONLY for slots matching BOTH selected filters.
             for round = 1, UPGRADE_SPAM_ROUNDS do
                 if not upgradeEnabled then
                     break
                 end
 
+                -- Stop this batch immediately if either dropdown changes.
+                if rarityAtDecision ~= selectedUpgradeRarity
+                    or mutationAtDecision ~= selectedUpgradeMutation
+                then
+                    break
+                end
+
                 for _, slotName in ipairs(slots) do
                     task.spawn(function()
+                        -- Re-check the selected filter snapshot before firing.
+                        if rarityAtDecision ~= selectedUpgradeRarity
+                            or mutationAtDecision ~= selectedUpgradeMutation
+                            or not upgradeEnabled
+                        then
+                            return
+                        end
+
                         local fired =
                             FireUpgradeSlot(
                                 slotName
@@ -5962,7 +6025,9 @@ task.spawn(function()
 
             StatusLabel.Text =
                 string.format(
-                    "Auto Upgrade | %d dynamic slots | %d requests",
+                    "Auto Upgrade | R:%s M:%s | %d slots | %d requests",
+                    upgradeRarityDisplayName(rarityAtDecision),
+                    upgradeMutationDisplayName(mutationAtDecision),
                     #slots,
                     firedCount
                 )
