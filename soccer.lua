@@ -528,7 +528,7 @@ UpgradeRarityDropBtn.Size = UDim2.new(0, 106, 0, 30)
 UpgradeRarityDropBtn.Position = UDim2.new(0, 15, 0, 98)
 UpgradeRarityDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
 UpgradeRarityDropBtn.BorderSizePixel = 0
-UpgradeRarityDropBtn.Text = "Rarity: ▼ All"
+UpgradeRarityDropBtn.Text = "Rarity: â–¼ All"
 UpgradeRarityDropBtn.TextColor3 = Color3.fromRGB(150, 205, 255)
 UpgradeRarityDropBtn.TextSize = 10
 UpgradeRarityDropBtn.Font = Enum.Font.GothamBold
@@ -542,7 +542,7 @@ UpgradeMutationDropBtn.Size = UDim2.new(0, 106, 0, 30)
 UpgradeMutationDropBtn.Position = UDim2.new(0, 129, 0, 98)
 UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(48, 34, 62)
 UpgradeMutationDropBtn.BorderSizePixel = 0
-UpgradeMutationDropBtn.Text = "Mutation: ▼ All"
+UpgradeMutationDropBtn.Text = "Mutation: â–¼ All"
 UpgradeMutationDropBtn.TextColor3 = Color3.fromRGB(220, 180, 255)
 UpgradeMutationDropBtn.TextSize = 10
 UpgradeMutationDropBtn.Font = Enum.Font.GothamBold
@@ -620,7 +620,7 @@ for i, rarityName in ipairs(UPGRADE_RARITY_OPTIONS) do
     item.MouseButton1Click:Connect(function()
         selectedUpgradeRarity = rarityName
         UpgradeRarityDropBtn.Text =
-            "Rarity: ▼ " .. upgradeRarityDisplayName(rarityName)
+            "Rarity: â–¼ " .. upgradeRarityDisplayName(rarityName)
 
         UpgradeRarityDropList.Visible = false
 
@@ -655,7 +655,7 @@ for i, mutationName in ipairs(UPGRADE_MUTATION_OPTIONS) do
             or tostring(mutationName)
 
         UpgradeMutationDropBtn.Text =
-            "Mutation: ▼ " .. shortName
+            "Mutation: â–¼ " .. shortName
 
         UpgradeMutationDropList.Visible = false
 
@@ -682,7 +682,7 @@ UpgradeRarityDropBtn.MouseButton1Click:Connect(function()
         not UpgradeRarityDropList.Visible
 
     UpgradeRarityDropBtn.Text =
-        (UpgradeRarityDropList.Visible and "Rarity: ▲ " or "Rarity: ▼ ")
+        (UpgradeRarityDropList.Visible and "Rarity: â–² " or "Rarity: â–¼ ")
         .. upgradeRarityDisplayName(selectedUpgradeRarity)
 end)
 
@@ -706,7 +706,7 @@ UpgradeMutationDropBtn.MouseButton1Click:Connect(function()
         or upgradeMutationDisplayName(selectedUpgradeMutation)
 
     UpgradeMutationDropBtn.Text =
-        (UpgradeMutationDropList.Visible and "Mutation: ▲ " or "Mutation: ▼ ")
+        (UpgradeMutationDropList.Visible and "Mutation: â–² " or "Mutation: â–¼ ")
         .. mutationLabel
 end)
 
@@ -722,7 +722,7 @@ LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
 LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
 LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
 LuckyTypeDropBtn.BorderSizePixel = 0
-LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. selectedLuckyBlockType
+LuckyTypeDropBtn.Text = "Lucky Type: â–¼  " .. selectedLuckyBlockType
 LuckyTypeDropBtn.TextColor3 = Color3.fromRGB(255, 214, 125)
 LuckyTypeDropBtn.TextSize = 11
 LuckyTypeDropBtn.Font = Enum.Font.GothamBold
@@ -763,7 +763,7 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
 
     item.MouseButton1Click:Connect(function()
         selectedLuckyBlockType = boxType
-        LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. boxType
+        LuckyTypeDropBtn.Text = "Lucky Type: â–¼  " .. boxType
         LuckyTypeDropList.Visible = false
 
         StatusLabel.Text =
@@ -805,7 +805,7 @@ PickupRangeDropBtn.Size = UDim2.new(0, 140, 0, 30)
 PickupRangeDropBtn.Position = UDim2.new(0, 15, 0, 344)
 PickupRangeDropBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
 PickupRangeDropBtn.BorderSizePixel = 0
-PickupRangeDropBtn.Text = "▼  " .. selectedPickupRange.label
+PickupRangeDropBtn.Text = "â–¼  " .. selectedPickupRange.label
 PickupRangeDropBtn.TextColor3 = Color3.fromRGB(190, 190, 255)
 PickupRangeDropBtn.TextSize = 12
 PickupRangeDropBtn.Font = Enum.Font.GothamBold
@@ -860,7 +860,7 @@ for i, rangeInfo in ipairs(PICKUP_RANGE_OPTIONS) do
 
     item.MouseButton1Click:Connect(function()
         selectedPickupRange = rangeInfo
-        PickupRangeDropBtn.Text = "▼  " .. rangeInfo.label
+        PickupRangeDropBtn.Text = "â–¼  " .. rangeInfo.label
         PickupRangeDropList.Visible = false
         StatusLabel.Text = "Pickup range selected: " .. rangeInfo.label
     end)
@@ -872,7 +872,7 @@ PickupRangeDropBtn.MouseButton1Click:Connect(function()
     if LuckyTypeDropList then LuckyTypeDropList.Visible = false end
     PickupRangeDropList.Visible = not PickupRangeDropList.Visible
     PickupRangeDropBtn.Text =
-        (PickupRangeDropList.Visible and "▲  " or "▼  ")
+        (PickupRangeDropList.Visible and "â–²  " or "â–¼  ")
         .. selectedPickupRange.label
 end)
 
@@ -1020,7 +1020,7 @@ do
         btn.Position = UDim2.new(0, x, 0, y)
         btn.BackgroundColor3 = bg
         btn.BorderSizePixel = 0
-        btn.Text = labelPrefix .. ": ▼ All"
+        btn.Text = labelPrefix .. ": â–¼ All"
         btn.TextColor3 = fg
         btn.TextSize = 10
         btn.Font = Enum.Font.GothamBold
@@ -1058,7 +1058,7 @@ do
 
             item.MouseButton1Click:Connect(function()
                 ManualFilters[stateKey] = option
-                btn.Text = labelPrefix .. ": ▼ " .. tostring(option)
+                btn.Text = labelPrefix .. ": â–¼ " .. tostring(option)
                 list.Visible = false
                 StatusLabel.Text = string.format(
                     "%s filter = %s",
@@ -1072,7 +1072,7 @@ do
             closeManualLists(list)
             list.Visible = not list.Visible
             btn.Text = labelPrefix
-                .. (list.Visible and ": ▲ " or ": ▼ ")
+                .. (list.Visible and ": â–² " or ": â–¼ ")
                 .. tostring(ManualFilters[stateKey])
         end)
 
@@ -1155,8 +1155,8 @@ PlaceBtn.BackgroundColor3 = Color3.fromRGB(30, 50, 40)
 BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
-print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] NO steal waits | HoldDuration=0.09 only | exact underneath teleport -> pickup -> base | NO SERVER HOP")
+print("[AutoFarm] GUI â€” JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
+print("[LuckyCollector] global HoldDuration=0.09 | exact teleport -> immediate zero-hold pass -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -3665,46 +3665,6 @@ local function deactivateCloak()
     if hum then pcall(function() hum:UnequipTools() end) end
 end
 
--- Lucky collector cloak path with NO scripted waits.
--- Normal Invis toggle still uses activateCloak() unchanged.
-local function activateCloakNoWait()
-    local tool = findCloakTool()
-    local hum = getHumanoid()
-    local char = LocalPlayer.Character
-
-    if not tool or not hum or not char then
-        return false
-    end
-
-    if tool.Parent ~= char then
-        pcall(function()
-            hum:UnequipTools()
-        end)
-
-        pcall(function()
-            hum:EquipTool(tool)
-        end)
-
-        if tool.Parent ~= char then
-            pcall(function()
-                tool.Parent = char
-            end)
-        end
-    end
-
-    local canAct = tool:FindFirstChild("CanActivate")
-    if canAct and canAct:IsA("BoolValue") then
-        canAct.Value = true
-    end
-
-    pcall(function()
-        tool:Activate()
-    end)
-
-    setLocalInvisible(true)
-    return true
-end
-
 local function getUpgradeCost(sellPrice, level)
     sellPrice = tonumber(sellPrice)
     level = tonumber(level)
@@ -4537,12 +4497,12 @@ local function attemptSteal(prompt)
         return false
     end
 
-    -- The ONLY steal timing setting:
-    -- ProximityPrompt HoldDuration stays at 0.09 seconds.
+    -- Prompt hold is globally forced to zero.
     pcall(function()
-        prompt.HoldDuration = 0.09
+        prompt.HoldDuration = 0
     end)
 
+    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
         local ok = pcall(function()
             fireproximityprompt(prompt)
@@ -4553,7 +4513,7 @@ local function attemptSteal(prompt)
         end
     end
 
-    -- Fallback: no extra scripted delay is added.
+    -- Fallback.
     local ok = pcall(function()
         prompt:InputHoldBegin()
         prompt:InputHoldEnd()
@@ -5533,7 +5493,7 @@ PlaceBtn.MouseButton1Click:Connect(function()
         end
 
         StatusLabel.Text = string.format(
-            "Placed %d/%d — CURRENT cash descending",
+            "Placed %d/%d â€” CURRENT cash descending",
             placed,
             total
         )
@@ -6032,25 +5992,29 @@ task.spawn(function()
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            --------------------------------------------------
-            -- ALREADY CARRYING
-            -- No holding-clear wait: return to base immediately.
-            --------------------------------------------------
-
+            -- Exact reference behavior if already carrying.
             if LocalPlayer:GetAttribute("holdingSlime") == true then
                 StatusLabel.Text =
                     "Lucky Block: carrying -> returning to base"
 
                 teleportToBase()
 
+                local t = os.clock() + 1
+
+                while luckyEnabled
+                    and LocalPlayer:GetAttribute("holdingSlime")
+                    and os.clock() < t
+                do
+                    task.wait(0.1)
+                end
+
                 luckyBlockBusy = false
+                task.wait(0.1)
                 continue
             end
 
-            --------------------------------------------------
-            -- TARGET
-            --------------------------------------------------
-
+            -- Keep the combined script's selected-type target detection.
+            -- ONLY the steal movement/prompt/deposit flow is replaced.
             local block = getTargetLuckyBlock()
 
             if not block then
@@ -6061,10 +6025,7 @@ task.spawn(function()
                 )
 
                 luckyBlockBusy = false
-
-                -- Idle scanning yield only.
-                -- This is outside an active steal sequence.
-                task.wait(0.08)
+                task.wait(0.15)
                 continue
             end
 
@@ -6072,19 +6033,15 @@ task.spawn(function()
                 tostring(selectedLuckyBlockType)
                 .. " Lucky Block found - stealing..."
 
-            --------------------------------------------------
-            -- NO-WAIT CLOAK
-            --------------------------------------------------
-
+            -- EXACT reference cloak step.
             pcall(function()
-                activateCloakNoWait()
+                activateCloak()
             end)
 
-            --------------------------------------------------
-            -- EXACT UNDER-TARGET TELEPORT
-            -- NO 0.2 / 0.15 SETTLE WAITS
-            --------------------------------------------------
+            task.wait(0.2)
 
+            -- EXACT reference teleport:
+            -- directly under the target.
             local root = getRoot()
 
             if not root
@@ -6092,6 +6049,7 @@ task.spawn(function()
                 or not block.part.Parent
             then
                 luckyBlockBusy = false
+                task.wait(0.15)
                 continue
             end
 
@@ -6102,10 +6060,7 @@ task.spawn(function()
             root.AssemblyLinearVelocity =
                 Vector3.zero
 
-            --------------------------------------------------
-            -- REFERENCE BODYVELOCITY FLOAT
-            --------------------------------------------------
-
+            -- EXACT reference BodyVelocity float.
             local bv = Instance.new("BodyVelocity")
             bv.Name = "LuckyFloat"
             bv.Velocity = Vector3.zero
@@ -6113,22 +6068,49 @@ task.spawn(function()
             bv.P = 1250
             bv.Parent = root
 
-            --------------------------------------------------
-            -- KEEP ALL PROXIMITY PROMPTS AT 0.09
-            -- No zero-hold override anywhere in stealing.
-            --------------------------------------------------
+            task.wait(0.15)
 
-            for _, v in ipairs(
-                game:GetService("Workspace"):GetDescendants()
-            ) do
-                if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0.09
+            -- EXACT reference prompt lookup.
+            local prompt = block.prompt
+
+            if (
+                not prompt
+                or not prompt.Parent
+            )
+                and block.model
+            then
+                for _, d in ipairs(
+                    block.model:GetDescendants()
+                ) do
+                    if d:IsA("ProximityPrompt")
+                        and d.Enabled
+                    then
+                        prompt = d
+                        break
+                    end
                 end
             end
 
             --------------------------------------------------
-            -- PROMPT LOOKUP
+            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
+            --
+            -- Exact reference teleport already completed above.
+            -- Immediately after arriving underneath the target:
+            -- 1) Force ALL current proximity prompts HoldDuration = 0
+            -- 2) Trigger the Lucky Block prompt / pick up
+            -- 3) Return to base
             --------------------------------------------------
+
+            StatusLabel.Text =
+                tostring(selectedLuckyBlockType)
+                .. " Lucky Block -> zero hold + pickup"
+
+            -- Exact loop requested by user, run immediately after teleport.
+            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
+                if v.ClassName == "ProximityPrompt" then
+                    v.HoldDuration = 0
+                end
+            end
 
             local prompt = block.prompt
 
@@ -6141,18 +6123,14 @@ task.spawn(function()
                 end
             end
 
-            --------------------------------------------------
-            -- STEAL -> BASE
-            -- NO SCRIPTED WAIT BETWEEN ANY OF THESE STEPS.
-            --------------------------------------------------
-
             if prompt and prompt.Parent then
-                prompt.HoldDuration = 0.09
+                prompt.HoldDuration = 0
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> 0.09s pickup"
+                    .. " Lucky Block -> picking up"
 
+                -- Instant pickup / steal.
                 attemptSteal(prompt)
 
                 if bv and bv.Parent then
@@ -6165,6 +6143,7 @@ task.spawn(function()
                     root.AssemblyLinearVelocity = Vector3.zero
                 end
 
+                -- Return immediately after the pickup tap.
                 teleportToBase()
 
                 totalCollected += 1
@@ -6184,10 +6163,10 @@ task.spawn(function()
             end
 
             luckyBlockBusy = false
-        else
-            -- Idle yield only when collector is OFF/busy.
-            task.wait(0.08)
         end
+
+        -- Same reference loop cadence.
+        task.wait(0.08)
     end
 end)
 
