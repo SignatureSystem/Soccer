@@ -182,50 +182,6 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 -- Default to the newest live tier.
 local selectedLuckyBlockType = "Japan"
 
--- ============================================
--- LUCKY "ALL" ORDERED EQUAL-BATCH CYCLE
---
--- When Lucky Type = All:
---   * Walk through the exact dropdown order below.
---   * The FIRST available type in each full cycle establishes the
---     batch size from how many of that type currently exist.
---   * Example: 3 Common found -> collect up to 3 Common, then
---     up to 3 Water, then up to 3 Rare, etc.
---   * If a type has zero available, skip it immediately.
---   * If it runs out before the batch quota, skip to the next type.
---   * After Alternative, wrap to Common and start a fresh cycle.
--- ============================================
-
-local ALL_LUCKY_CYCLE_ORDER = {}
-for _, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
-    if boxType ~= "All" then
-        table.insert(ALL_LUCKY_CYCLE_ORDER, boxType)
-    end
-end
-
-local allLuckyCycleIndex = 1
-local allLuckyBatchTarget = nil
-local allLuckyPickedCurrent = 0
-
-local function resetAllLuckyCycle()
-    allLuckyCycleIndex = 1
-    allLuckyBatchTarget = nil
-    allLuckyPickedCurrent = 0
-end
-
-local function advanceAllLuckyCycle()
-    allLuckyCycleIndex += 1
-    allLuckyPickedCurrent = 0
-
-    if allLuckyCycleIndex > #ALL_LUCKY_CYCLE_ORDER then
-        allLuckyCycleIndex = 1
-        allLuckyBatchTarget = nil
-        return true
-    end
-
-    return false
-end
-
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
 local giftAllEnabled = false
@@ -807,8 +763,6 @@ for i, boxType in ipairs(LUCKY_BLOCK_OPTIONS) do
 
     item.MouseButton1Click:Connect(function()
         selectedLuckyBlockType = boxType
-        resetAllLuckyCycle()
-
         LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. boxType
         LuckyTypeDropList.Visible = false
 
@@ -1202,7 +1156,7 @@ BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 
 print("[AutoFarm] GUI — JAPAN + ICONS UPDATE + selected-type Place/Open burst buttons")
-print("[LuckyCollector] global HoldDuration=0.09 | exact teleport -> zero-hold pickup -> base | All = ordered equal-batch cycle")
+print("[LuckyCollector] NO steal waits | HoldDuration=0.09 only | exact underneath teleport -> pickup -> base | NO SERVER HOP")
 
 -- ============================================
 -- STATE
@@ -1639,7 +1593,6 @@ local function setLuckyState(on)
     luckyEnabled = on
     if on then
         totalCollected = 0
-        resetAllLuckyCycle()
         LuckyBtn.Text = "Lucky Block: ON"
         LuckyBtn.TextColor3 = Color3.fromRGB(255, 200, 80)
         LuckyBtn.BackgroundColor3 = Color3.fromRGB(60, 45, 20)
@@ -3712,6 +3665,46 @@ local function deactivateCloak()
     if hum then pcall(function() hum:UnequipTools() end) end
 end
 
+-- Lucky collector cloak path with NO scripted waits.
+-- Normal Invis toggle still uses activateCloak() unchanged.
+local function activateCloakNoWait()
+    local tool = findCloakTool()
+    local hum = getHumanoid()
+    local char = LocalPlayer.Character
+
+    if not tool or not hum or not char then
+        return false
+    end
+
+    if tool.Parent ~= char then
+        pcall(function()
+            hum:UnequipTools()
+        end)
+
+        pcall(function()
+            hum:EquipTool(tool)
+        end)
+
+        if tool.Parent ~= char then
+            pcall(function()
+                tool.Parent = char
+            end)
+        end
+    end
+
+    local canAct = tool:FindFirstChild("CanActivate")
+    if canAct and canAct:IsA("BoolValue") then
+        canAct.Value = true
+    end
+
+    pcall(function()
+        tool:Activate()
+    end)
+
+    setLocalInvisible(true)
+    return true
+end
+
 local function getUpgradeCost(sellPrice, level)
     sellPrice = tonumber(sellPrice)
     level = tonumber(level)
@@ -4435,9 +4428,7 @@ local function teleportToBase()
     return false
 end
 
-local function getTargetLuckyBlock(filterType)
-    filterType = tostring(filterType or selectedLuckyBlockType)
-
+local function getTargetLuckyBlock()
     local live = workspace:FindFirstChild("Live")
     if not live then return nil end
 
@@ -4454,7 +4445,7 @@ local function getTargetLuckyBlock(filterType)
             local modelName = tostring(model.Name)
             local matches = false
 
-            if filterType == "All" then
+            if selectedLuckyBlockType == "All" then
                 -- Only accept the exact Lucky Block models from this game's database.
                 for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
                     if names[modelName] == true then
@@ -4464,7 +4455,7 @@ local function getTargetLuckyBlock(filterType)
                 end
             else
                 local allowedNames =
-                    LUCKY_BLOCK_MODEL_NAMES[filterType]
+                    LUCKY_BLOCK_MODEL_NAMES[selectedLuckyBlockType]
 
                 matches =
                     allowedNames ~= nil
@@ -4528,7 +4519,7 @@ local function getTargetLuckyBlock(filterType)
                 bestDistance = distance
                 best = {
                     name = modelName,
-                    type = filterType,
+                    type = selectedLuckyBlockType,
                     value = value,
                     part = primary,
                     prompt = prompt,
@@ -4541,56 +4532,17 @@ local function getTargetLuckyBlock(filterType)
     return best
 end
 
-local function countLuckyBlocksByType(filterType)
-    filterType = tostring(filterType or "")
-
-    local live = workspace:FindFirstChild("Live")
-    local slimes = live and live:FindFirstChild("Slimes")
-
-    if not slimes then
-        return 0
-    end
-
-    local allowedNames =
-        LUCKY_BLOCK_MODEL_NAMES[filterType]
-
-    if not allowedNames then
-        return 0
-    end
-
-    local count = 0
-
-    for _, model in ipairs(slimes:GetChildren()) do
-        if model:IsA("Model")
-            and not model:GetAttribute("Carrying")
-            and allowedNames[tostring(model.Name)] == true
-        then
-            count += 1
-        end
-    end
-
-    return count
-end
-
-local function getAllCycleActiveType()
-    if #ALL_LUCKY_CYCLE_ORDER == 0 then
-        return nil
-    end
-
-    return ALL_LUCKY_CYCLE_ORDER[allLuckyCycleIndex]
-end
-
 local function attemptSteal(prompt)
     if not prompt or not prompt.Parent then
         return false
     end
 
-    -- Prompt hold is globally forced to zero.
+    -- The ONLY steal timing setting:
+    -- ProximityPrompt HoldDuration stays at 0.09 seconds.
     pcall(function()
-        prompt.HoldDuration = 0
+        prompt.HoldDuration = 0.09
     end)
 
-    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
         local ok = pcall(function()
             fireproximityprompt(prompt)
@@ -4601,7 +4553,7 @@ local function attemptSteal(prompt)
         end
     end
 
-    -- Fallback.
+    -- Fallback: no extra scripted delay is added.
     local ok = pcall(function()
         prompt:InputHoldBegin()
         prompt:InputHoldEnd()
@@ -6080,146 +6032,59 @@ task.spawn(function()
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            -- Exact reference behavior if already carrying.
+            --------------------------------------------------
+            -- ALREADY CARRYING
+            -- No holding-clear wait: return to base immediately.
+            --------------------------------------------------
+
             if LocalPlayer:GetAttribute("holdingSlime") == true then
                 StatusLabel.Text =
                     "Lucky Block: carrying -> returning to base"
 
                 teleportToBase()
 
-                local t = os.clock() + 1
-
-                while luckyEnabled
-                    and LocalPlayer:GetAttribute("holdingSlime")
-                    and os.clock() < t
-                do
-                    task.wait(0.1)
-                end
-
                 luckyBlockBusy = false
-                task.wait(0.1)
                 continue
             end
 
             --------------------------------------------------
-            -- TARGET SELECTION
-            --
-            -- Specific type:
-            --   exact old behavior.
-            --
-            -- All:
-            --   ordered equal-batch cycle.
+            -- TARGET
             --------------------------------------------------
 
-            local activeLuckyType =
-                selectedLuckyBlockType
-
-            if selectedLuckyBlockType == "All" then
-                local safety = 0
-
-                while safety < #ALL_LUCKY_CYCLE_ORDER do
-                    safety += 1
-
-                    activeLuckyType =
-                        getAllCycleActiveType()
-
-                    if not activeLuckyType then
-                        break
-                    end
-
-                    local available =
-                        countLuckyBlocksByType(activeLuckyType)
-
-                    -- First available rarity/type in a fresh full cycle
-                    -- establishes the quota for every following type.
-                    if allLuckyBatchTarget == nil then
-                        if available > 0 then
-                            allLuckyBatchTarget = available
-                            allLuckyPickedCurrent = 0
-                            break
-                        else
-                            advanceAllLuckyCycle()
-                        end
-
-                    -- Current type already hit the cycle quota.
-                    elseif allLuckyPickedCurrent >= allLuckyBatchTarget then
-                        advanceAllLuckyCycle()
-
-                    -- Current type has run out before quota: skip it.
-                    elseif available <= 0 then
-                        advanceAllLuckyCycle()
-
-                    else
-                        break
-                    end
-                end
-
-                activeLuckyType =
-                    getAllCycleActiveType()
-
-                if allLuckyBatchTarget == nil then
-                    StatusLabel.Text =
-                        string.format(
-                            "All: no Lucky Boxes available | Total: %d",
-                            totalCollected
-                        )
-
-                    luckyBlockBusy = false
-                    task.wait(0.15)
-                    continue
-                end
-            end
-
-            local block =
-                getTargetLuckyBlock(activeLuckyType)
+            local block = getTargetLuckyBlock()
 
             if not block then
-                if selectedLuckyBlockType == "All" then
-                    StatusLabel.Text =
-                        string.format(
-                            "All: %s unavailable -> skip | %d/%d",
-                            tostring(activeLuckyType),
-                            allLuckyPickedCurrent,
-                            tonumber(allLuckyBatchTarget) or 0
-                        )
-
-                    advanceAllLuckyCycle()
-                else
-                    StatusLabel.Text = string.format(
-                        "No %s boxes | Total: %d",
-                        selectedLuckyBlockType,
-                        totalCollected
-                    )
-                end
+                StatusLabel.Text = string.format(
+                    "No %s boxes | Total: %d",
+                    selectedLuckyBlockType,
+                    totalCollected
+                )
 
                 luckyBlockBusy = false
-                task.wait(0.15)
+
+                -- Idle scanning yield only.
+                -- This is outside an active steal sequence.
+                task.wait(0.08)
                 continue
             end
 
-            if selectedLuckyBlockType == "All" then
-                StatusLabel.Text =
-                    string.format(
-                        "All: %s | %d/%d -> stealing...",
-                        tostring(activeLuckyType),
-                        allLuckyPickedCurrent + 1,
-                        tonumber(allLuckyBatchTarget) or 0
-                    )
-            else
-                StatusLabel.Text =
-                    tostring(selectedLuckyBlockType)
-                    .. " Lucky Block found - stealing..."
-            end
+            StatusLabel.Text =
+                tostring(selectedLuckyBlockType)
+                .. " Lucky Block found - stealing..."
 
-            -- EXACT reference cloak step.
+            --------------------------------------------------
+            -- NO-WAIT CLOAK
+            --------------------------------------------------
+
             pcall(function()
-                activateCloak()
+                activateCloakNoWait()
             end)
 
-            task.wait(0.2)
+            --------------------------------------------------
+            -- EXACT UNDER-TARGET TELEPORT
+            -- NO 0.2 / 0.15 SETTLE WAITS
+            --------------------------------------------------
 
-            -- EXACT reference teleport:
-            -- directly under the target.
             local root = getRoot()
 
             if not root
@@ -6227,7 +6092,6 @@ task.spawn(function()
                 or not block.part.Parent
             then
                 luckyBlockBusy = false
-                task.wait(0.15)
                 continue
             end
 
@@ -6238,7 +6102,10 @@ task.spawn(function()
             root.AssemblyLinearVelocity =
                 Vector3.zero
 
-            -- EXACT reference BodyVelocity float.
+            --------------------------------------------------
+            -- REFERENCE BODYVELOCITY FLOAT
+            --------------------------------------------------
+
             local bv = Instance.new("BodyVelocity")
             bv.Name = "LuckyFloat"
             bv.Velocity = Vector3.zero
@@ -6246,49 +6113,22 @@ task.spawn(function()
             bv.P = 1250
             bv.Parent = root
 
-            task.wait(0.15)
-
-            -- EXACT reference prompt lookup.
-            local prompt = block.prompt
-
-            if (
-                not prompt
-                or not prompt.Parent
-            )
-                and block.model
-            then
-                for _, d in ipairs(
-                    block.model:GetDescendants()
-                ) do
-                    if d:IsA("ProximityPrompt")
-                        and d.Enabled
-                    then
-                        prompt = d
-                        break
-                    end
-                end
-            end
-
             --------------------------------------------------
-            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
-            --
-            -- Exact reference teleport already completed above.
-            -- Immediately after arriving underneath the target:
-            -- 1) Force ALL current proximity prompts HoldDuration = 0
-            -- 2) Trigger the Lucky Block prompt / pick up
-            -- 3) Return to base
+            -- KEEP ALL PROXIMITY PROMPTS AT 0.09
+            -- No zero-hold override anywhere in stealing.
             --------------------------------------------------
 
-            StatusLabel.Text =
-                tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> zero hold + pickup"
-
-            -- Exact loop requested by user, run immediately after teleport.
-            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
+            for _, v in ipairs(
+                game:GetService("Workspace"):GetDescendants()
+            ) do
                 if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0
+                    v.HoldDuration = 0.09
                 end
             end
+
+            --------------------------------------------------
+            -- PROMPT LOOKUP
+            --------------------------------------------------
 
             local prompt = block.prompt
 
@@ -6301,14 +6141,18 @@ task.spawn(function()
                 end
             end
 
+            --------------------------------------------------
+            -- STEAL -> BASE
+            -- NO SCRIPTED WAIT BETWEEN ANY OF THESE STEPS.
+            --------------------------------------------------
+
             if prompt and prompt.Parent then
-                prompt.HoldDuration = 0
+                prompt.HoldDuration = 0.09
 
                 StatusLabel.Text =
                     tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> picking up"
+                    .. " Lucky Block -> 0.09s pickup"
 
-                -- Instant pickup / steal.
                 attemptSteal(prompt)
 
                 if bv and bv.Parent then
@@ -6321,29 +6165,15 @@ task.spawn(function()
                     root.AssemblyLinearVelocity = Vector3.zero
                 end
 
-                -- Return immediately after the pickup tap.
                 teleportToBase()
 
                 totalCollected += 1
 
-                if selectedLuckyBlockType == "All" then
-                    allLuckyPickedCurrent += 1
-
-                    StatusLabel.Text =
-                        string.format(
-                            "All: %s %d/%d | Total %d -> base",
-                            tostring(activeLuckyType),
-                            allLuckyPickedCurrent,
-                            tonumber(allLuckyBatchTarget) or 0,
-                            totalCollected
-                        )
-                else
-                    StatusLabel.Text =
-                        string.format(
-                            "Picked up #%d -> returned to base",
-                            totalCollected
-                        )
-                end
+                StatusLabel.Text =
+                    string.format(
+                        "Picked up #%d -> returned to base",
+                        totalCollected
+                    )
             else
                 if bv and bv.Parent then
                     bv:Destroy()
@@ -6354,10 +6184,10 @@ task.spawn(function()
             end
 
             luckyBlockBusy = false
+        else
+            -- Idle yield only when collector is OFF/busy.
+            task.wait(0.08)
         end
-
-        -- Same reference loop cadence.
-        task.wait(0.08)
     end
 end)
 
