@@ -2,13 +2,16 @@
   Lucky Box Cycle Auto
   ----------------------
   Flow (loops forever while ON):
-    Priority: HIGHEST → LOWEST (Alternative first, Common last).
-    For each rarity as its own batch of up to 100:
+    Rarity filter (dropdown):
+      - "All" (default) → Priority HIGHEST → LOWEST (Alternative first, Common last)
+      - Specific rarity → only that rarity
+    For each selected rarity batch of up to 100:
       - First scan: if none of that rarity in world → skip whole batch
       - Else collect up to 100 of THAT rarity only
+      - Carry up to 6 steals, then teleport to base (deposit), repeat
       - If any collected → Place + Open + Pickup + Sell
-      - Then next lower rarity batch
-    After Common, restart from Alternative.
+      - Then next lower rarity batch (if All)
+    After pass, restart.
 
   Mechanisms reused from your AutoFarm + Slime Value Browser scripts.
 ]]
@@ -29,6 +32,8 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui", 10)
 -- Priority is HIGHEST → LOWEST (Alternative first, Common last).
 -- If the FIRST scan of a rarity finds zero boxes, skip that whole batch.
 local BATCH_SIZE = 100
+-- How many lucky boxes to steal in one trip before teleporting back to base
+local CARRY_BEFORE_BASE = 6
 
 -- Highest value first → lowest last
 local TARGET_RARITIES = {
@@ -94,6 +99,7 @@ local phase   = "Idle"
 local collectedThisCycle = 0
 local countsByRarity = {}
 local currentRarityIndex = 1
+local selectedRarity = "All"  -- "All" or one of TARGET_RARITIES
 local logLines = {}
 local MAX_LOG = 80
 
@@ -135,8 +141,8 @@ pcall(function() ScreenGui.Parent = PlayerGui or CoreGui end)
 if not ScreenGui.Parent then ScreenGui.Parent = CoreGui end
 
 local Main = Instance.new("Frame")
-Main.Size = UDim2.new(0, 340, 0, 420)
-Main.Position = UDim2.new(0, 20, 0.5, -210)
+Main.Size = UDim2.new(0, 340, 0, 470)
+Main.Position = UDim2.new(0, 20, 0.5, -235)
 Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
 Main.BorderSizePixel = 0
 Main.Active = true
@@ -183,11 +189,98 @@ StatusLabel.TextYAlignment = Enum.TextYAlignment.Center
 StatusLabel.TextWrapped = true
 StatusLabel.Parent = Main
 
+-- Rarity dropdown
+local RarityLabel = Instance.new("TextLabel")
+RarityLabel.Size = UDim2.new(0, 70, 0, 26)
+RarityLabel.Position = UDim2.new(0, 12, 0, 78)
+RarityLabel.BackgroundTransparency = 1
+RarityLabel.Text = "Rarity:"
+RarityLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+RarityLabel.TextSize = 12
+RarityLabel.Font = Enum.Font.Gotham
+RarityLabel.TextXAlignment = Enum.TextXAlignment.Left
+RarityLabel.Parent = Main
+
+local RarityDropBtn = Instance.new("TextButton")
+RarityDropBtn.Size = UDim2.new(0, 240, 0, 26)
+RarityDropBtn.Position = UDim2.new(0, 82, 0, 78)
+RarityDropBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+RarityDropBtn.BorderSizePixel = 0
+RarityDropBtn.Text = "All (highest → lowest)"
+RarityDropBtn.TextColor3 = Color3.fromRGB(200, 220, 255)
+RarityDropBtn.TextSize = 11
+RarityDropBtn.Font = Enum.Font.GothamBold
+RarityDropBtn.Parent = Main
+Instance.new("UICorner", RarityDropBtn).CornerRadius = UDim.new(0, 6)
+
+local RarityDropList = Instance.new("ScrollingFrame")
+RarityDropList.Size = UDim2.new(0, 240, 0, 0)
+RarityDropList.Position = UDim2.new(0, 82, 0, 106)
+RarityDropList.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
+RarityDropList.BorderSizePixel = 0
+RarityDropList.ScrollBarThickness = 4
+RarityDropList.Visible = false
+RarityDropList.ZIndex = 50
+RarityDropList.CanvasSize = UDim2.new(0, 0, 0, 0)
+RarityDropList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+RarityDropList.Parent = Main
+Instance.new("UICorner", RarityDropList).CornerRadius = UDim.new(0, 6)
+local RarityDropLayout = Instance.new("UIListLayout")
+RarityDropLayout.SortOrder = Enum.SortOrder.LayoutOrder
+RarityDropLayout.Padding = UDim.new(0, 1)
+RarityDropLayout.Parent = RarityDropList
+
+local RARITY_OPTIONS = { "All" }
+for _, r in ipairs(TARGET_RARITIES) do
+    table.insert(RARITY_OPTIONS, r)
+end
+
+local function setRaritySelection(name)
+    selectedRarity = name
+    if name == "All" then
+        RarityDropBtn.Text = "All (highest → lowest)"
+    else
+        RarityDropBtn.Text = name
+    end
+    RarityDropList.Visible = false
+    RarityDropList.Size = UDim2.new(0, 240, 0, 0)
+    addLog("Rarity filter → " .. (name == "All" and "All (priority order)" or name))
+end
+
+for i, opt in ipairs(RARITY_OPTIONS) do
+    local item = Instance.new("TextButton")
+    item.Size = UDim2.new(1, -4, 0, 22)
+    item.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
+    item.BorderSizePixel = 0
+    item.Text = opt == "All" and "All (highest → lowest)" or opt
+    item.TextColor3 = Color3.fromRGB(210, 210, 230)
+    item.TextSize = 11
+    item.Font = Enum.Font.Gotham
+    item.LayoutOrder = i
+    item.ZIndex = 51
+    item.Parent = RarityDropList
+    Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
+    item.MouseButton1Click:Connect(function()
+        setRaritySelection(opt)
+    end)
+end
+
+RarityDropBtn.MouseButton1Click:Connect(function()
+    local open = not RarityDropList.Visible
+    RarityDropList.Visible = open
+    if open then
+        local h = math.min(#RARITY_OPTIONS * 24, 180)
+        RarityDropList.Size = UDim2.new(0, 240, 0, h)
+    else
+        RarityDropList.Size = UDim2.new(0, 240, 0, 0)
+    end
+end)
+
 local ProgressLabel = Instance.new("TextLabel")
-ProgressLabel.Size = UDim2.new(1, -24, 0, 40)
-ProgressLabel.Position = UDim2.new(0, 12, 0, 78)
+ProgressLabel.Size = UDim2.new(1, -24, 0, 36)
+ProgressLabel.Position = UDim2.new(0, 12, 0, 112)
 ProgressLabel.BackgroundTransparency = 1
-ProgressLabel.Text = "0 / 80 boxes | Phase: Idle"
+ProgressLabel.Text = "0 / 100 boxes | Phase: Idle"
 ProgressLabel.TextColor3 = Color3.fromRGB(150, 220, 170)
 ProgressLabel.TextSize = 12
 ProgressLabel.Font = Enum.Font.GothamBold
@@ -197,8 +290,8 @@ ProgressLabel.TextWrapped = true
 ProgressLabel.Parent = Main
 
 local LogFrame = Instance.new("ScrollingFrame")
-LogFrame.Size = UDim2.new(1, -24, 0, 280)
-LogFrame.Position = UDim2.new(0, 12, 0, 125)
+LogFrame.Size = UDim2.new(1, -24, 0, 300)
+LogFrame.Position = UDim2.new(0, 12, 0, 152)
 LogFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
 LogFrame.BorderSizePixel = 0
 LogFrame.ScrollBarThickness = 5
@@ -602,13 +695,14 @@ end
 -- Steal one box of current rarity.
 -- Solidify the box, stand on top of it (no ground), fire prompt, then base.
 local function stealOne(rarityName)
+    -- Already holding something → deposit at base only (not a new steal)
     if LocalPlayer:GetAttribute("holdingSlime") == true then
         teleportToBase()
         local t = os.clock() + 1.2
         while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
             task.wait(0.08)
         end
-        return true
+        return "deposited"
     end
 
     local block = getTargetLuckyBlock(rarityName)
@@ -825,15 +919,12 @@ local function stealOne(rarityName)
         stolen = true
     end
 
-    -- Teleport to base WHILE still air-locked, then release hover
-    -- No deposit wait — return immediately after base teleport
+    -- Successful steal: do NOT go to base here.
+    -- Caller (runCycle) returns to base every CARRY_BEFORE_BASE (6) steals.
+    cleanupHover()
     if stolen then
-        teleportToBase()
-        cleanupHover()
         return true
     end
-
-    cleanupHover()
     return false
 end
 
@@ -1240,13 +1331,27 @@ end
 ]]
 local function runCycle()
     resetCycleCounters()
-    addLog("=== NEW PASS — highest→lowest | 100 per rarity batch ===")
 
-    for rarityIndex = 1, #TARGET_RARITIES do
+    -- Build the rarity list for this pass from the dropdown filter
+    local rarityList = {}
+    if selectedRarity == "All" then
+        for _, r in ipairs(TARGET_RARITIES) do
+            table.insert(rarityList, r)
+        end
+        addLog("=== NEW PASS — All rarities (highest→lowest) | 100/batch | carry 6 → base ===")
+    else
+        table.insert(rarityList, selectedRarity)
+        addLog(string.format(
+            "=== NEW PASS — only %s | 100/batch | carry 6 → base ===",
+            selectedRarity
+        ))
+    end
+
+    for rarityIndex = 1, #rarityList do
         if not running then return end
 
         currentRarityIndex = rarityIndex
-        local rarity = TARGET_RARITIES[rarityIndex]
+        local rarity = rarityList[rarityIndex]
         collectedThisCycle = 0
         countsByRarity[rarity] = 0
 
@@ -1260,20 +1365,24 @@ local function runCycle()
         end
 
         addLog(string.format(
-            "=== BATCH START: %s (target %d) ===",
+            "=== BATCH START: %s (target %d, carry %d) ===",
             rarity,
-            BATCH_SIZE
+            BATCH_SIZE,
+            CARRY_BEFORE_BASE
         ))
         setPhase(string.format("Batch %s 0/%d", rarity, BATCH_SIZE))
 
         local emptyStreak = 0
+        local carryCount = 0  -- steals this trip before returning to base
 
         while running and collectedThisCycle < BATCH_SIZE do
             setPhase(string.format(
-                "Batch %s %d/%d",
+                "Batch %s %d/%d (carry %d/%d)",
                 rarity,
                 collectedThisCycle,
-                BATCH_SIZE
+                BATCH_SIZE,
+                carryCount,
+                CARRY_BEFORE_BASE
             ))
 
             -- Mid-batch: if none left in world, end this batch
@@ -1293,29 +1402,64 @@ local function runCycle()
             end
             emptyStreak = 0
 
-            local ok = stealOne(rarity)
-            if ok then
-                task.wait(0.35)
+            local result = stealOne(rarity)
+
+            if result == "deposited" then
+                -- Was holding → deposited; reset trip counter
+                carryCount = 0
+                addLog("Deposited held item at base")
+                task.wait(0.15)
+            elseif result == true then
+                -- Successful steal — stay out, no base yet
+                task.wait(0.20)
                 countsByRarity[rarity] = countsByRarity[rarity] + 1
                 collectedThisCycle += 1
+                carryCount += 1
+
                 ProgressLabel.Text = string.format(
-                    "%d / %d | Batch: %s",
+                    "%d / %d | %s | trip %d/%d",
                     collectedThisCycle,
                     BATCH_SIZE,
-                    rarity
+                    rarity,
+                    carryCount,
+                    CARRY_BEFORE_BASE
                 )
                 addLog(string.format(
-                    "Got %s [%d/%d]",
+                    "Got %s [%d/%d] trip %d/%d",
                     rarity,
                     collectedThisCycle,
-                    BATCH_SIZE
+                    BATCH_SIZE,
+                    carryCount,
+                    CARRY_BEFORE_BASE
                 ))
+
+                -- After 6 steals → return to base, then continue
+                if carryCount >= CARRY_BEFORE_BASE then
+                    addLog(string.format(
+                        "Carried %d — returning to base",
+                        carryCount
+                    ))
+                    teleportToBase()
+                    carryCount = 0
+                    task.wait(0.25)
+                end
             else
-                -- Steal miss while boxes still exist — brief retry, stay on same batch
+                -- Steal miss while boxes still exist — brief retry
                 task.wait(0.15)
             end
 
             task.wait(0.08)
+        end
+
+        -- End of batch: if still carrying from a partial trip, deposit
+        if carryCount > 0 then
+            addLog(string.format(
+                "Batch end with %d carried — returning to base",
+                carryCount
+            ))
+            teleportToBase()
+            carryCount = 0
+            task.wait(0.25)
         end
 
         if not running then return end
@@ -1340,7 +1484,7 @@ local function runCycle()
     end
 
     setPhase("Pass complete")
-    addLog("=== FULL PASS DONE (Alternative→Common) — looping ===")
+    addLog("=== FULL PASS DONE — looping ===")
     task.wait(0.50)
 end
 
@@ -1378,10 +1522,11 @@ ToggleBtn.MouseButton1Click:Connect(function()
 end)
 
 ensureRemotes()
-addLog("Ready. Priority: Alternative → ... → Common (highest first)")
+addLog("Ready. Dropdown: All (highest→lowest) or pick a rarity")
 addLog(string.format(
-    "Batch size %d per rarity | first-scan empty = skip batch",
-    BATCH_SIZE
+    "Batch %d/rarity | carry %d then base | first-scan empty = skip",
+    BATCH_SIZE,
+    CARRY_BEFORE_BASE
 ))
 setPhase("Idle")
-print("[LuckyBoxCycle] Loaded — highest→lowest batches of 100 → Place+Open+Pickup+Sell → loop")
+print("[LuckyBoxCycle] Loaded — rarity dropdown + carry 6 → base → Place+Open+Pickup+Sell → loop")
