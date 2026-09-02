@@ -2,7 +2,9 @@
   Lucky Box Cycle Auto
   ----------------------
   Flow (loops forever while ON):
-    1. Collect 10 lucky boxes of each target rarity (8 rarities = 80 total)
+    1. Collect 10 lucky boxes of EACH rarity (Common → Alternative)
+       If none of the current rarity exist, auto-skip to the next
+       available rarity that has boxes in the world.
     2. Place ALL lucky boxes into free slots (spam + teleport hop)
     3. Open ALL placed boxes (spam)
     4. Pick up ALL placed slimes (spam)
@@ -24,19 +26,37 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui", 10)
 -- CONFIG
 -- ============================================================
 local BOXES_PER_RARITY = 10
-local TOTAL_TARGET     = 80          -- 8 rarities * 10
+-- How many consecutive "no box found" attempts before auto-skipping
+-- to the next rarity that currently has boxes in the world.
+local SKIP_AFTER_FAILS = 8
 
--- Ordered list of 8 rarities (edit freely). Collects 10 of each in order.
+-- Full ordered list: Common → Alternative (all in-game lucky types)
 local TARGET_RARITIES = {
-    "Japan",
-    "Icons",
-    "Spain",
-    "Champions",
-    "OG",
+    "Common",
+    "Water",
+    "Rare",
+    "Volcanic",
+    "Epic",
+    "Ghost",
+    "Legendary",
+    "67",
+    "Mythic",
+    "Poison",
+    "Secret",
+    "Cosmic",
+    "Soccer God",
+    "Rainbow",
     "Exclusive",
     "Limited",
+    "OG",
+    "Champions",
+    "Spain",
+    "Icons",
+    "Japan",
     "Alternative",
 }
+
+local TOTAL_TARGET = #TARGET_RARITIES * BOXES_PER_RARITY  -- 22 * 10 = 220
 
 local LUCKY_BLOCK_MODEL_NAMES = {
     ["Common"]      = { ["Common Lucky Block"] = true },
@@ -460,6 +480,41 @@ local function attemptSteal(prompt)
         end
     end)
     return true
+end
+
+-- True if at least one non-carrying block of this rarity exists in Live.Slimes
+local function hasLuckyBlockOfType(rarityName)
+    local allowed = LUCKY_BLOCK_MODEL_NAMES[rarityName]
+    if not allowed then return false end
+    local live = Workspace:FindFirstChild("Live")
+    local slimes = live and live:FindFirstChild("Slimes")
+    if not slimes then return false end
+    for _, model in ipairs(slimes:GetChildren()) do
+        if model:IsA("Model")
+            and not model:GetAttribute("Carrying")
+            and allowed[tostring(model.Name)]
+        then
+            return true
+        end
+    end
+    return false
+end
+
+-- Find the next rarity (from startIndex onward, wrapping once) that still
+-- needs boxes AND currently has at least one block in the world.
+-- Returns index + name, or nil if nothing available.
+local function findNextAvailableRarity(startIndex)
+    local n = #TARGET_RARITIES
+    for offset = 0, n - 1 do
+        local i = ((startIndex - 1 + offset) % n) + 1
+        local rarity = TARGET_RARITIES[i]
+        if countsByRarity[rarity] < BOXES_PER_RARITY
+            and hasLuckyBlockOfType(rarity)
+        then
+            return i, rarity
+        end
+    end
+    return nil, nil
 end
 
 -- Find one target lucky block of the given type
@@ -931,27 +986,42 @@ end
 local function runCycle()
     resetCycleCounters()
     setPhase("Collecting")
-    addLog("=== NEW CYCLE — collecting 80 lucky boxes ===")
+    addLog(string.format(
+        "=== NEW CYCLE — up to %d boxes (10 each, Common→Alternative) ===",
+        TOTAL_TARGET
+    ))
 
-    -- Phase 1: Collect 10 of each rarity
+    local failStreak = 0
+    local idleRounds = 0
+
+    -- Phase 1: Collect 10 of each rarity; auto-skip when none available
     while running and collectedThisCycle < TOTAL_TARGET do
         local rarity = TARGET_RARITIES[currentRarityIndex]
         if not rarity then break end
 
+        -- Already finished this rarity → advance
         if countsByRarity[rarity] >= BOXES_PER_RARITY then
             currentRarityIndex += 1
+            failStreak = 0
             if currentRarityIndex > #TARGET_RARITIES then
+                -- All rarities done (or skipped). Stop collect phase.
                 break
             end
             rarity = TARGET_RARITIES[currentRarityIndex]
             addLog(string.format("Moving to next rarity: %s", tostring(rarity)))
         end
 
-        setPhase(string.format("Collect %s (%d/%d)", rarity, countsByRarity[rarity], BOXES_PER_RARITY))
+        setPhase(string.format(
+            "Collect %s (%d/%d)",
+            rarity,
+            countsByRarity[rarity],
+            BOXES_PER_RARITY
+        ))
 
         local ok = stealOne(rarity)
         if ok then
-            -- Wait briefly to confirm deposit
+            failStreak = 0
+            idleRounds = 0
             task.wait(0.35)
             countsByRarity[rarity] = countsByRarity[rarity] + 1
             collectedThisCycle += 1
@@ -972,14 +1042,62 @@ local function runCycle()
                 TOTAL_TARGET
             ))
         else
-            addLog(string.format("No %s box nearby — scanning...", rarity))
-            task.wait(0.25)
+            failStreak += 1
+            addLog(string.format(
+                "No %s box nearby (%d/%d fails) — scanning...",
+                rarity,
+                failStreak,
+                SKIP_AFTER_FAILS
+            ))
+
+            -- After enough fails, jump to the next rarity that currently
+            -- has boxes in the world (and still needs more).
+            if failStreak >= SKIP_AFTER_FAILS then
+                local nextIdx, nextName = findNextAvailableRarity(currentRarityIndex + 1)
+                if nextIdx and nextName then
+                    addLog(string.format(
+                        "Skipping %s → next available: %s",
+                        rarity,
+                        nextName
+                    ))
+                    currentRarityIndex = nextIdx
+                    failStreak = 0
+                else
+                    -- Nothing of any remaining rarity is in the world right now.
+                    idleRounds += 1
+                    addLog(string.format(
+                        "No available rarities in world (idle %d). Waiting...",
+                        idleRounds
+                    ))
+                    -- Give the world time to spawn more boxes, then retry
+                    -- from the current index again.
+                    task.wait(1.0)
+                    failStreak = 0
+                    -- Soft exit collect if we've been idle too long and already
+                    -- have some boxes — go place/open what we have.
+                    if idleRounds >= 6 and collectedThisCycle > 0 then
+                        addLog(string.format(
+                            "Idle too long with %d boxes — proceeding to Place+Open",
+                            collectedThisCycle
+                        ))
+                        break
+                    end
+                end
+            else
+                task.wait(0.25)
+            end
         end
 
         task.wait(0.08)
     end
 
     if not running then return end
+
+    if collectedThisCycle == 0 then
+        addLog("Collected 0 boxes this cycle — waiting before retry...")
+        task.wait(2)
+        return
+    end
 
     addLog(string.format("Collected %d boxes — starting Place + Open", collectedThisCycle))
 
@@ -1050,7 +1168,12 @@ ToggleBtn.MouseButton1Click:Connect(function()
 end)
 
 ensureRemotes()
-addLog("Ready. Target rarities: " .. table.concat(TARGET_RARITIES, ", "))
-addLog(string.format("%d boxes total (%d per rarity)", TOTAL_TARGET, BOXES_PER_RARITY))
+addLog("Ready. All rarities: Common → Alternative")
+addLog(string.format(
+    "Up to %d boxes (%d per rarity × %d types) | auto-skip if none available",
+    TOTAL_TARGET,
+    BOXES_PER_RARITY,
+    #TARGET_RARITIES
+))
 setPhase("Idle")
-print("[LuckyBoxCycle] Loaded — 80 boxes (10 each) → Place+Open → Pickup → Sell → loop")
+print("[LuckyBoxCycle] Loaded — all rarities (10 each) → auto-skip → Place+Open → Pickup → Sell → loop")
