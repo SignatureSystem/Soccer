@@ -634,17 +634,18 @@ local function waitForStealConfirm(block, timeout)
 end
 
 --[[
-  EXACT AutoFarm steal flow + confirm:
+  Steal flow:
     1) If already holding → deposit at base (not a new collect)
     2) Find target block of this rarity
     3) activateCloak
     4) Teleport UNDER the block (CFrame * (0, -1, 0))
     5) BodyVelocity float
-    6) Force ALL prompts HoldDuration = 0
-    7) attemptSteal(prompt)
-    8) CONFIRM steal (holdingSlime / model gone / Carrying)
-    9) Only if confirmed → destroy BV, zero velocity, teleportToBase
-   10) Wait until deposit finishes before returning "stolen"
+    6) WAIT 1 SECOND under the block
+    7) Force ALL prompts HoldDuration = 0
+    8) Trigger proximity prompt (attemptSteal)
+    9) CONFIRM steal (holdingSlime / model gone / Carrying)
+   10) Only if confirmed → destroy BV, zero velocity, teleportToBase
+   11) Wait until deposit finishes before returning "stolen"
 ]]
 local function stealOne(rarityName)
     -- 1) already carrying → base only
@@ -672,7 +673,7 @@ local function stealOne(rarityName)
     end)
     task.wait(0.2)
 
-    -- 4) teleport under target (exact AutoFarm)
+    -- 4) teleport under target
     local root = getRoot()
     if not root or not block.part or not block.part.Parent then
         return false
@@ -681,7 +682,7 @@ local function stealOne(rarityName)
     root.CFrame = block.part.CFrame * CFrame.new(0, -1, 0)
     root.AssemblyLinearVelocity = Vector3.zero
 
-    -- 5) BodyVelocity float (exact AutoFarm)
+    -- 5) BodyVelocity float
     local bv = Instance.new("BodyVelocity")
     bv.Name = "LuckyFloat"
     bv.Velocity = Vector3.zero
@@ -689,9 +690,18 @@ local function stealOne(rarityName)
     bv.P = 1250
     bv.Parent = root
 
-    task.wait(0.15)
+    -- 6) WAIT 1 SECOND under the block before triggering the prompt
+    addLog("Under block — waiting 1s before prompt...")
+    task.wait(1)
 
-    -- 6) force zero hold on every prompt (exact AutoFarm loop)
+    -- Re-check target still valid after the wait
+    if not block.part or not block.part.Parent then
+        if bv and bv.Parent then bv:Destroy() end
+        addLog("Target gone during 1s wait — abort")
+        return false
+    end
+
+    -- 7) force zero hold on every prompt
     for _, v in ipairs(Workspace:GetDescendants()) do
         if v.ClassName == "ProximityPrompt" then
             v.HoldDuration = 0
@@ -716,10 +726,11 @@ local function stealOne(rarityName)
 
     prompt.HoldDuration = 0
 
-    -- 7) instant steal
+    -- 8) trigger proximity prompt
+    addLog("Triggering proximity prompt...")
     attemptSteal(prompt)
 
-    -- 8) CONFIRM before leaving
+    -- 9) CONFIRM before leaving
     local confirmed, reason = waitForStealConfirm(block, 1.25)
 
     if bv and bv.Parent then
@@ -740,10 +751,10 @@ local function stealOne(rarityName)
 
     addLog(string.format("Steal confirmed (%s) → base", tostring(reason)))
 
-    -- 9) return to base only after confirm
+    -- 10) return to base only after confirm
     teleportToBase()
 
-    -- 10) wait for deposit
+    -- 11) wait for deposit
     local t = os.clock() + 2.0
     while LocalPlayer:GetAttribute("holdingSlime") == true and os.clock() < t do
         task.wait(0.08)
