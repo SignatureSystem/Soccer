@@ -826,14 +826,10 @@ local function stealOne(rarityName)
     end
 
     -- Teleport to base WHILE still air-locked, then release hover
+    -- No deposit wait — return immediately after base teleport
     if stolen then
         teleportToBase()
-        task.wait(0.05)
         cleanupHover()
-        local t = os.clock() + 1.5
-        while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
-            task.wait(0.08)
-        end
         return true
     end
 
