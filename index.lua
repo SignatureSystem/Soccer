@@ -633,6 +633,9 @@ local function waitForStealConfirm(block, timeout)
     return false, "timeout"
 end
 
+local PROMPT_RETRY_COUNT = 20
+local PROMPT_RETRY_GAP   = 0.08
+
 --[[
   Steal flow:
     1) If already holding → deposit at base (not a new collect)
@@ -640,12 +643,11 @@ end
     3) activateCloak
     4) Teleport UNDER the block (CFrame * (0, -1, 0))
     5) BodyVelocity float
-    6) Force ALL prompts HoldDuration = 0
-    7) Trigger proximity prompt IMMEDIATELY (no pre-wait)
-    8) Wait 1 second (prompt must fire before leaving)
-    9) CONFIRM steal (holdingSlime / model gone / Carrying)
-   10) Only if confirmed → destroy BV, zero velocity, teleportToBase
-   11) Wait until deposit finishes before returning "stolen"
+    6) Force prompts HoldDuration = 0
+    7) Trigger proximity prompt up to 20 times while STILL under the block
+       - after each fire, briefly check confirm
+       - if confirmed → wait 1s → base → return "stolen"
+    8) If all 20 fail → do NOT go to base, return false (caller may try next rarity)
 ]]
 local function stealOne(rarityName)
     -- 1) already carrying → base only
@@ -692,92 +694,114 @@ local function stealOne(rarityName)
 
     task.wait(0.05)
 
-    -- 6) force zero hold on every prompt
-    for _, v in ipairs(Workspace:GetDescendants()) do
-        if v.ClassName == "ProximityPrompt" then
-            v.HoldDuration = 0
+    local function cleanupFloat()
+        if bv and bv.Parent then
+            bv:Destroy()
+        end
+        local r = getRoot()
+        if r then
+            r.AssemblyLinearVelocity = Vector3.zero
         end
     end
 
-    local prompt = block.prompt
-    if (not prompt or not prompt.Parent) and block.model then
-        for _, d in ipairs(block.model:GetDescendants()) do
-            if d:IsA("ProximityPrompt") and d.Enabled then
-                prompt = d
-                break
+    local function refreshPrompt()
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v.ClassName == "ProximityPrompt" then
+                v.HoldDuration = 0
             end
         end
-    end
 
-    if not prompt or not prompt.Parent then
-        if bv and bv.Parent then bv:Destroy() end
-        addLog("Prompt missing — abort")
-        return false
-    end
-
-    prompt.HoldDuration = 0
-
-    -- 7) trigger proximity prompt IMMEDIATELY (before any long wait / base return)
-    addLog("Triggering proximity prompt...")
-    local fired = attemptSteal(prompt)
-    if not fired then
-        -- retry once while still under the block
-        task.wait(0.05)
+        local prompt = block.prompt
+        if (not prompt or not prompt.Parent) and block.model and block.model.Parent then
+            for _, d in ipairs(block.model:GetDescendants()) do
+                if d:IsA("ProximityPrompt") and d.Enabled then
+                    prompt = d
+                    break
+                end
+            end
+        end
         if prompt and prompt.Parent then
             prompt.HoldDuration = 0
-            fired = attemptSteal(prompt)
         end
+        return prompt
     end
 
-    if not fired then
-        if bv and bv.Parent then bv:Destroy() end
-        addLog("Prompt fire failed — abort (not returning to base as stolen)")
-        return false
-    end
-
-    -- 8) wait 1 second AFTER prompt was triggered (still under block)
-    addLog("Prompt fired — waiting 1s before base...")
-    task.wait(1)
-
-    -- 9) CONFIRM before leaving
-    local confirmed, reason = waitForStealConfirm(block, 0.75)
-
-    if bv and bv.Parent then
-        bv:Destroy()
-    end
-    root = getRoot()
-    if root then
-        root.AssemblyLinearVelocity = Vector3.zero
-    end
-
-    if not confirmed then
-        -- Still held after the 1s wait counts as success too
-        if LocalPlayer:GetAttribute("holdingSlime") == true then
-            confirmed = true
-            reason = "holdingSlime-after-wait"
+    -- Stay under the block. Retry proximity prompt up to 20 times.
+    -- NEVER return to base unless steal is confirmed.
+    for attempt = 1, PROMPT_RETRY_COUNT do
+        if not running then
+            cleanupFloat()
+            return false
         end
-    end
 
-    if not confirmed then
+        -- Target disappeared mid-retry
+        if not block.part or not block.part.Parent then
+            cleanupFloat()
+            addLog("Target gone during retries — abort (no base)")
+            return false
+        end
+
+        -- Keep position under the block
+        root = getRoot()
+        if root and block.part and block.part.Parent then
+            root.CFrame = block.part.CFrame * CFrame.new(0, -1, 0)
+            root.AssemblyLinearVelocity = Vector3.zero
+        end
+
+        local prompt = refreshPrompt()
+        if not prompt or not prompt.Parent then
+            addLog(string.format(
+                "Prompt missing (try %d/%d)",
+                attempt,
+                PROMPT_RETRY_COUNT
+            ))
+            task.wait(PROMPT_RETRY_GAP)
+            continue
+        end
+
         addLog(string.format(
-            "Steal NOT confirmed (%s) — will skip rarity",
-            tostring(reason)
+            "Prompt try %d/%d...",
+            attempt,
+            PROMPT_RETRY_COUNT
         ))
-        return false
+        attemptSteal(prompt)
+
+        -- Quick confirm after this fire
+        local confirmed, reason = waitForStealConfirm(block, 0.35)
+        if not confirmed and LocalPlayer:GetAttribute("holdingSlime") == true then
+            confirmed = true
+            reason = "holdingSlime"
+        end
+
+        if confirmed then
+            addLog(string.format(
+                "Steal confirmed on try %d (%s) — wait 1s then base",
+                attempt,
+                tostring(reason)
+            ))
+            task.wait(1)
+
+            cleanupFloat()
+            teleportToBase()
+
+            local t = os.clock() + 2.0
+            while LocalPlayer:GetAttribute("holdingSlime") == true and os.clock() < t do
+                task.wait(0.08)
+            end
+
+            return "stolen"
+        end
+
+        task.wait(PROMPT_RETRY_GAP)
     end
 
-    addLog(string.format("Steal confirmed (%s) → base", tostring(reason)))
-
-    -- 10) return to base ONLY after prompt was triggered + wait + confirm
-    teleportToBase()
-
-    -- 11) wait for deposit
-    local t = os.clock() + 2.0
-    while LocalPlayer:GetAttribute("holdingSlime") == true and os.clock() < t do
-        task.wait(0.08)
-    end
-
-    return "stolen"
+    -- All 20 failed → do NOT go to base
+    cleanupFloat()
+    addLog(string.format(
+        "Steal failed after %d prompt tries — staying put, next rarity",
+        PROMPT_RETRY_COUNT
+    ))
+    return false
 end
 
 -- Always leave the current rarity index (wraps). Prefer a rarity that
@@ -1267,10 +1291,11 @@ local function runCycle()
             addLog("Deposited held slime — not counted")
             task.wait(0.15)
         else
-            -- Steal attempted but failed (prompt gone, etc.) → leave this rarity now.
+            -- stealOne already retried the prompt 20 times under the box
+            -- and did NOT return to base. Only now move to next rarity.
             local nextIdx, nextName, foundLive = advanceRarityIndex(currentRarityIndex)
             addLog(string.format(
-                "Missed %s → skip to %s%s",
+                "Failed %s after 20 prompt tries → next: %s%s",
                 rarity,
                 tostring(nextName),
                 foundLive and " (live)" or ""
