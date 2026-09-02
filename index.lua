@@ -467,19 +467,31 @@ local function activateCloak()
     return true
 end
 
+-- Exact attemptSteal from AutoFarm
 local function attemptSteal(prompt)
-    if not prompt or not prompt.Parent then return false end
-    prompt.HoldDuration = 0
+    if not prompt or not prompt.Parent then
+        return false
+    end
+
     pcall(function()
-        if fireproximityprompt then
-            fireproximityprompt(prompt)
-        else
-            prompt:InputHoldBegin()
-            task.wait(0.05)
-            prompt:InputHoldEnd()
-        end
+        prompt.HoldDuration = 0
     end)
-    return true
+
+    if typeof(fireproximityprompt) == "function" then
+        local ok = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+        if ok then
+            return true
+        end
+    end
+
+    local ok = pcall(function()
+        prompt:InputHoldBegin()
+        prompt:InputHoldEnd()
+    end)
+
+    return ok
 end
 
 -- True if at least one non-carrying block of this rarity exists in Live.Slimes
@@ -492,7 +504,7 @@ local function hasLuckyBlockOfType(rarityName)
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model")
             and not model:GetAttribute("Carrying")
-            and allowed[tostring(model.Name)]
+            and allowed[tostring(model.Name)] == true
         then
             return true
         end
@@ -502,7 +514,6 @@ end
 
 -- Find the next rarity (from startIndex onward, wrapping once) that still
 -- needs boxes AND currently has at least one block in the world.
--- Returns index + name, or nil if nothing available.
 local function findNextAvailableRarity(startIndex)
     local n = #TARGET_RARITIES
     for offset = 0, n - 1 do
@@ -517,7 +528,8 @@ local function findNextAvailableRarity(startIndex)
     return nil, nil
 end
 
--- Find one target lucky block of the given type
+-- Exact getTargetLuckyBlock from AutoFarm (filtered by rarity).
+-- Prefers highest Value, then nearest. Prompt prefers steal/open/pick/take.
 local function getTargetLuckyBlock(rarityName)
     local live = Workspace:FindFirstChild("Live")
     if not live then return nil end
@@ -528,55 +540,148 @@ local function getTargetLuckyBlock(rarityName)
     if not allowed then return nil end
 
     local root = getRoot()
-    local best, bestDist = nil, math.huge
+    local best = nil
+    local bestValue = -math.huge
+    local bestDistance = math.huge
 
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model") and not model:GetAttribute("Carrying") then
-            if allowed[tostring(model.Name)] then
-                local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+            local modelName = tostring(model.Name)
+            if allowed[modelName] == true then
+                local primary =
+                    model.PrimaryPart
+                    or model:FindFirstChildWhichIsA("BasePart")
+
                 if primary then
-                    local dist = root and (root.Position - primary.Position).Magnitude or 0
-                    if dist < bestDist then
-                        bestDist = dist
-                        local prompt
-                        for _, d in ipairs(model:GetDescendants()) do
-                            if d:IsA("ProximityPrompt") and d.Enabled then
+                    local value =
+                        tonumber(model:GetAttribute("Value"))
+                        or tonumber(model:GetAttribute("MoneyPerSecond"))
+                        or 0
+
+                    local distance =
+                        root and (root.Position - primary.Position).Magnitude
+                        or math.huge
+
+                    local prompt = nil
+                    for _, d in ipairs(model:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") and d.Enabled then
+                            local at = string.lower(tostring(d.ActionText or ""))
+                            if at:find("steal", 1, true)
+                                or at:find("open", 1, true)
+                                or at:find("pick", 1, true)
+                                or at:find("take", 1, true)
+                                or not prompt
+                            then
                                 prompt = d
-                                break
+                                if at:find("steal", 1, true)
+                                    or at:find("open", 1, true)
+                                    or at:find("pick", 1, true)
+                                    or at:find("take", 1, true)
+                                then
+                                    break
+                                end
                             end
                         end
-                        best = { model = model, part = primary, prompt = prompt }
+                    end
+
+                    if value > bestValue
+                        or (value == bestValue and distance < bestDistance)
+                    then
+                        bestValue = value
+                        bestDistance = distance
+                        best = {
+                            name = modelName,
+                            type = rarityName,
+                            value = value,
+                            part = primary,
+                            prompt = prompt,
+                            model = model,
+                        }
                     end
                 end
             end
         end
     end
+
     return best
 end
 
--- Steal one box of current rarity
-local function stealOne(rarityName)
-    if LocalPlayer:GetAttribute("holdingSlime") == true then
-        teleportToBase()
-        local t = os.clock() + 1.2
-        while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
-            task.wait(0.08)
+-- Confirm steal before counting / returning to base.
+-- Success if holdingSlime, model removed, or Carrying attribute set.
+local function waitForStealConfirm(block, timeout)
+    timeout = tonumber(timeout) or 1.25
+    local deadline = os.clock() + timeout
+
+    while os.clock() < deadline do
+        if LocalPlayer:GetAttribute("holdingSlime") == true then
+            return true, "holdingSlime"
         end
-        return true
+        if block and block.model then
+            if not block.model.Parent then
+                return true, "modelRemoved"
+            end
+            if block.model:GetAttribute("Carrying") == true then
+                return true, "carryingAttr"
+            end
+        end
+        task.wait(0.05)
     end
 
+    if LocalPlayer:GetAttribute("holdingSlime") == true then
+        return true, "holdingSlime"
+    end
+    return false, "timeout"
+end
+
+--[[
+  EXACT AutoFarm steal flow + confirm:
+    1) If already holding → deposit at base (not a new collect)
+    2) Find target block of this rarity
+    3) activateCloak
+    4) Teleport UNDER the block (CFrame * (0, -1, 0))
+    5) BodyVelocity float
+    6) Force ALL prompts HoldDuration = 0
+    7) attemptSteal(prompt)
+    8) CONFIRM steal (holdingSlime / model gone / Carrying)
+    9) Only if confirmed → destroy BV, zero velocity, teleportToBase
+   10) Wait until deposit finishes before returning "stolen"
+]]
+local function stealOne(rarityName)
+    -- 1) already carrying → base only
+    if LocalPlayer:GetAttribute("holdingSlime") == true then
+        addLog("Already holding → returning to base")
+        teleportToBase()
+        local t = os.clock() + 1.5
+        while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
+            task.wait(0.1)
+        end
+        return "deposited"
+    end
+
+    -- 2) find target
     local block = getTargetLuckyBlock(rarityName)
-    if not block then return false end
+    if not block then
+        return false
+    end
 
-    pcall(activateCloak)
-    task.wait(0.15)
+    addLog(string.format("Found %s — stealing...", tostring(block.name)))
 
+    -- 3) cloak
+    pcall(function()
+        activateCloak()
+    end)
+    task.wait(0.2)
+
+    -- 4) teleport under target (exact AutoFarm)
     local root = getRoot()
-    if not root or not block.part or not block.part.Parent then return false end
+    if not root or not block.part or not block.part.Parent then
+        return false
+    end
 
     root.CFrame = block.part.CFrame * CFrame.new(0, -1, 0)
     root.AssemblyLinearVelocity = Vector3.zero
 
+    -- 5) BodyVelocity float (exact AutoFarm)
     local bv = Instance.new("BodyVelocity")
     bv.Name = "LuckyFloat"
     bv.Velocity = Vector3.zero
@@ -584,10 +689,11 @@ local function stealOne(rarityName)
     bv.P = 1250
     bv.Parent = root
 
-    task.wait(0.12)
+    task.wait(0.15)
 
+    -- 6) force zero hold on every prompt (exact AutoFarm loop)
     for _, v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("ProximityPrompt") then
+        if v.ClassName == "ProximityPrompt" then
             v.HoldDuration = 0
         end
     end
@@ -602,18 +708,62 @@ local function stealOne(rarityName)
         end
     end
 
-    if prompt and prompt.Parent then
-        prompt.HoldDuration = 0
-        attemptSteal(prompt)
+    if not prompt or not prompt.Parent then
         if bv and bv.Parent then bv:Destroy() end
-        root = getRoot()
-        if root then root.AssemblyLinearVelocity = Vector3.zero end
-        teleportToBase()
-        return true
+        addLog("Prompt missing — abort")
+        return false
     end
 
-    if bv and bv.Parent then bv:Destroy() end
-    return false
+    prompt.HoldDuration = 0
+
+    -- 7) instant steal
+    attemptSteal(prompt)
+
+    -- 8) CONFIRM before leaving
+    local confirmed, reason = waitForStealConfirm(block, 1.25)
+
+    if bv and bv.Parent then
+        bv:Destroy()
+    end
+    root = getRoot()
+    if root then
+        root.AssemblyLinearVelocity = Vector3.zero
+    end
+
+    if not confirmed then
+        addLog(string.format(
+            "Steal NOT confirmed (%s) — will skip rarity",
+            tostring(reason)
+        ))
+        return false
+    end
+
+    addLog(string.format("Steal confirmed (%s) → base", tostring(reason)))
+
+    -- 9) return to base only after confirm
+    teleportToBase()
+
+    -- 10) wait for deposit
+    local t = os.clock() + 2.0
+    while LocalPlayer:GetAttribute("holdingSlime") == true and os.clock() < t do
+        task.wait(0.08)
+    end
+
+    return "stolen"
+end
+
+-- Always leave the current rarity index (wraps). Prefer a rarity that
+-- still needs boxes AND has one in the world; otherwise just +1.
+local function advanceRarityIndex(fromIndex)
+    local nextIdx, nextName = findNextAvailableRarity(fromIndex + 1)
+    if nextIdx and nextName then
+        return nextIdx, nextName, true
+    end
+    local i = fromIndex + 1
+    if i > #TARGET_RARITIES then
+        i = 1
+    end
+    return i, TARGET_RARITIES[i], false
 end
 
 -- Count lucky boxes currently in inventory (by checking tools + data)
@@ -991,24 +1141,34 @@ local function runCycle()
         TOTAL_TARGET
     ))
 
-    local failStreak = 0
     local idleRounds = 0
+    local fullRotationsWithoutSteal = 0
+    local indexAtRotationStart = currentRarityIndex
 
-    -- Phase 1: Collect 10 of each rarity; auto-skip when none available
+    -- Phase 1: Collect 10 of each rarity.
+    -- ONE empty scan → leave that rarity immediately (never stick on Japan/etc).
     while running and collectedThisCycle < TOTAL_TARGET do
         local rarity = TARGET_RARITIES[currentRarityIndex]
         if not rarity then break end
 
         -- Already finished this rarity → advance
         if countsByRarity[rarity] >= BOXES_PER_RARITY then
-            currentRarityIndex += 1
-            failStreak = 0
-            if currentRarityIndex > #TARGET_RARITIES then
-                -- All rarities done (or skipped). Stop collect phase.
+            local nextIdx, nextName = advanceRarityIndex(currentRarityIndex)
+            currentRarityIndex = nextIdx
+            -- Detect full pass of completed rarities
+            local allDone = true
+            for _, r in ipairs(TARGET_RARITIES) do
+                if countsByRarity[r] < BOXES_PER_RARITY then
+                    allDone = false
+                    break
+                end
+            end
+            if allDone then
+                addLog("All rarities hit 10/10 — collect phase done")
                 break
             end
             rarity = TARGET_RARITIES[currentRarityIndex]
-            addLog(string.format("Moving to next rarity: %s", tostring(rarity)))
+            addLog(string.format("Quota filled → next: %s", tostring(rarity)))
         end
 
         setPhase(string.format(
@@ -1018,10 +1178,44 @@ local function runCycle()
             BOXES_PER_RARITY
         ))
 
-        local ok = stealOne(rarity)
-        if ok then
-            failStreak = 0
+        -- Pre-check: if this rarity has zero boxes in the world right now,
+        -- skip on this single scan without even attempting a steal.
+        if not hasLuckyBlockOfType(rarity) then
+            local nextIdx, nextName, foundLive = advanceRarityIndex(currentRarityIndex)
+            addLog(string.format(
+                "No %s in world → skip to %s%s",
+                rarity,
+                tostring(nextName),
+                foundLive and " (live)" or ""
+            ))
+            currentRarityIndex = nextIdx
+
+            if nextIdx == indexAtRotationStart then
+                fullRotationsWithoutSteal += 1
+                idleRounds += 1
+                addLog(string.format(
+                    "Full rarity rotation with nothing live (idle %d)",
+                    idleRounds
+                ))
+                task.wait(0.8)
+                if idleRounds >= 5 and collectedThisCycle > 0 then
+                    addLog(string.format(
+                        "Idle with %d boxes — proceeding to Place+Open",
+                        collectedThisCycle
+                    ))
+                    break
+                end
+            end
+            task.wait(0.05)
+            continue
+        end
+
+        local result = stealOne(rarity)
+
+        if result == "stolen" then
             idleRounds = 0
+            fullRotationsWithoutSteal = 0
+            indexAtRotationStart = currentRarityIndex
             task.wait(0.35)
             countsByRarity[rarity] = countsByRarity[rarity] + 1
             collectedThisCycle += 1
@@ -1041,38 +1235,19 @@ local function runCycle()
                 collectedThisCycle,
                 TOTAL_TARGET
             ))
+        elseif result == "deposited" then
+            addLog("Deposited held slime — not counted")
+            task.wait(0.15)
         else
-            -- Single empty scan → immediately jump to next rarity that
-            -- currently has boxes in the world (and still needs more).
-            failStreak += 1
-            local nextIdx, nextName = findNextAvailableRarity(currentRarityIndex + 1)
-            if nextIdx and nextName then
-                addLog(string.format(
-                    "No %s box → skip to next available: %s",
-                    rarity,
-                    nextName
-                ))
-                currentRarityIndex = nextIdx
-                failStreak = 0
-            else
-                -- Nothing of any remaining needed rarity is in the world.
-                idleRounds += 1
-                addLog(string.format(
-                    "No %s (or any other needed) box in world (idle %d). Waiting...",
-                    rarity,
-                    idleRounds
-                ))
-                task.wait(1.0)
-                failStreak = 0
-                -- Soft exit collect if idle too long and we already have boxes.
-                if idleRounds >= 6 and collectedThisCycle > 0 then
-                    addLog(string.format(
-                        "Idle too long with %d boxes — proceeding to Place+Open",
-                        collectedThisCycle
-                    ))
-                    break
-                end
-            end
+            -- Steal attempted but failed (prompt gone, etc.) → leave this rarity now.
+            local nextIdx, nextName, foundLive = advanceRarityIndex(currentRarityIndex)
+            addLog(string.format(
+                "Missed %s → skip to %s%s",
+                rarity,
+                tostring(nextName),
+                foundLive and " (live)" or ""
+            ))
+            currentRarityIndex = nextIdx
         end
 
         task.wait(0.08)
