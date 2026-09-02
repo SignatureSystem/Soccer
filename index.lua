@@ -56,7 +56,7 @@ local TARGET_RARITIES = {
     "Alternative",
 }
 
-local TOTAL_TARGET = #TARGET_RARITIES * BOXES_PER_RARITY  -- 22 * 10 = 220
+local TOTAL_TARGET = 100  -- hard cap (was 220 = 22 rarities * 10)
 
 local LUCKY_BLOCK_MODEL_NAMES = {
     ["Common"]      = { ["Common Lucky Block"] = true },
@@ -640,9 +640,9 @@ end
     3) activateCloak
     4) Teleport UNDER the block (CFrame * (0, -1, 0))
     5) BodyVelocity float
-    6) WAIT 1 SECOND under the block
-    7) Force ALL prompts HoldDuration = 0
-    8) Trigger proximity prompt (attemptSteal)
+    6) Force ALL prompts HoldDuration = 0
+    7) Trigger proximity prompt IMMEDIATELY (no pre-wait)
+    8) Wait 1 second (prompt must fire before leaving)
     9) CONFIRM steal (holdingSlime / model gone / Carrying)
    10) Only if confirmed → destroy BV, zero velocity, teleportToBase
    11) Wait until deposit finishes before returning "stolen"
@@ -690,18 +690,9 @@ local function stealOne(rarityName)
     bv.P = 1250
     bv.Parent = root
 
-    -- 6) WAIT 1 SECOND under the block before triggering the prompt
-    addLog("Under block — waiting 1s before prompt...")
-    task.wait(1)
+    task.wait(0.05)
 
-    -- Re-check target still valid after the wait
-    if not block.part or not block.part.Parent then
-        if bv and bv.Parent then bv:Destroy() end
-        addLog("Target gone during 1s wait — abort")
-        return false
-    end
-
-    -- 7) force zero hold on every prompt
+    -- 6) force zero hold on every prompt
     for _, v in ipairs(Workspace:GetDescendants()) do
         if v.ClassName == "ProximityPrompt" then
             v.HoldDuration = 0
@@ -726,12 +717,30 @@ local function stealOne(rarityName)
 
     prompt.HoldDuration = 0
 
-    -- 8) trigger proximity prompt
+    -- 7) trigger proximity prompt IMMEDIATELY (before any long wait / base return)
     addLog("Triggering proximity prompt...")
-    attemptSteal(prompt)
+    local fired = attemptSteal(prompt)
+    if not fired then
+        -- retry once while still under the block
+        task.wait(0.05)
+        if prompt and prompt.Parent then
+            prompt.HoldDuration = 0
+            fired = attemptSteal(prompt)
+        end
+    end
+
+    if not fired then
+        if bv and bv.Parent then bv:Destroy() end
+        addLog("Prompt fire failed — abort (not returning to base as stolen)")
+        return false
+    end
+
+    -- 8) wait 1 second AFTER prompt was triggered (still under block)
+    addLog("Prompt fired — waiting 1s before base...")
+    task.wait(1)
 
     -- 9) CONFIRM before leaving
-    local confirmed, reason = waitForStealConfirm(block, 1.25)
+    local confirmed, reason = waitForStealConfirm(block, 0.75)
 
     if bv and bv.Parent then
         bv:Destroy()
@@ -739,6 +748,14 @@ local function stealOne(rarityName)
     root = getRoot()
     if root then
         root.AssemblyLinearVelocity = Vector3.zero
+    end
+
+    if not confirmed then
+        -- Still held after the 1s wait counts as success too
+        if LocalPlayer:GetAttribute("holdingSlime") == true then
+            confirmed = true
+            reason = "holdingSlime-after-wait"
+        end
     end
 
     if not confirmed then
@@ -751,7 +768,7 @@ local function stealOne(rarityName)
 
     addLog(string.format("Steal confirmed (%s) → base", tostring(reason)))
 
-    -- 10) return to base only after confirm
+    -- 10) return to base ONLY after prompt was triggered + wait + confirm
     teleportToBase()
 
     -- 11) wait for deposit
