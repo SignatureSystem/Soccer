@@ -26,9 +26,9 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui", 10)
 -- CONFIG
 -- ============================================================
 local BOXES_PER_RARITY = 10
--- How many consecutive "no box found" attempts before auto-skipping
--- to the next rarity that currently has boxes in the world.
-local SKIP_AFTER_FAILS = 8
+-- 1 = on a single empty scan, immediately skip to the next rarity
+-- that currently has boxes in the world.
+local SKIP_AFTER_FAILS = 1
 
 -- Full ordered list: Common → Alternative (all in-game lucky types)
 local TARGET_RARITIES = {
@@ -1042,49 +1042,36 @@ local function runCycle()
                 TOTAL_TARGET
             ))
         else
+            -- Single empty scan → immediately jump to next rarity that
+            -- currently has boxes in the world (and still needs more).
             failStreak += 1
-            addLog(string.format(
-                "No %s box nearby (%d/%d fails) — scanning...",
-                rarity,
-                failStreak,
-                SKIP_AFTER_FAILS
-            ))
-
-            -- After enough fails, jump to the next rarity that currently
-            -- has boxes in the world (and still needs more).
-            if failStreak >= SKIP_AFTER_FAILS then
-                local nextIdx, nextName = findNextAvailableRarity(currentRarityIndex + 1)
-                if nextIdx and nextName then
-                    addLog(string.format(
-                        "Skipping %s → next available: %s",
-                        rarity,
-                        nextName
-                    ))
-                    currentRarityIndex = nextIdx
-                    failStreak = 0
-                else
-                    -- Nothing of any remaining rarity is in the world right now.
-                    idleRounds += 1
-                    addLog(string.format(
-                        "No available rarities in world (idle %d). Waiting...",
-                        idleRounds
-                    ))
-                    -- Give the world time to spawn more boxes, then retry
-                    -- from the current index again.
-                    task.wait(1.0)
-                    failStreak = 0
-                    -- Soft exit collect if we've been idle too long and already
-                    -- have some boxes — go place/open what we have.
-                    if idleRounds >= 6 and collectedThisCycle > 0 then
-                        addLog(string.format(
-                            "Idle too long with %d boxes — proceeding to Place+Open",
-                            collectedThisCycle
-                        ))
-                        break
-                    end
-                end
+            local nextIdx, nextName = findNextAvailableRarity(currentRarityIndex + 1)
+            if nextIdx and nextName then
+                addLog(string.format(
+                    "No %s box → skip to next available: %s",
+                    rarity,
+                    nextName
+                ))
+                currentRarityIndex = nextIdx
+                failStreak = 0
             else
-                task.wait(0.25)
+                -- Nothing of any remaining needed rarity is in the world.
+                idleRounds += 1
+                addLog(string.format(
+                    "No %s (or any other needed) box in world (idle %d). Waiting...",
+                    rarity,
+                    idleRounds
+                ))
+                task.wait(1.0)
+                failStreak = 0
+                -- Soft exit collect if idle too long and we already have boxes.
+                if idleRounds >= 6 and collectedThisCycle > 0 then
+                    addLog(string.format(
+                        "Idle too long with %d boxes — proceeding to Place+Open",
+                        collectedThisCycle
+                    ))
+                    break
+                end
             end
         end
 
