@@ -554,7 +554,11 @@ local function getTargetLuckyBlock(rarityName)
     return best
 end
 
--- Steal one box of current rarity
+-- Hover height above the lucky box (studs). Close enough for ProximityPrompt range.
+local HOVER_HEIGHT = 4
+
+-- Steal one box of current rarity.
+-- Hover ABOVE the box like a chopper (anti-gravity BodyVelocity), trigger prompt, then base.
 local function stealOne(rarityName)
     if LocalPlayer:GetAttribute("holdingSlime") == true then
         teleportToBase()
@@ -572,19 +576,71 @@ local function stealOne(rarityName)
     task.wait(0.15)
 
     local root = getRoot()
+    local hum = getHumanoid()
     if not root or not block.part or not block.part.Parent then return false end
 
-    root.CFrame = block.part.CFrame * CFrame.new(0, -1, 0)
+    -- Position ABOVE the box (not under)
+    local hoverCF = block.part.CFrame * CFrame.new(0, HOVER_HEIGHT, 0)
+    root.CFrame = hoverCF
     root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+
+    -- Cancel gravity / physics pull: BodyVelocity with zero velocity + huge MaxForce
+    -- locks the character in place in the air (chopper hover).
+    local oldBV = root:FindFirstChild("LuckyFloat")
+    if oldBV then oldBV:Destroy() end
 
     local bv = Instance.new("BodyVelocity")
     bv.Name = "LuckyFloat"
     bv.Velocity = Vector3.zero
-    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    bv.MaxForce = Vector3.new(1e6, 1e6, 1e6) -- strong enough to fight gravity on all axes
     bv.P = 1250
     bv.Parent = root
 
-    task.wait(0.12)
+    -- Reduce humanoid physics fighting the hover
+    local prevState = nil
+    if hum then
+        prevState = hum:GetState()
+        pcall(function()
+            hum.PlatformStand = true
+        end)
+    end
+
+    local function maintainHover()
+        local r = getRoot()
+        if not r or not block.part or not block.part.Parent then return false end
+        local cf = block.part.CFrame * CFrame.new(0, HOVER_HEIGHT, 0)
+        r.CFrame = cf
+        r.AssemblyLinearVelocity = Vector3.zero
+        r.AssemblyAngularVelocity = Vector3.zero
+        if bv and bv.Parent then
+            bv.Velocity = Vector3.zero
+        end
+        return true
+    end
+
+    local function cleanupHover()
+        if bv and bv.Parent then bv:Destroy() end
+        local r = getRoot()
+        if r then
+            r.AssemblyLinearVelocity = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+        end
+        if hum then
+            pcall(function()
+                hum.PlatformStand = false
+            end)
+        end
+    end
+
+    -- Settle hover briefly
+    for _ = 1, 4 do
+        if not maintainHover() then
+            cleanupHover()
+            return false
+        end
+        task.wait(0.03)
+    end
 
     for _, v in ipairs(Workspace:GetDescendants()) do
         if v:IsA("ProximityPrompt") then
@@ -602,17 +658,61 @@ local function stealOne(rarityName)
         end
     end
 
-    if prompt and prompt.Parent then
-        prompt.HoldDuration = 0
-        attemptSteal(prompt)
-        if bv and bv.Parent then bv:Destroy() end
-        root = getRoot()
-        if root then root.AssemblyLinearVelocity = Vector3.zero end
+    if not prompt or not prompt.Parent then
+        cleanupHover()
+        return false
+    end
+
+    -- While still hovering, trigger the prompt (retry a few times)
+    prompt.HoldDuration = 0
+    local stolen = false
+    for try = 1, 8 do
+        if not maintainHover() then break end
+        if not prompt.Parent then
+            -- refresh prompt from model
+            if block.model and block.model.Parent then
+                for _, d in ipairs(block.model:GetDescendants()) do
+                    if d:IsA("ProximityPrompt") and d.Enabled then
+                        prompt = d
+                        break
+                    end
+                end
+            end
+        end
+        if prompt and prompt.Parent then
+            prompt.HoldDuration = 0
+            attemptSteal(prompt)
+        end
+        if LocalPlayer:GetAttribute("holdingSlime") == true then
+            stolen = true
+            break
+        end
+        if block.model and (not block.model.Parent or block.model:GetAttribute("Carrying") == true) then
+            stolen = true
+            break
+        end
+        task.wait(0.08)
+    end
+
+    -- Short hold still hovering so the server can register the steal
+    task.wait(0.25)
+    maintainHover()
+
+    if LocalPlayer:GetAttribute("holdingSlime") == true then
+        stolen = true
+    end
+
+    cleanupHover()
+
+    if stolen then
         teleportToBase()
+        local t = os.clock() + 1.5
+        while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
+            task.wait(0.08)
+        end
         return true
     end
 
-    if bv and bv.Parent then bv:Destroy() end
     return false
 end
 
