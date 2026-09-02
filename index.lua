@@ -554,11 +554,53 @@ local function getTargetLuckyBlock(rarityName)
     return best
 end
 
--- Hover height above the lucky box (studs). Close enough for ProximityPrompt range.
-local HOVER_HEIGHT = 4
+-- Extra height above the TOP of the solid lucky box (humanoid hip height-ish).
+local STAND_OFFSET = 3
+
+local RunService = game:GetService("RunService")
+
+-- Make the lucky box solid locally so the player can stand on it.
+-- Sets CanCollide on every BasePart in the model (client-side collision).
+local function makeLuckyBoxSolid(block)
+    if not block then return end
+
+    local parts = {}
+    if block.model and block.model.Parent then
+        for _, d in ipairs(block.model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                table.insert(parts, d)
+            end
+        end
+        if block.model:IsA("BasePart") then
+            table.insert(parts, block.model)
+        end
+    end
+    if block.part and block.part:IsA("BasePart") then
+        table.insert(parts, block.part)
+    end
+
+    for _, part in ipairs(parts) do
+        pcall(function()
+            part.CanCollide = true
+            part.CanTouch = true
+            part.CanQuery = true
+            -- Keep massless so server physics on the box itself don't go crazy
+            if part.Massless ~= nil then
+                part.Massless = true
+            end
+        end)
+    end
+end
+
+-- World CFrame standing on top of the box (uses part size so feet sit on surface).
+local function standOnBoxCFrame(part)
+    if not part or not part.Parent then return nil end
+    local topY = part.Size.Y * 0.5 + STAND_OFFSET
+    return part.CFrame * CFrame.new(0, topY, 0)
+end
 
 -- Steal one box of current rarity.
--- Hover ABOVE the box like a chopper (anti-gravity BodyVelocity), trigger prompt, then base.
+-- Solidify the box, stand on top of it (no ground), fire prompt, then base.
 local function stealOne(rarityName)
     if LocalPlayer:GetAttribute("holdingSlime") == true then
         teleportToBase()
@@ -572,6 +614,9 @@ local function stealOne(rarityName)
     local block = getTargetLuckyBlock(rarityName)
     if not block then return false end
 
+    -- Make the lucky box solid so we can stand on it
+    makeLuckyBoxSolid(block)
+
     pcall(activateCloak)
     task.wait(0.15)
 
@@ -579,48 +624,124 @@ local function stealOne(rarityName)
     local hum = getHumanoid()
     if not root or not block.part or not block.part.Parent then return false end
 
-    -- Position ABOVE the box (not under)
-    local hoverCF = block.part.CFrame * CFrame.new(0, HOVER_HEIGHT, 0)
-    root.CFrame = hoverCF
+    -- Re-apply solidity in case the model streamed parts late
+    makeLuckyBoxSolid(block)
+
+    -- Clear any previous float objects
+    for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
+        local old = root:FindFirstChild(name)
+        if old then old:Destroy() end
+    end
+
+    local function hoverCFrame()
+        if not block.part or not block.part.Parent then return nil end
+        -- Stand on the solid top of the box — never the ground
+        return standOnBoxCFrame(block.part)
+    end
+
+    local cf0 = hoverCFrame()
+    if not cf0 then return false end
+
+    root.CFrame = cf0
     root.AssemblyLinearVelocity = Vector3.zero
     root.AssemblyAngularVelocity = Vector3.zero
 
-    -- Cancel gravity / physics pull: BodyVelocity with zero velocity + huge MaxForce
-    -- locks the character in place in the air (chopper hover).
-    local oldBV = root:FindFirstChild("LuckyFloat")
-    if oldBV then oldBV:Destroy() end
-
+    -- 1) BodyVelocity: zero velocity + extreme force = cancels gravity completely
     local bv = Instance.new("BodyVelocity")
     bv.Name = "LuckyFloat"
     bv.Velocity = Vector3.zero
-    bv.MaxForce = Vector3.new(1e6, 1e6, 1e6) -- strong enough to fight gravity on all axes
-    bv.P = 1250
+    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bv.P = 50000
     bv.Parent = root
 
-    -- Reduce humanoid physics fighting the hover
-    local prevState = nil
+    -- 2) BodyPosition: hard lock world position in the air
+    local bp = Instance.new("BodyPosition")
+    bp.Name = "LuckyHoverPos"
+    bp.Position = cf0.Position
+    bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bp.P = 50000
+    bp.D = 2500
+    bp.Parent = root
+
+    -- 3) BodyGyro: keep upright
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "LuckyHoverGyro"
+    bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bg.P = 50000
+    bg.CFrame = CFrame.new(cf0.Position) -- upright
+    bg.Parent = root
+
+    -- Freeze humanoid so it cannot walk/fall/jump into the ground
     if hum then
-        prevState = hum:GetState()
         pcall(function()
             hum.PlatformStand = true
+            hum.AutoRotate = false
+            hum:ChangeState(Enum.HumanoidStateType.Physics)
         end)
     end
 
-    local function maintainHover()
+    local hoverConn = nil
+    local hovering = true
+
+    local function applyHover()
         local r = getRoot()
-        if not r or not block.part or not block.part.Parent then return false end
-        local cf = block.part.CFrame * CFrame.new(0, HOVER_HEIGHT, 0)
+        if not r or not hovering then return false end
+        local cf = hoverCFrame()
+        if not cf then return false end
+
+        -- Hard snap every frame so gravity never wins a single tick
         r.CFrame = cf
         r.AssemblyLinearVelocity = Vector3.zero
         r.AssemblyAngularVelocity = Vector3.zero
+
         if bv and bv.Parent then
             bv.Velocity = Vector3.zero
+            bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
         end
+        if bp and bp.Parent then
+            bp.Position = cf.Position
+            bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        end
+        if bg and bg.Parent then
+            bg.CFrame = CFrame.new(cf.Position)
+        end
+
+        -- Safety: never sink through the box / onto the ground
+        if block.part and block.part.Parent then
+            local minY = block.part.Position.Y + (block.part.Size.Y * 0.5) + 1.5
+            if r.Position.Y < minY then
+                local cf = standOnBoxCFrame(block.part)
+                if cf then
+                    r.CFrame = cf
+                else
+                    r.CFrame = CFrame.new(r.Position.X, minY, r.Position.Z)
+                end
+                r.AssemblyLinearVelocity = Vector3.zero
+            end
+            -- Keep the box solid every frame (some games reset CanCollide)
+            makeLuckyBoxSolid(block)
+        end
+
         return true
     end
 
+    -- Every frame lock while hovering — player cannot touch the ground
+    hoverConn = RunService.Heartbeat:Connect(function()
+        if not hovering then return end
+        applyHover()
+    end)
+
     local function cleanupHover()
-        if bv and bv.Parent then bv:Destroy() end
+        hovering = false
+        if hoverConn then
+            hoverConn:Disconnect()
+            hoverConn = nil
+        end
+        for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
+            local r = getRoot()
+            local obj = r and r:FindFirstChild(name)
+            if obj then obj:Destroy() end
+        end
         local r = getRoot()
         if r then
             r.AssemblyLinearVelocity = Vector3.zero
@@ -629,13 +750,14 @@ local function stealOne(rarityName)
         if hum then
             pcall(function()
                 hum.PlatformStand = false
+                hum.AutoRotate = true
             end)
         end
     end
 
-    -- Settle hover briefly
-    for _ = 1, 4 do
-        if not maintainHover() then
+    -- Settle in the air
+    for _ = 1, 6 do
+        if not applyHover() then
             cleanupHover()
             return false
         end
@@ -663,26 +785,25 @@ local function stealOne(rarityName)
         return false
     end
 
-    -- While still hovering, trigger the prompt (retry a few times)
-    prompt.HoldDuration = 0
+    -- Fire prompt while locked in the air (never leave hover until done)
     local stolen = false
-    for try = 1, 8 do
-        if not maintainHover() then break end
-        if not prompt.Parent then
-            -- refresh prompt from model
-            if block.model and block.model.Parent then
-                for _, d in ipairs(block.model:GetDescendants()) do
-                    if d:IsA("ProximityPrompt") and d.Enabled then
-                        prompt = d
-                        break
-                    end
+    for try = 1, 10 do
+        if not applyHover() then break end
+
+        if not prompt.Parent and block.model and block.model.Parent then
+            for _, d in ipairs(block.model:GetDescendants()) do
+                if d:IsA("ProximityPrompt") and d.Enabled then
+                    prompt = d
+                    break
                 end
             end
         end
+
         if prompt and prompt.Parent then
             prompt.HoldDuration = 0
             attemptSteal(prompt)
         end
+
         if LocalPlayer:GetAttribute("holdingSlime") == true then
             stolen = true
             break
@@ -694,18 +815,21 @@ local function stealOne(rarityName)
         task.wait(0.08)
     end
 
-    -- Short hold still hovering so the server can register the steal
-    task.wait(0.25)
-    maintainHover()
+    -- Stay airborne a bit longer for server register
+    for _ = 1, 5 do
+        applyHover()
+        task.wait(0.05)
+    end
 
     if LocalPlayer:GetAttribute("holdingSlime") == true then
         stolen = true
     end
 
-    cleanupHover()
-
+    -- Teleport to base WHILE still air-locked, then release hover
     if stolen then
         teleportToBase()
+        task.wait(0.05)
+        cleanupHover()
         local t = os.clock() + 1.5
         while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
             task.wait(0.08)
@@ -713,6 +837,7 @@ local function stealOne(rarityName)
         return true
     end
 
+    cleanupHover()
     return false
 end
 
