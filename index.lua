@@ -2,14 +2,13 @@
   Lucky Box Cycle Auto
   ----------------------
   Flow (loops forever while ON):
-    1. Collect 10 lucky boxes of EACH rarity (Common → Alternative)
-       If none of the current rarity exist, auto-skip to the next
-       available rarity that has boxes in the world.
-    2. Place ALL lucky boxes into free slots (spam + teleport hop)
-    3. Open ALL placed boxes (spam)
-    4. Pick up ALL placed slimes (spam)
-    5. Sell ALL inventory slimes (spam)
-    6. Repeat
+    Priority: HIGHEST → LOWEST (Alternative first, Common last).
+    For each rarity as its own batch of up to 100:
+      - First scan: if none of that rarity in world → skip whole batch
+      - Else collect up to 100 of THAT rarity only
+      - If any collected → Place + Open + Pickup + Sell
+      - Then next lower rarity batch
+    After Common, restart from Alternative.
 
   Mechanisms reused from your AutoFarm + Slime Value Browser scripts.
 ]]
@@ -25,38 +24,39 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui", 10)
 -- ============================================================
 -- CONFIG
 -- ============================================================
-local BOXES_PER_RARITY = 10
--- 1 = on a single empty scan, immediately skip to the next rarity
--- that currently has boxes in the world.
-local SKIP_AFTER_FAILS = 1
+-- Each batch targets ONE rarity and collects up to BATCH_SIZE boxes
+-- of that rarity only, then Place → Open → Pickup → Sell.
+-- Priority is HIGHEST → LOWEST (Alternative first, Common last).
+-- If the FIRST scan of a rarity finds zero boxes, skip that whole batch.
+local BATCH_SIZE = 100
 
--- Full ordered list: Common → Alternative (all in-game lucky types)
+-- Highest value first → lowest last
 local TARGET_RARITIES = {
-    "Common",
-    "Water",
-    "Rare",
-    "Volcanic",
-    "Epic",
-    "Ghost",
-    "Legendary",
-    "67",
-    "Mythic",
-    "Poison",
-    "Secret",
-    "Cosmic",
-    "Soccer God",
-    "Rainbow",
-    "Exclusive",
-    "Limited",
-    "OG",
-    "Champions",
-    "Spain",
-    "Icons",
-    "Japan",
     "Alternative",
+    "Japan",
+    "Icons",
+    "Spain",
+    "Champions",
+    "OG",
+    "Limited",
+    "Exclusive",
+    "Rainbow",
+    "Soccer God",
+    "Cosmic",
+    "Secret",
+    "Poison",
+    "Mythic",
+    "67",
+    "Legendary",
+    "Ghost",
+    "Epic",
+    "Volcanic",
+    "Rare",
+    "Water",
+    "Common",
 }
 
-local TOTAL_TARGET = 20  -- hard cap (was 220)
+local TOTAL_TARGET = BATCH_SIZE  -- per-batch cap (shown in UI)
 
 local LUCKY_BLOCK_MODEL_NAMES = {
     ["Common"]      = { ["Common Lucky Block"] = true },
@@ -508,7 +508,7 @@ local function findNextAvailableRarity(startIndex)
     for offset = 0, n - 1 do
         local i = ((startIndex - 1 + offset) % n) + 1
         local rarity = TARGET_RARITIES[i]
-        if countsByRarity[rarity] < BOXES_PER_RARITY
+        if countsByRarity[rarity] < BATCH_SIZE
             and hasLuckyBlockOfType(rarity)
         then
             return i, rarity
@@ -973,7 +973,7 @@ local function doSellAllSpam()
 end
 
 -- ============================================================
--- MAIN CYCLE
+-- MAIN CYCLE — highest → lowest, 100 per batch
 -- ============================================================
 local function resetCycleCounters()
     collectedThisCycle = 0
@@ -983,141 +983,143 @@ local function resetCycleCounters()
     end
 end
 
-local function runCycle()
-    resetCycleCounters()
-    setPhase("Collecting")
+-- Run Place → Open → Pickup → Sell for whatever was collected this batch
+local function runPostCollectPipeline()
     addLog(string.format(
-        "=== NEW CYCLE — up to %d boxes (10 each, Common→Alternative) ===",
-        TOTAL_TARGET
+        "Batch collected %d — Place → Open → Pickup → Sell",
+        collectedThisCycle
     ))
 
-    local failStreak = 0
-    local idleRounds = 0
+    setPhase("Placing boxes")
+    doPlaceBoxesOnly()
+    task.wait(0.30)
+    if not running then return end
 
-    -- Phase 1: Collect 10 of each rarity; auto-skip when none available
-    while running and collectedThisCycle < TOTAL_TARGET do
-        local rarity = TARGET_RARITIES[currentRarityIndex]
-        if not rarity then break end
+    setPhase("Opening boxes")
+    doOpenBoxesOnly()
+    task.wait(0.80)
+    if not running then return end
 
-        -- Already finished this rarity → advance
-        if countsByRarity[rarity] >= BOXES_PER_RARITY then
-            currentRarityIndex += 1
-            failStreak = 0
-            if currentRarityIndex > #TARGET_RARITIES then
-                -- All rarities done (or skipped). Stop collect phase.
-                break
-            end
-            rarity = TARGET_RARITIES[currentRarityIndex]
-            addLog(string.format("Moving to next rarity: %s", tostring(rarity)))
+    setPhase("Picking up")
+    doPickupAllSpam()
+    task.wait(0.40)
+    if not running then return end
+
+    setPhase("Selling")
+    doSellAllSpam()
+    task.wait(0.30)
+end
+
+--[[
+  One full pass = walk rarities from HIGHEST → LOWEST.
+  For each rarity:
+    - First scan: if ZERO of that type in world → skip entire batch
+    - Else collect up to BATCH_SIZE (100) of THAT rarity only
+    - If we got any boxes → Place+Open+Pickup+Sell, then next rarity batch
+]]
+local function runCycle()
+    resetCycleCounters()
+    addLog("=== NEW PASS — highest→lowest | 100 per rarity batch ===")
+
+    for rarityIndex = 1, #TARGET_RARITIES do
+        if not running then return end
+
+        currentRarityIndex = rarityIndex
+        local rarity = TARGET_RARITIES[rarityIndex]
+        collectedThisCycle = 0
+        countsByRarity[rarity] = 0
+
+        -- FIRST SCAN: if none of this rarity exist, skip whole batch
+        if not hasLuckyBlockOfType(rarity) then
+            addLog(string.format(
+                "Batch %s: none in world on first scan → SKIP",
+                rarity
+            ))
+            continue
         end
 
-        setPhase(string.format(
-            "Collect %s (%d/%d)",
+        addLog(string.format(
+            "=== BATCH START: %s (target %d) ===",
             rarity,
-            countsByRarity[rarity],
-            BOXES_PER_RARITY
+            BATCH_SIZE
         ))
+        setPhase(string.format("Batch %s 0/%d", rarity, BATCH_SIZE))
 
-        local ok = stealOne(rarity)
-        if ok then
-            failStreak = 0
-            idleRounds = 0
-            task.wait(0.35)
-            countsByRarity[rarity] = countsByRarity[rarity] + 1
-            collectedThisCycle += 1
-            ProgressLabel.Text = string.format(
-                "%d / %d boxes | %s: %d/%d",
-                collectedThisCycle,
-                TOTAL_TARGET,
+        local emptyStreak = 0
+
+        while running and collectedThisCycle < BATCH_SIZE do
+            setPhase(string.format(
+                "Batch %s %d/%d",
                 rarity,
-                countsByRarity[rarity],
-                BOXES_PER_RARITY
-            )
-            addLog(string.format(
-                "Got %s [%d/%d]  total %d/%d",
-                rarity,
-                countsByRarity[rarity],
-                BOXES_PER_RARITY,
                 collectedThisCycle,
-                TOTAL_TARGET
+                BATCH_SIZE
             ))
-        else
-            -- Single empty scan → immediately jump to next rarity that
-            -- currently has boxes in the world (and still needs more).
-            failStreak += 1
-            local nextIdx, nextName = findNextAvailableRarity(currentRarityIndex + 1)
-            if nextIdx and nextName then
-                addLog(string.format(
-                    "No %s box → skip to next available: %s",
-                    rarity,
-                    nextName
-                ))
-                currentRarityIndex = nextIdx
-                failStreak = 0
-            else
-                -- Nothing of any remaining needed rarity is in the world.
-                idleRounds += 1
-                addLog(string.format(
-                    "No %s (or any other needed) box in world (idle %d). Waiting...",
-                    rarity,
-                    idleRounds
-                ))
-                task.wait(1.0)
-                failStreak = 0
-                -- Soft exit collect if idle too long and we already have boxes.
-                if idleRounds >= 6 and collectedThisCycle > 0 then
+
+            -- Mid-batch: if none left in world, end this batch
+            if not hasLuckyBlockOfType(rarity) then
+                emptyStreak += 1
+                if emptyStreak >= 3 then
                     addLog(string.format(
-                        "Idle too long with %d boxes — proceeding to Place+Open",
+                        "Batch %s: no more in world after %d — ending batch (%d collected)",
+                        rarity,
+                        emptyStreak,
                         collectedThisCycle
                     ))
                     break
                 end
+                task.wait(0.25)
+                continue
             end
+            emptyStreak = 0
+
+            local ok = stealOne(rarity)
+            if ok then
+                task.wait(0.35)
+                countsByRarity[rarity] = countsByRarity[rarity] + 1
+                collectedThisCycle += 1
+                ProgressLabel.Text = string.format(
+                    "%d / %d | Batch: %s",
+                    collectedThisCycle,
+                    BATCH_SIZE,
+                    rarity
+                )
+                addLog(string.format(
+                    "Got %s [%d/%d]",
+                    rarity,
+                    collectedThisCycle,
+                    BATCH_SIZE
+                ))
+            else
+                -- Steal miss while boxes still exist — brief retry, stay on same batch
+                task.wait(0.15)
+            end
+
+            task.wait(0.08)
         end
 
-        task.wait(0.08)
+        if not running then return end
+
+        -- Only run pipeline if this batch collected something
+        if collectedThisCycle > 0 then
+            runPostCollectPipeline()
+            if not running then return end
+            addLog(string.format(
+                "=== BATCH DONE: %s (%d boxes) ===",
+                rarity,
+                collectedThisCycle
+            ))
+        else
+            addLog(string.format(
+                "Batch %s collected 0 — skip pipeline, next rarity",
+                rarity
+            ))
+        end
+
+        task.wait(0.20)
     end
 
-    if not running then return end
-
-    if collectedThisCycle == 0 then
-        addLog("Collected 0 boxes this cycle — waiting before retry...")
-        task.wait(2)
-        return
-    end
-
-    addLog(string.format("Collected %d boxes — starting Place + Open", collectedThisCycle))
-
-    -- Phase 2: Place
-    setPhase("Placing boxes")
-    local placed = doPlaceBoxesOnly()
-    task.wait(0.30)
-
-    if not running then return end
-
-    -- Phase 3: Open
-    setPhase("Opening boxes")
-    local opened = doOpenBoxesOnly()
-    task.wait(0.80) -- let opens resolve into slimes
-
-    if not running then return end
-
-    -- Phase 4: Pickup all
-    setPhase("Picking up")
-    doPickupAllSpam()
-    task.wait(0.40)
-
-    if not running then return end
-
-    -- Phase 5: Sell all
-    setPhase("Selling")
-    doSellAllSpam()
-    task.wait(0.30)
-
-    if not running then return end
-
-    setPhase("Cycle complete")
-    addLog("=== CYCLE COMPLETE — restarting ===")
+    setPhase("Pass complete")
+    addLog("=== FULL PASS DONE (Alternative→Common) — looping ===")
     task.wait(0.50)
 end
 
@@ -1155,12 +1157,10 @@ ToggleBtn.MouseButton1Click:Connect(function()
 end)
 
 ensureRemotes()
-addLog("Ready. All rarities: Common → Alternative")
+addLog("Ready. Priority: Alternative → ... → Common (highest first)")
 addLog(string.format(
-    "Up to %d boxes (%d per rarity × %d types) | auto-skip if none available",
-    TOTAL_TARGET,
-    BOXES_PER_RARITY,
-    #TARGET_RARITIES
+    "Batch size %d per rarity | first-scan empty = skip batch",
+    BATCH_SIZE
 ))
 setPhase("Idle")
-print("[LuckyBoxCycle] Loaded — all rarities (10 each) → auto-skip → Place+Open → Pickup → Sell → loop")
+print("[LuckyBoxCycle] Loaded — highest→lowest batches of 100 → Place+Open+Pickup+Sell → loop")
