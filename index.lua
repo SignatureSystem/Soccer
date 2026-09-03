@@ -98,7 +98,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 -- ============================================================
 -- STATE
 -- ============================================================
-local running = true
+local running = false
 local phase   = "Idle"
 local collectedThisCycle = 0
 local countsByRarity = {}
@@ -1498,9 +1498,7 @@ end
 -- CONTROL
 -- ============================================================
 local function setRunning(on)
-    if on == running and on == true then
-        return
-    end
+    if on == running then return end
     running = on
     if running then
         ToggleBtn.Text = "STOP"
@@ -1541,14 +1539,19 @@ addLog(string.format(
     BATCH_SIZE,
     CARRY_BEFORE_BASE
 ))
-addLog("AUTO START ENABLED")
+addLog("Auto-start ON — running immediately")
 setPhase("Starting...")
-print("[LuckyBoxCycle] Loaded — AUTO START")
+print("[LuckyBoxCycle] Loaded — auto-start ON | one pass highest→lowest | carry 6 → base")
 
--- Guaranteed auto-run on execution
+-- Auto click START automatically on execution
 task.spawn(function()
-    task.wait(1)
-    if running then
-        setRunning(true)
+    task.wait(0.5)
+
+    if ToggleBtn then
+        ToggleBtn.Text = "STOP"
+        ToggleBtn.TextColor3 = Color3.fromRGB(120, 255, 150)
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 55, 40)
     end
+
+    setRunning(true)
 end)
