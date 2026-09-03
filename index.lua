@@ -98,7 +98,7 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 -- ============================================================
 -- STATE
 -- ============================================================
-local running = false
+local running = true
 local phase   = "Idle"
 local collectedThisCycle = 0
 local countsByRarity = {}
@@ -1498,7 +1498,9 @@ end
 -- CONTROL
 -- ============================================================
 local function setRunning(on)
-    if on == running then return end
+    if on == running and on == true then
+        return
+    end
     running = on
     if running then
         ToggleBtn.Text = "STOP"
@@ -1539,9 +1541,14 @@ addLog(string.format(
     BATCH_SIZE,
     CARRY_BEFORE_BASE
 ))
-addLog("Auto-start ON — running immediately")
+addLog("AUTO START ENABLED")
 setPhase("Starting...")
-print("[LuckyBoxCycle] Loaded — auto-start ON | one pass highest→lowest | carry 6 → base")
+print("[LuckyBoxCycle] Loaded — AUTO START")
 
--- Auto-run on execution (START is ON by default)
-setRunning(true)
+-- Guaranteed auto-run on execution
+task.spawn(function()
+    task.wait(1)
+    if running then
+        setRunning(true)
+    end
+end)
