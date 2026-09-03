@@ -3,15 +3,19 @@
   ----------------------
   Flow (loops forever while ON):
     Rarity filter (dropdown):
-      - "All" (default) → Priority HIGHEST → LOWEST (Alternative first, Common last)
-      - Specific rarity → only that rarity
-    For each selected rarity batch of up to 100:
-      - First scan: if none of that rarity in world → skip whole batch
+      - "All" (default) → ONE pass HIGHEST → LOWEST
+        Alternative → Japan → Icons → Spain → … → Water → Common
+        Each rarity is processed AT MOST ONCE per pass.
+        After a batch finishes (or is skipped), NEVER go back to it
+        until the full pass reaches Common and restarts from the top.
+      - Specific rarity → only that rarity (repeat batches of 100)
+
+    Per rarity batch (up to 100):
+      - First scan: if none in world → skip whole batch, move to next lower
       - Else collect up to 100 of THAT rarity only
-      - Carry up to 6 steals, then teleport to base (deposit), repeat
+      - Carry up to 6 steals, then teleport to base, repeat
       - If any collected → Place + Open + Pickup + Sell
-      - Then next lower rarity batch (if All)
-    After pass, restart.
+      - Then move to the NEXT LOWER rarity (never re-do current)
 
   Mechanisms reused from your AutoFarm + Slime Value Browser scripts.
 ]]
@@ -1469,30 +1473,33 @@ local function runCycle()
             runPostCollectPipeline()
             if not running then return end
             addLog(string.format(
-                "=== BATCH DONE: %s (%d boxes) ===",
+                "=== BATCH DONE: %s (%d boxes) — move to next lower rarity ===",
                 rarity,
                 collectedThisCycle
             ))
         else
             addLog(string.format(
-                "Batch %s collected 0 — skip pipeline, next rarity",
+                "Batch %s collected 0 — skip pipeline, next lower rarity",
                 rarity
             ))
         end
 
+        -- Strict one-pass: never revisit this rarity until Common finishes
+        -- and the outer loop starts a new pass from the highest again.
         task.wait(0.20)
     end
 
     setPhase("Pass complete")
-    addLog("=== FULL PASS DONE — looping ===")
+    addLog("=== FULL PASS DONE (reached Common / end of list) — restart from highest ===")
     task.wait(0.50)
 end
 
 -- ============================================================
 -- CONTROL
 -- ============================================================
-ToggleBtn.MouseButton1Click:Connect(function()
-    running = not running
+local function setRunning(on)
+    if on == running then return end
+    running = on
     if running then
         ToggleBtn.Text = "STOP"
         ToggleBtn.TextColor3 = Color3.fromRGB(120, 255, 150)
@@ -1519,14 +1526,22 @@ ToggleBtn.MouseButton1Click:Connect(function()
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 40)
         setPhase("Stopping...")
     end
+end
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    setRunning(not running)
 end)
 
 ensureRemotes()
-addLog("Ready. Dropdown: All (highest→lowest) or pick a rarity")
+addLog("Ready. Dropdown: All (highest→lowest once) or pick a rarity")
 addLog(string.format(
-    "Batch %d/rarity | carry %d then base | first-scan empty = skip",
+    "Batch %d/rarity | carry %d→base | skip empty | no re-do until full pass",
     BATCH_SIZE,
     CARRY_BEFORE_BASE
 ))
-setPhase("Idle")
-print("[LuckyBoxCycle] Loaded — rarity dropdown + carry 6 → base → Place+Open+Pickup+Sell → loop")
+addLog("Auto-start ON — running immediately")
+setPhase("Starting...")
+print("[LuckyBoxCycle] Loaded — auto-start ON | one pass highest→lowest | carry 6 → base")
+
+-- Auto-run on execution (START is ON by default)
+setRunning(true)
