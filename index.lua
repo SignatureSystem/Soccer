@@ -1497,34 +1497,90 @@ end
 -- ============================================================
 -- CONTROL
 -- ============================================================
-local function setRunning(on)
-    if on == running then return end
-    running = on
-    if running then
+local farmLoopStarted = false
+local didStartupPipeline = false
+
+local function applyToggleVisual(on)
+    if on then
         ToggleBtn.Text = "STOP"
         ToggleBtn.TextColor3 = Color3.fromRGB(120, 255, 150)
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 55, 40)
-        addLog("Automation STARTED")
-        task.spawn(function()
-            while running do
-                local ok, err = xpcall(runCycle, debug.traceback)
-                if not ok then
-                    addLog("ERROR: " .. tostring(err):match("^[^\n]+"))
-                    warn("[LuckyBoxCycle]", err)
-                    task.wait(1)
-                end
-                if running then
-                    task.wait(0.2)
-                end
-            end
-            setPhase("Idle")
-            addLog("Automation STOPPED")
-        end)
     else
         ToggleBtn.Text = "START"
         ToggleBtn.TextColor3 = Color3.fromRGB(255, 120, 130)
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 40)
+    end
+end
+
+-- First thing on launch: clear existing boxes / inventory before stealing
+local function runStartupPipeline()
+    addLog("=== STARTUP: Place → Open → Pickup → Sell (before steal) ===")
+    setPhase("Startup: Placing")
+    pcall(doPlaceBoxesOnly)
+    task.wait(0.30)
+    if not running then return end
+
+    setPhase("Startup: Opening")
+    pcall(doOpenBoxesOnly)
+    task.wait(0.80)
+    if not running then return end
+
+    setPhase("Startup: Picking up")
+    pcall(doPickupAllSpam)
+    task.wait(0.40)
+    if not running then return end
+
+    setPhase("Startup: Selling")
+    pcall(doSellAllSpam)
+    task.wait(0.30)
+    if not running then return end
+
+    addLog("=== STARTUP DONE — beginning steal cycle ===")
+    setPhase("Startup done → steal")
+end
+
+local function setRunning(on)
+    if on then
+        running = true
+        applyToggleVisual(true)
+        addLog("Automation STARTED")
+        setPhase("Running")
+        -- Spawn the farm loop only once; it keeps going and checks `running`
+        if not farmLoopStarted then
+            farmLoopStarted = true
+            task.spawn(function()
+                -- One-time startup pipeline before any steal pass
+                if not didStartupPipeline then
+                    didStartupPipeline = true
+                    local ok, err = xpcall(runStartupPipeline, debug.traceback)
+                    if not ok then
+                        addLog("STARTUP ERROR: " .. tostring(err):match("^[^\n]+"))
+                        warn("[LuckyBoxCycle] startup", err)
+                    end
+                end
+
+                while true do
+                    if not running then
+                        task.wait(0.15)
+                        continue
+                    end
+                    local ok, err = xpcall(runCycle, debug.traceback)
+                    if not ok then
+                        addLog("ERROR: " .. tostring(err):match("^[^\n]+"))
+                        warn("[LuckyBoxCycle]", err)
+                        task.wait(1)
+                    end
+                    if running then
+                        task.wait(0.2)
+                    end
+                end
+            end)
+        end
+    else
+        running = false
+        applyToggleVisual(false)
         setPhase("Stopping...")
+        addLog("Automation STOPPED")
     end
 end
 
@@ -1539,19 +1595,38 @@ addLog(string.format(
     BATCH_SIZE,
     CARRY_BEFORE_BASE
 ))
-addLog("Auto-start ON — running immediately")
-setPhase("Starting...")
-print("[LuckyBoxCycle] Loaded — auto-start ON | one pass highest→lowest | carry 6 → base")
+addLog("On launch: Place+Open+Pickup+Sell first, then steal")
+print("[LuckyBoxCycle] Loaded — wait character → startup pipeline → steal")
 
--- Auto click START automatically on execution
+-- UI shows STOP immediately (on by default)
+applyToggleVisual(true)
+setPhase("Waiting for character...")
+addLog("Auto-start pending — waiting for character + root")
+
+-- Reliable auto-start after character is ready
 task.spawn(function()
-    task.wait(0.5)
-
-    if ToggleBtn then
-        ToggleBtn.Text = "STOP"
-        ToggleBtn.TextColor3 = Color3.fromRGB(120, 255, 150)
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 55, 40)
+    local deadline = os.clock() + 30
+    while os.clock() < deadline do
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if root and hum and hum.Health > 0 then
+            break
+        end
+        if not LocalPlayer.Character then
+            pcall(function()
+                LocalPlayer.CharacterAdded:Wait()
+            end)
+        else
+            task.wait(0.15)
+        end
     end
 
+    -- Settle so plot / Live / remotes exist
+    task.wait(0.75)
+    pcall(ensureRemotes)
+
+    addLog("Character ready — AUTO START")
     setRunning(true)
+    print("[LuckyBoxCycle] Auto-started")
 end)
