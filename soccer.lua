@@ -1,7 +1,8 @@
--- Combined Script: JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
--- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
--- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
--- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
+-- Combined Script: Auto Farm + DYNAMIC Lucky/Rarity/Mutation detection (no hardcoded box lists)
+-- + Auto Upgrade (RARITY + MUTATION filters from live game data) + Lucky Block Collector
+-- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes + Pickup Range + Gift All + Auto Accept
+-- + Lucky lists auto-refresh from GameplaySharedRegistry + SoccerGameCatalog + Live.Slimes
+-- + Steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit
 
 local Players = game:GetService("Players")
 
@@ -60,129 +61,344 @@ local DELAY_NEXT  = 0.12
 local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
--- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
-local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
+-- ============================================================
+-- DYNAMIC GAME DATA (auto-detect rarities / mutations / lucky boxes)
+-- Reads live game modules when available; falls back to world scan.
+-- Refresh periodically so new content appears without script edits.
+-- ============================================================
 
-local RARITY_VALUE = {
-    ["Alternative"] = 9000000,
-    ["Japan"] = 7000000,
-    ["Icons"] = 5000000,
-    ["Spain"] = 2500000,
-    ["Champions"] = 1000000,
-    ["OG"] = 500000,
-    ["Exclusive"] = 75000,
-    ["LIMITED"] = 75000,
-    ["Divine"] = 50000,
-    ["Slime God"] = 30000,
-    ["Secret"] = 10000,
-    ["Mythic"] = 2500,
-    ["Legendary"] = 750,
-    ["Epic"] = 250,
-    ["Rare"] = 100,
-    ["Common"] = 25,
-}
-
-local ALL_RARITIES = {
-    "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
-    "Slime God", "Divine", "Exclusive", "OG", "Champions",
-    "Spain", "Icons", "Japan", "Alternative", "LIMITED",
-}
-
--- Latest live mutation table includes Divine + Fallen at 5x.
-local ALL_MUTATIONS = {
-    "Golden", "Diamond", "Rainbow", "Cursed", "Divine", "Fallen",
-    "Joker", "Stellar",
-    "Volcanic", "Toxic", "Taco", "Cosmic", "Slimey",
-}
+local UPGRADE_PRIORITY = {}
+local TARGET_RARITIES = {}
+local RARITY_VALUE = {}
+local ALL_RARITIES = {}
+local ALL_MUTATIONS = {}
 local PICK_OPTIONS = {}
-for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
-for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
-
--- Auto Upgrade rarity filter options.
--- Includes all current rarities, including LIMITED, Japan, Icons and Alternative.
-local UPGRADE_RARITY_OPTIONS = {
-    "All",
-    "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
-    "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan", "Alternative",
-}
-
-local selectedUpgradeRarity = "All"
-
--- Auto Upgrade mutation filter options.
--- "All" = any mutation.
--- "Common" is displayed as "Common (No Mutation)" and means
--- NO base mutation AND NO event mutation.
--- Includes current mutations/event mutations such as Divine, Fallen,
--- Joker, Stellar, Volcanic, Toxic, Taco, Cosmic and Slimey.
+local UPGRADE_RARITY_OPTIONS = { "All" }
 local UPGRADE_MUTATION_OPTIONS = { "All", "Common" }
-for _, mutationName in ipairs(ALL_MUTATIONS) do
-    table.insert(UPGRADE_MUTATION_OPTIONS, mutationName)
+local LUCKY_BLOCK_OPTIONS = { "All" }
+local LUCKY_BLOCK_MODEL_NAMES = {}  -- [filterLabel] = { [modelName] = true }
+local ALL_LUCKY_MODEL_NAMES = {}    -- [modelName] = true
+local selectedUpgradeRarity = "All"
+local selectedUpgradeMutation = "All"
+local selectedLuckyBlockType = "All"
+
+local function getGameplayShared()
+    local lib = rawget(_G, "_Lib")
+    if lib then
+        if lib.GameplaySharedRegistry then return lib.GameplaySharedRegistry end
+        if lib.Shared then return lib.Shared end
+    end
+    local sm = ReplicatedStorage:FindFirstChild("SharedModules")
+    if not sm then return nil end
+    for _, name in ipairs({ "GameplaySharedRegistry", "Shared" }) do
+        local mod = sm:FindFirstChild(name)
+        if mod and mod:IsA("ModuleScript") then
+            local ok, res = pcall(require, mod)
+            if ok and type(res) == "table" then return res end
+        end
+    end
+    return nil
 end
 
-local selectedUpgradeMutation = "All"
+local function getSlimeCatalog()
+    local lib = rawget(_G, "_Lib")
+    if lib then
+        if lib.Database and type(lib.Database.Slimes) == "table" then
+            return lib.Database.Slimes
+        end
+        if lib.SoccerGameCatalog then
+            local c = lib.SoccerGameCatalog
+            if type(c.Slimes) == "table" then return c.Slimes end
+            if type(c.SoccerPlayerCatalog) == "table" then return c.SoccerPlayerCatalog end
+            if type(c) == "table" then return c end
+        end
+    end
+    local sm = ReplicatedStorage:FindFirstChild("SharedModules")
+    local cat = sm and sm:FindFirstChild("SoccerGameCatalog")
+    if cat and cat:IsA("ModuleScript") then
+        local ok, mod = pcall(require, cat)
+        if ok and type(mod) == "table" then
+            return mod.Slimes or mod.SoccerPlayerCatalog or mod
+        end
+    end
+    if cat then
+        local slimes = cat:FindFirstChild("Slimes")
+        if slimes and slimes:IsA("ModuleScript") then
+            local ok, mod = pcall(require, slimes)
+            if ok and type(mod) == "table" then return mod end
+        end
+    end
+    return nil
+end
 
--- Exact Lucky Block types found in the latest game slime registry.
--- New live entry: Japan Lucky Block (rarity Japan). Previous: Icons Lucky Block.
--- The dropdown uses display labels; matching uses exact live model names.
-local LUCKY_BLOCK_OPTIONS = {
-    "All",
-    "Common",
-    "Water",
-    "Rare",
-    "Volcanic",
-    "Epic",
-    "Ghost",
-    "Legendary",
-    "67",
-    "Mythic",
-    "Poison",
-    "Secret",
-    "Cosmic",
-    "Soccer God",
-    "Rainbow",
-    "Exclusive",
-    "Limited",
-    "OG",
-    "Champions",
-    "Spain",
-    "Icons",
-    "Japan",
-    "Alternative",
-}
+local function discoverMutations()
+    local list = {}
+    local shared = getGameplayShared()
+    local mult = shared and shared.MUTATION_MULTIPLIERS
+    if type(mult) == "table" then
+        for name in pairs(mult) do
+            table.insert(list, tostring(name))
+        end
+        table.sort(list)
+        return list
+    end
+    -- minimal fallback if registry not ready yet
+    return {
+        "Golden", "Diamond", "Rainbow", "Cursed", "Divine", "Fallen",
+        "Joker", "Stellar", "Volcanic", "Toxic", "Taco", "Cosmic", "Slimey",
+    }
+end
 
-local LUCKY_BLOCK_MODEL_NAMES = {
-    ["Common"] = { ["Common Lucky Block"] = true },
-    ["Water"] = { ["Water Lucky Block"] = true },
-    ["Rare"] = { ["Rare Lucky Block"] = true },
-    ["Volcanic"] = { ["Volcanic Lucky Block"] = true },
-    ["Epic"] = { ["Epic Lucky Block"] = true },
-    ["Ghost"] = { ["Ghost Lucky Block"] = true },
-    ["Legendary"] = { ["Legendary Lucky Block"] = true },
-    ["67"] = { ["67 Lucky Block"] = true },
-    ["Mythic"] = { ["Mythic Lucky Block"] = true },
-    ["Poison"] = { ["Poison Lucky Block"] = true },
-    ["Secret"] = { ["Secret Lucky Block"] = true },
-    ["Cosmic"] = { ["Cosmic Lucky Block"] = true },
-    -- Internal database name is Slime God Lucky Block; the game displays Soccer God.
-    ["Soccer God"] = {
-        ["Slime God Lucky Block"] = true,
-        ["Soccer God Lucky Block"] = true,
-    },
-    ["Rainbow"] = { ["Rainbow Lucky Block"] = true },
-    ["Exclusive"] = { ["Exclusive Lucky Block"] = true },
-    ["Limited"] = { ["Limited Lucky Block"] = true },
-    ["OG"] = { ["OG Lucky Block"] = true },
-    ["Champions"] = { ["Champions Lucky Block"] = true },
-    ["Spain"] = { ["Spain Lucky Block"] = true },
-    ["Icons"] = { ["Icons Lucky Block"] = true },
-    ["Japan"] = { ["Japan Lucky Block"] = true },
-    ["Alternative"] = { ["Alternative Lucky Block"] = true },
-}
+local function discoverRarities()
+    local shared = getGameplayShared()
+    local orderTbl = shared and shared.RarityOrders
+    local source = orderTbl
+        or (shared and shared.RARITY_COLORS)
+        or (shared and shared.RARITY_CARRY_MULTIPLIERS)
+    local list, seen = {}, {}
+    if type(source) == "table" then
+        for name in pairs(source) do
+            local n = tostring(name)
+            if not seen[n] then
+                seen[n] = true
+                table.insert(list, n)
+            end
+        end
+    end
+    if #list == 0 then
+        list = {
+            "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
+            "Slime God", "Divine", "Exclusive", "OG", "Champions",
+            "Spain", "Icons", "Japan", "Alternative", "LIMITED",
+        }
+    end
+    table.sort(list, function(a, b)
+        local oa = orderTbl and tonumber(orderTbl[a]) or 0
+        local ob = orderTbl and tonumber(orderTbl[b]) or 0
+        if oa ~= ob then return oa > ob end -- higher order = higher tier
+        return a < b
+    end)
+    return list, orderTbl
+end
 
--- Default to the newest live tier.
-local selectedLuckyBlockType = "Japan"
+local function buildRarityValueMap(rarities, orderTbl)
+    local map = {}
+    local n = #rarities
+    for i, r in ipairs(rarities) do
+        -- Higher tier -> higher numeric priority for sorting
+        local ord = orderTbl and tonumber(orderTbl[r])
+        if ord then
+            map[r] = ord * 100000
+        else
+            map[r] = (n - i + 1) * 100000
+        end
+    end
+    return map
+end
+
+local function addLuckyModel(modelNamesSet, byRarity, modelName, rarity)
+    if modelName == nil or modelName == "" then return end
+    modelName = tostring(modelName)
+    modelNamesSet[modelName] = true
+    local r = tostring(rarity or "Unknown")
+    byRarity[r] = byRarity[r] or {}
+    byRarity[r][modelName] = true
+    -- Friendly aliases
+    if r == "Slime God" then
+        byRarity["Soccer God"] = byRarity["Soccer God"] or {}
+        byRarity["Soccer God"][modelName] = true
+    end
+    if r == "LIMITED" or r == "Limited" then
+        byRarity["Limited"] = byRarity["Limited"] or {}
+        byRarity["Limited"][modelName] = true
+        byRarity["LIMITED"] = byRarity["LIMITED"] or {}
+        byRarity["LIMITED"][modelName] = true
+    end
+    if r == "Alternative" then
+        byRarity["Alternate"] = byRarity["Alternate"] or {}
+        byRarity["Alternate"][modelName] = true
+    end
+end
+
+local function discoverLuckyBlocks(rarities)
+    local modelNamesSet, byRarity, raritySeen = {}, {}, {}
+
+    -- 1) Catalog entries
+    local catalog = getSlimeCatalog()
+    if type(catalog) == "table" then
+        for _, entry in pairs(catalog) do
+            if type(entry) == "table" then
+                local typ = entry.Type or entry.type
+                local name = entry.Name or entry.name
+                local display = entry.displayName or entry.DisplayName
+                local rarity = entry.Rarity or entry.rarity
+                local isLucky = (typ == "Lucky Block")
+                    or (type(name) == "string" and name:find("Lucky Block", 1, true) ~= nil)
+                    or (type(display) == "string" and display:find("Lucky Block", 1, true) ~= nil)
+                if isLucky then
+                    if name then addLuckyModel(modelNamesSet, byRarity, name, rarity) end
+                    if display and display ~= name then
+                        addLuckyModel(modelNamesSet, byRarity, display, rarity)
+                    end
+                    if rarity then raritySeen[tostring(rarity)] = true end
+                end
+            end
+        end
+    end
+
+    -- 2) Live world models (catches brand-new boxes immediately)
+    local live = Workspace:FindFirstChild("Live")
+    local slimes = live and live:FindFirstChild("Slimes")
+    if slimes then
+        for _, model in ipairs(slimes:GetChildren()) do
+            if model:IsA("Model") then
+                local n = model.Name
+                if type(n) == "string" and n:find("Lucky Block", 1, true) then
+                    local rarity = model:GetAttribute("Rarity")
+                        or model:GetAttribute("rarity")
+                        or model:GetAttribute("Type")
+                    addLuckyModel(modelNamesSet, byRarity, n, rarity)
+                    if rarity then raritySeen[tostring(rarity)] = true end
+                end
+            end
+        end
+    end
+
+    -- 3) Infer filter labels from model names ("Japan Lucky Block" -> "Japan")
+    for modelName in pairs(modelNamesSet) do
+        local label = modelName:gsub("%s*[Ll]ucky%s*[Bb]lock%s*", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if label ~= "" and label ~= modelName then
+            byRarity[label] = byRarity[label] or {}
+            byRarity[label][modelName] = true
+            raritySeen[label] = true
+        end
+    end
+
+    -- 4) Option list: All + known labels ordered by rarity tier when possible
+    local options = { "All" }
+    local added = { All = true }
+    local function push(label)
+        if label and not added[label] then
+            added[label] = true
+            table.insert(options, label)
+        end
+    end
+    for _, r in ipairs(rarities or {}) do
+        if raritySeen[r] or byRarity[r] then push(r) end
+    end
+    -- extras not in rarity table (Water, Ghost, 67, Cosmic, Poison, Soccer God, ...)
+    local extras = {}
+    for label in pairs(byRarity) do
+        if not added[label] then table.insert(extras, label) end
+    end
+    table.sort(extras)
+    for _, label in ipairs(extras) do push(label) end
+
+    return modelNamesSet, byRarity, options
+end
+
+local function isKnownLuckyModelName(modelName)
+    modelName = tostring(modelName or "")
+    if ALL_LUCKY_MODEL_NAMES[modelName] then return true end
+    if modelName:find("Lucky Block", 1, true) then return true end
+    local lower = string.lower(modelName)
+    return lower:find("lucky", 1, true) ~= nil and lower:find("block", 1, true) ~= nil
+end
+
+local function luckyModelMatchesFilter(modelName, filterType, model)
+    modelName = tostring(modelName or "")
+    filterType = tostring(filterType or "All")
+    if not isKnownLuckyModelName(modelName) then
+        return false
+    end
+    if filterType == "All" then
+        return true
+    end
+    local bucket = LUCKY_BLOCK_MODEL_NAMES[filterType]
+    if bucket and bucket[modelName] then
+        return true
+    end
+    -- Rarity attribute match
+    if model then
+        local attr = model:GetAttribute("Rarity") or model:GetAttribute("rarity")
+        if attr and string.lower(tostring(attr)) == string.lower(filterType) then
+            return true
+        end
+        if filterType == "Soccer God" and tostring(attr) == "Slime God" then
+            return true
+        end
+        if filterType == "Limited" and tostring(attr) == "LIMITED" then
+            return true
+        end
+    end
+    -- Name contains filter label ("Japan Lucky Block" vs filter "Japan")
+    if modelName:lower():find(filterType:lower(), 1, true) then
+        return true
+    end
+    return false
+end
+
+local function refreshGameData()
+    ALL_MUTATIONS = discoverMutations()
+    local orderTbl
+    ALL_RARITIES, orderTbl = discoverRarities()
+    RARITY_VALUE = buildRarityValueMap(ALL_RARITIES, orderTbl)
+
+    ALL_LUCKY_MODEL_NAMES, LUCKY_BLOCK_MODEL_NAMES, LUCKY_BLOCK_OPTIONS =
+        discoverLuckyBlocks(ALL_RARITIES)
+
+    PICK_OPTIONS = {}
+    for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
+    for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
+
+    UPGRADE_RARITY_OPTIONS = { "All" }
+    for _, r in ipairs(ALL_RARITIES) do table.insert(UPGRADE_RARITY_OPTIONS, r) end
+
+    UPGRADE_MUTATION_OPTIONS = { "All", "Common" }
+    for _, m in ipairs(ALL_MUTATIONS) do table.insert(UPGRADE_MUTATION_OPTIONS, m) end
+
+    -- Priority targets: top few rarities by order (for any legacy use)
+    UPGRADE_PRIORITY = {}
+    TARGET_RARITIES = {}
+    for i, r in ipairs(ALL_RARITIES) do
+        if i <= 5 then
+            UPGRADE_PRIORITY[r] = i
+            TARGET_RARITIES[r] = true
+        end
+    end
+
+    -- Keep selection valid if lists changed
+    local function validIn(list, value)
+        for _, v in ipairs(list) do
+            if v == value then return true end
+        end
+        return false
+    end
+    if not validIn(LUCKY_BLOCK_OPTIONS, selectedLuckyBlockType) then
+        selectedLuckyBlockType = "All"
+    end
+    if not validIn(UPGRADE_RARITY_OPTIONS, selectedUpgradeRarity) then
+        selectedUpgradeRarity = "All"
+    end
+    if not validIn(UPGRADE_MUTATION_OPTIONS, selectedUpgradeMutation) then
+        selectedUpgradeMutation = "All"
+    end
+end
+
+-- Initial discovery (may be partial if modules not ready; refresh loop fills in)
+refreshGameData()
+
+task.spawn(function()
+    -- Retry shortly after load when _Lib / SharedModules finish initializing
+    for _, delay in ipairs({ 1, 3, 8 }) do
+        task.wait(delay)
+        pcall(refreshGameData)
+    end
+    while true do
+        task.wait(120)
+        pcall(refreshGameData)
+    end
+end)
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -2378,18 +2594,14 @@ local function getUnopenedLuckyBlockSlots(filterType)
                 or db[tonumber(slimeId)]
         end
 
-        local allowed = LUCKY_BLOCK_MODEL_NAMES[filterType]
-
-        if allowed then
-            local names = {
-                tostring((def and def.Name) or ""),
-                tostring(entry.Name or entry.name or ""),
-            }
-
-            for _, candidateName in ipairs(names) do
-                if allowed[candidateName] == true then
-                    return true
-                end
+        local names = {
+            tostring((def and def.Name) or ""),
+            tostring(entry.Name or entry.name or ""),
+            tostring(entry.displayName or ""),
+        }
+        for _, candidateName in ipairs(names) do
+            if candidateName ~= "" and luckyModelMatchesFilter(candidateName, filterType, nil) then
+                return true
             end
         end
 
@@ -3313,11 +3525,10 @@ local function isLuckyBlock(tool)
     if not tool or not tool:IsA("Tool") then return false end
     local typ = tool:GetAttribute("Type") or tool:GetAttribute("type")
     if typ and tostring(typ):lower():find("lucky") then return true end
-    local name = tostring(tool.Name):lower()
-    if name:find("lucky") or name:find("box") or name:find("crate") then return true end
-    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret"}) do
-        if name:find(n) then return true end
-    end
+    local name = tostring(tool.Name)
+    if isKnownLuckyModelName(name) then return true end
+    local lower = string.lower(name)
+    if lower:find("lucky", 1, true) then return true end
     return false
 end
 
@@ -3340,20 +3551,16 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
         or nil
 
     local def = resolveSlimeDefinition(inventoryEntry)
-    local allowed = LUCKY_BLOCK_MODEL_NAMES[filterType]
-
-    if allowed then
-        local names = {
-            tostring(tool.Name or ""),
+    local names = {
             tostring((def and def.Name) or ""),
+            tostring(entry.Name or entry.name or ""),
+            tostring(entry.displayName or ""),
         }
-
         for _, candidateName in ipairs(names) do
-            if allowed[candidateName] == true then
+            if candidateName ~= "" and luckyModelMatchesFilter(candidateName, filterType, nil) then
                 return true
             end
         end
-    end
 
     local rarity =
         tool:GetAttribute("Rarity")
@@ -4421,24 +4628,11 @@ local function getTargetLuckyBlock()
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model") and not model:GetAttribute("Carrying") then
             local modelName = tostring(model.Name)
-            local matches = false
-
-            if selectedLuckyBlockType == "All" then
-                -- Only accept the exact Lucky Block models from this game's database.
-                for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
-                    if names[modelName] == true then
-                        matches = true
-                        break
-                    end
-                end
-            else
-                local allowedNames =
-                    LUCKY_BLOCK_MODEL_NAMES[selectedLuckyBlockType]
-
-                matches =
-                    allowedNames ~= nil
-                    and allowedNames[modelName] == true
-            end
+            local matches = luckyModelMatchesFilter(
+                modelName,
+                selectedLuckyBlockType,
+                model
+            )
 
             if not matches then
                 continue
@@ -4573,15 +4767,7 @@ local function getAllLuckyBlockPlaceEntries()
         if not isLuckyInventoryEntry(tool, invEntry, def) then
             -- Still accept exact known model names from tools
             if tool then
-                local n = tostring(tool.Name)
-                local known = false
-                for _, names in pairs(LUCKY_BLOCK_MODEL_NAMES) do
-                    if names[n] then
-                        known = true
-                        break
-                    end
-                end
-                if not known then
+                if not isKnownLuckyModelName(tostring(tool.Name)) then
                     return
                 end
             else
@@ -6473,7 +6659,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
+print("[AutoFarm] DYNAMIC lucky/rarity/mutation detect + upgrade + steal + OPEN ALL boxes + Gift + Auto Accept + Lowest Profit")
 print("Place Boxes = teleport-hop + spam Place Slime near each slot | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
