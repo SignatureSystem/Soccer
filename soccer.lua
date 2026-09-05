@@ -5061,31 +5061,24 @@ local function doPlaceBoxesOnly()
         return true
     end
 
-    -- Keep placing forever until EVERY free slot is filled.
-    -- Does NOT stop because inventory has no boxes yet — waits and retries.
-    -- Only exit condition: getAvailableSlots() is empty (all slots full).
+    -- Keep placing until every free slot is filled OR no lucky boxes remain.
+    -- Re-scans boxes + free slots each outer pass so newly freed / late tools count.
     local totalPlaced = 0
+    local outerDeadline = os.clock() + 45
+    local emptyPassStreak = 0
 
-    while true do
+    while os.clock() < outerDeadline do
+        local boxes = getAllLuckyBlockPlaceEntries()
         local slots = getAvailableSlots()
 
-        -- STOP ONLY WHEN NO FREE SLOTS LEFT
-        if #slots == 0 then
+        if #boxes == 0 then
+            -- No more boxes in inventory to place
             break
         end
 
-        local boxes = getAllLuckyBlockPlaceEntries()
-
-        if #boxes == 0 then
-            -- Still have free slots but no boxes yet — wait and keep checking
-            if StatusLabel then
-                StatusLabel.Text = string.format(
-                    "Place Boxes: %d free slots | waiting for boxes...",
-                    #slots
-                )
-            end
-            task.wait(0.25)
-            continue
+        if #slots == 0 then
+            -- All available slots are full
+            break
         end
 
         local targets = {}
@@ -5099,24 +5092,11 @@ local function doPlaceBoxesOnly()
             })
         end
 
-        if StatusLabel then
-            StatusLabel.Text = string.format(
-                "Place Boxes: filling %d free slots (%d boxes)...",
-                #slots,
-                #boxes
-            )
-        end
-
-        local passDeadline = os.clock() + 10
+        local passDeadline = os.clock() + 12
         local hopIndex = 1
+        local passPlaced = 0
 
         while os.clock() < passDeadline do
-            -- Stop mid-pass only if slots are now full
-            local stillFree = getAvailableSlots()
-            if #stillFree == 0 then
-                break
-            end
-
             local remainingList = {}
             local data = getData()
 
@@ -5124,6 +5104,7 @@ local function doPlaceBoxesOnly()
                 if not t.done then
                     if findPlacedSlotByUID(data, t.uid) then
                         t.done = true
+                        passPlaced += 1
                         totalPlaced += 1
                     else
                         table.insert(remainingList, t)
@@ -5132,6 +5113,12 @@ local function doPlaceBoxesOnly()
             end
 
             if #remainingList == 0 then
+                break
+            end
+
+            -- Also re-check free slots: if none left mid-pass, stop
+            local stillFree = getAvailableSlots()
+            if #stillFree == 0 then
                 break
             end
 
@@ -5171,8 +5158,26 @@ local function doPlaceBoxesOnly()
             end
         end
 
-        task.wait(0.1)
-        -- Loop continues; only breaks when #getAvailableSlots() == 0 above
+        -- Confirm progress: if nothing new placed this pass, count streak
+        if passPlaced == 0 then
+            emptyPassStreak += 1
+            if emptyPassStreak >= 3 then
+                -- Still empty slots + boxes but server not accepting — stop
+                break
+            end
+            task.wait(0.15)
+        else
+            emptyPassStreak = 0
+        end
+
+        -- Brief settle then re-scan for any remaining empty slots
+        task.wait(0.12)
+
+        local remainingSlots = getAvailableSlots()
+        local remainingBoxes = getAllLuckyBlockPlaceEntries()
+        if #remainingSlots == 0 or #remainingBoxes == 0 then
+            break
+        end
     end
 
     return totalPlaced
