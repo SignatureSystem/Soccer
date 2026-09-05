@@ -271,7 +271,7 @@ sideArrowStroke.Thickness = 1.5
 
 local GiftPanel = Instance.new("Frame")
 GiftPanel.Name = "GiftPanel"
-GiftPanel.Size = UDim2.new(0, 220, 0, 560)
+GiftPanel.Size = UDim2.new(0, 220, 0, 580)
 GiftPanel.Position = UDim2.new(1, 32, 0, 36)
 GiftPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 31)
 GiftPanel.BackgroundTransparency = 0.03
@@ -502,10 +502,13 @@ UpgradeBtn.ZIndex = 116
 UpgradeBtn.Parent = GiftPanel
 Instance.new("UICorner", UpgradeBtn).CornerRadius = UDim.new(0, 7)
 
+-- Rarity / Mutation dropdown buttons are created later and placed at y=370
+-- (directly under Upgrade, above Place+Open).
+
 local BoxesBtn = Instance.new("TextButton")
 BoxesBtn.Name = "BoxesBtn"
 BoxesBtn.Size = UDim2.new(1, -20, 0, 30)
-BoxesBtn.Position = UDim2.new(0, 10, 0, 390)
+BoxesBtn.Position = UDim2.new(0, 10, 0, 406)
 BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
 BoxesBtn.BorderSizePixel = 0
 BoxesBtn.Text = "Place + Open Boxes"
@@ -519,7 +522,7 @@ Instance.new("UICorner", BoxesBtn).CornerRadius = UDim.new(0, 7)
 local OpenBoxesBtn = Instance.new("TextButton")
 OpenBoxesBtn.Name = "OpenBoxesBtn"
 OpenBoxesBtn.Size = UDim2.new(1, -20, 0, 30)
-OpenBoxesBtn.Position = UDim2.new(0, 10, 0, 426)
+OpenBoxesBtn.Position = UDim2.new(0, 10, 0, 442)
 OpenBoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 45, 25)
 OpenBoxesBtn.BorderSizePixel = 0
 OpenBoxesBtn.Text = "Open Boxes"
@@ -562,8 +565,22 @@ local function createButton(name, y, text)
     return btn
 end
 
+local StatsLabel = Instance.new("TextLabel")
+StatsLabel.Name = "StatsLabel"
+StatsLabel.Size = UDim2.new(0, 230, 0, 28)
+StatsLabel.Position = UDim2.new(0, 10, 0, 618)
+StatsLabel.BackgroundTransparency = 1
+StatsLabel.Text = "Empty slots: ... | Lucky boxes: ..."
+StatsLabel.TextColor3 = Color3.fromRGB(150, 210, 170)
+StatsLabel.TextSize = 11
+StatsLabel.Font = Enum.Font.GothamBold
+StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatsLabel.TextYAlignment = Enum.TextYAlignment.Top
+StatsLabel.TextWrapped = true
+StatsLabel.Parent = MainFrame
+
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(0, 230, 0, 44)
+StatusLabel.Size = UDim2.new(0, 230, 0, 36)
 StatusLabel.Position = UDim2.new(0, 10, 0, 648)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Text = "Loading..."
@@ -595,7 +612,7 @@ local PickupRangeDropList
 local UpgradeRarityDropBtn = Instance.new("TextButton")
 UpgradeRarityDropBtn.Name = "UpgradeRarityDrop"
 UpgradeRarityDropBtn.Size = UDim2.new(0, 96, 0, 28)
-UpgradeRarityDropBtn.Position = UDim2.new(0, 10, 0, 354)
+UpgradeRarityDropBtn.Position = UDim2.new(0, 10, 0, 370)
 UpgradeRarityDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
 UpgradeRarityDropBtn.BorderSizePixel = 0
 UpgradeRarityDropBtn.Text = "Rarity: ▼ All"
@@ -609,7 +626,7 @@ Instance.new("UICorner", UpgradeRarityDropBtn).CornerRadius = UDim.new(0, 8)
 local UpgradeMutationDropBtn = Instance.new("TextButton")
 UpgradeMutationDropBtn.Name = "UpgradeMutationDrop"
 UpgradeMutationDropBtn.Size = UDim2.new(0, 96, 0, 28)
-UpgradeMutationDropBtn.Position = UDim2.new(0, 114, 0, 354)
+UpgradeMutationDropBtn.Position = UDim2.new(0, 114, 0, 370)
 UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(48, 34, 62)
 UpgradeMutationDropBtn.BorderSizePixel = 0
 UpgradeMutationDropBtn.Text = "Mutation: ▼ All"
@@ -630,7 +647,7 @@ UpgradeMutationDropBtn.Visible = true
 local UpgradeRarityDropList = Instance.new("ScrollingFrame")
 UpgradeRarityDropList.Name = "UpgradeRarityDropList"
 UpgradeRarityDropList.Size = UDim2.new(0, 200, 0, 150)
-UpgradeRarityDropList.Position = UDim2.new(0, 10, 0, 384)
+UpgradeRarityDropList.Position = UDim2.new(0, 10, 0, 400)
 UpgradeRarityDropList.BackgroundColor3 = Color3.fromRGB(20, 28, 40)
 UpgradeRarityDropList.BorderSizePixel = 0
 UpgradeRarityDropList.Visible = false
@@ -648,7 +665,7 @@ upgradeRarityListLayout.Parent = UpgradeRarityDropList
 local UpgradeMutationDropList = Instance.new("ScrollingFrame")
 UpgradeMutationDropList.Name = "UpgradeMutationDropList"
 UpgradeMutationDropList.Size = UDim2.new(0, 200, 0, 150)
-UpgradeMutationDropList.Position = UDim2.new(0, 10, 0, 384)
+UpgradeMutationDropList.Position = UDim2.new(0, 10, 0, 400)
 UpgradeMutationDropList.BackgroundColor3 = Color3.fromRGB(32, 22, 42)
 UpgradeMutationDropList.BorderSizePixel = 0
 UpgradeMutationDropList.Visible = false
@@ -5990,30 +6007,121 @@ end
 -- LOOPS
 -- ============================================
 -- AUTO COLLECT
--- When ON, fire Collect Earnings for stand IDs "1" through "150"
--- rapidly, then repeat the full 1-150 cycle every 5 seconds.
+-- Every 5 seconds, collect earnings once from each currently occupied slot.
+-- No spam: only real placed stands from PlotSlimes (fallback: stand models).
 task.spawn(function()
     while true do
         if collectEnabled and CollectRemote then
-            for standId = 1, 150 do
+            local slots = {}
+            local seen = {}
+
+            local data = getData()
+            local plotSlimes = data and data.PlotSlimes
+
+            if type(plotSlimes) == "table" then
+                for slotName, entry in pairs(plotSlimes) do
+                    if entry ~= nil then
+                        local name = tostring(slotName)
+                        if name ~= "" and not seen[name] then
+                            seen[name] = true
+                            table.insert(slots, name)
+                        end
+                    end
+                end
+            end
+
+            if #slots == 0 then
+                local plot = getMyPlot and getMyPlot() or nil
+                local stands = plot and plot:FindFirstChild("Stands")
+                if stands then
+                    for _, stand in ipairs(stands:GetChildren()) do
+                        if stand:IsA("Model") then
+                            local name = tostring(stand.Name)
+                            if name ~= "" and not seen[name] then
+                                seen[name] = true
+                                table.insert(slots, name)
+                            end
+                        end
+                    end
+                end
+            end
+
+            table.sort(slots, function(a, b)
+                local an, bn = tonumber(a), tonumber(b)
+                if an and bn then return an < bn end
+                if an then return true end
+                if bn then return false end
+                return a < b
+            end)
+
+            for _, slotName in ipairs(slots) do
                 if not collectEnabled then
                     break
                 end
-
-                task.spawn(function()
-                    pcall(function()
-                        CollectRemote:FireServer(
-                            tostring(standId)
-                        )
-                    end)
+                pcall(function()
+                    CollectRemote:FireServer(tostring(slotName))
                 end)
             end
 
-            -- One complete 1 -> 150 collection burst every 5 seconds.
             task.wait(5)
         else
-            task.wait(0.2)
+            task.wait(0.25)
         end
+    end
+end)
+
+
+-- Bottom stats: empty slots + total lucky boxes in inventory
+task.spawn(function()
+    local function countLuckyBoxesInInventory()
+        local data = getData()
+        if not data or type(data.Inventory) ~= "table" then
+            return 0
+        end
+
+        local count = 0
+        for _, entry in pairs(data.Inventory) do
+            if type(entry) == "table" then
+                local slimeId =
+                    entry.id
+                    or entry.Id
+                    or entry.slimeId
+                    or entry.slimeID
+                local def = nil
+                if slimeId ~= nil and getSlimeDef then
+                    def = getSlimeDef(slimeId)
+                end
+                if isLuckyInventoryEntry and isLuckyInventoryEntry(nil, entry, def) then
+                    count += 1
+                elseif def and tostring(def.Type or "") == "Lucky Block" then
+                    count += 1
+                end
+            end
+        end
+        return count
+    end
+
+    while true do
+        local ok, err = pcall(function()
+            local empty = 0
+            if getAvailableSlots then
+                empty = #getAvailableSlots()
+            end
+            local boxes = countLuckyBoxesInInventory()
+            if StatsLabel then
+                StatsLabel.Text = string.format(
+                    "Empty slots: %d  |  Lucky boxes: %d",
+                    empty,
+                    boxes
+                )
+            end
+        end)
+        if not ok then
+            if StatsLabel then
+                StatsLabel.Text = "Empty slots: ?  |  Lucky boxes: ?"
+            end
+        end
+        task.wait(1.5)
     end
 end)
 
