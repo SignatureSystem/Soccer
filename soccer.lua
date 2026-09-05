@@ -1,7 +1,8 @@
 -- Combined Script: NEXT GENERATION + JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
--- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
+-- + Lucky Box collector uses cycle steal flow: solidify -> cloak -> stand ON TOP -> hover lock -> zero hold prompt -> base; NO server hop
+-- + Place Boxes keeps spamming until all free slots are filled (or no boxes left)
 -- + Next Generation Lucky Block (ID 2146 / Rarity "Next Generation") supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
@@ -10,19 +11,20 @@ local Players = game:GetService("Players")
 -- Existing prompts:
 for _, v in ipairs(workspace:GetDescendants()) do
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0.09
+        v.HoldDuration = 0
     end
 end
 
 -- Future prompts that replicate/spawn later:
 workspace.DescendantAdded:Connect(function(v)
     if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0.09
+        v.HoldDuration = 0
     end
 end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
@@ -4637,31 +4639,291 @@ local function attemptSteal(prompt)
         return false
     end
 
-    -- Prompt hold is globally forced to zero.
     pcall(function()
         prompt.HoldDuration = 0
     end)
 
-    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
         local ok = pcall(function()
             fireproximityprompt(prompt)
         end)
-
         if ok then
             return true
         end
     end
 
-    -- Fallback.
     local ok = pcall(function()
         prompt:InputHoldBegin()
+        task.wait(0.05)
         prompt:InputHoldEnd()
     end)
 
     return ok
 end
 
+-- ============================================================
+-- CYCLE-STYLE STEAL HELPERS
+-- solidify → cloak → stand ON TOP → hover lock → zero-hold prompt
+-- ============================================================
+
+local STAND_OFFSET = 3
+
+local function makeLuckyBoxSolid(block)
+    if not block then
+        return
+    end
+
+    local parts = {}
+    if block.model and block.model.Parent then
+        for _, d in ipairs(block.model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                table.insert(parts, d)
+            end
+        end
+        if block.model:IsA("BasePart") then
+            table.insert(parts, block.model)
+        end
+    end
+    if block.part and block.part:IsA("BasePart") then
+        table.insert(parts, block.part)
+    end
+
+    for _, part in ipairs(parts) do
+        pcall(function()
+            part.CanCollide = true
+            part.CanTouch = true
+            part.CanQuery = true
+            if part.Massless ~= nil then
+                part.Massless = true
+            end
+        end)
+    end
+end
+
+local function standOnBoxCFrame(part)
+    if not part or not part.Parent then
+        return nil
+    end
+    local topY = part.Size.Y * 0.5 + STAND_OFFSET
+    return part.CFrame * CFrame.new(0, topY, 0)
+end
+
+-- Full cycle-style steal for the selected lucky type target from getTargetLuckyBlock().
+-- Returns true on successful steal, "deposited" if already carrying, false on miss.
+local function stealOneCycleStyle(block)
+    if LocalPlayer:GetAttribute("holdingSlime") == true then
+        teleportToBase()
+        local t = os.clock() + 1.2
+        while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t do
+            task.wait(0.08)
+        end
+        return "deposited"
+    end
+
+    if not block or not block.part or not block.part.Parent then
+        return false
+    end
+
+    makeLuckyBoxSolid(block)
+    pcall(activateCloak)
+    task.wait(0.15)
+
+    local root = getRoot()
+    local hum = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+    if not root or not block.part or not block.part.Parent then
+        return false
+    end
+
+    makeLuckyBoxSolid(block)
+
+    for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
+        local old = root:FindFirstChild(name)
+        if old then
+            old:Destroy()
+        end
+    end
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = "LuckyFloat"
+    bv.Velocity = Vector3.zero
+    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    bv.P = 1250
+    bv.Parent = root
+
+    local bp = Instance.new("BodyPosition")
+    bp.Name = "LuckyHoverPos"
+    bp.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    bp.P = 20000
+    bp.D = 1500
+    bp.Parent = root
+
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "LuckyHoverGyro"
+    bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    bg.P = 3000
+    bg.D = 500
+    bg.Parent = root
+
+    if hum then
+        pcall(function()
+            hum.PlatformStand = true
+            hum.AutoRotate = false
+        end)
+    end
+
+    local hovering = true
+    local hoverConn
+
+    local function applyHover()
+        if not hovering then
+            return false
+        end
+
+        local r = getRoot()
+        if not r or not block.part or not block.part.Parent then
+            return false
+        end
+
+        local cf = standOnBoxCFrame(block.part)
+        if not cf then
+            return false
+        end
+
+        r.CFrame = cf
+        r.AssemblyLinearVelocity = Vector3.zero
+        r.AssemblyAngularVelocity = Vector3.zero
+
+        if bp and bp.Parent then
+            bp.Position = cf.Position
+        end
+        if bg and bg.Parent then
+            bg.CFrame = CFrame.new(cf.Position)
+        end
+
+        local minY = block.part.Position.Y + (block.part.Size.Y * 0.5) + 1.5
+        if r.Position.Y < minY then
+            local cf2 = standOnBoxCFrame(block.part)
+            if cf2 then
+                r.CFrame = cf2
+            else
+                r.CFrame = CFrame.new(r.Position.X, minY, r.Position.Z)
+            end
+            r.AssemblyLinearVelocity = Vector3.zero
+        end
+
+        makeLuckyBoxSolid(block)
+        return true
+    end
+
+    hoverConn = RunService.Heartbeat:Connect(function()
+        if not hovering then
+            return
+        end
+        applyHover()
+    end)
+
+    local function cleanupHover()
+        hovering = false
+        if hoverConn then
+            hoverConn:Disconnect()
+            hoverConn = nil
+        end
+        for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
+            local r = getRoot()
+            local obj = r and r:FindFirstChild(name)
+            if obj then
+                obj:Destroy()
+            end
+        end
+        local r = getRoot()
+        if r then
+            r.AssemblyLinearVelocity = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+        end
+        if hum then
+            pcall(function()
+                hum.PlatformStand = false
+                hum.AutoRotate = true
+            end)
+        end
+    end
+
+    for _ = 1, 6 do
+        if not applyHover() then
+            cleanupHover()
+            return false
+        end
+        task.wait(0.03)
+    end
+
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then
+            v.HoldDuration = 0
+        end
+    end
+
+    local prompt = block.prompt
+    if (not prompt or not prompt.Parent) and block.model then
+        for _, d in ipairs(block.model:GetDescendants()) do
+            if d:IsA("ProximityPrompt") and d.Enabled then
+                prompt = d
+                break
+            end
+        end
+    end
+
+    if not prompt or not prompt.Parent then
+        cleanupHover()
+        return false
+    end
+
+    local stolen = false
+    for try = 1, 10 do
+        if not applyHover() then
+            break
+        end
+
+        if not prompt.Parent and block.model and block.model.Parent then
+            for _, d in ipairs(block.model:GetDescendants()) do
+                if d:IsA("ProximityPrompt") and d.Enabled then
+                    prompt = d
+                    break
+                end
+            end
+        end
+
+        if prompt and prompt.Parent then
+            prompt.HoldDuration = 0
+            attemptSteal(prompt)
+        end
+
+        if LocalPlayer:GetAttribute("holdingSlime") == true then
+            stolen = true
+            break
+        end
+        if block.model
+            and (not block.model.Parent or block.model:GetAttribute("Carrying") == true)
+        then
+            stolen = true
+            break
+        end
+        task.wait(0.08)
+    end
+
+    for _ = 1, 5 do
+        applyHover()
+        task.wait(0.05)
+    end
+
+    if LocalPlayer:GetAttribute("holdingSlime") == true then
+        stolen = true
+    end
+
+    cleanupHover()
+    return stolen == true
+end
 
 
 -- ============================================================
@@ -4751,12 +5013,6 @@ local function doPlaceBoxesOnly()
         return 0
     end
 
-    local boxes = getAllLuckyBlockPlaceEntries()
-    local slots = getAvailableSlots()
-    if #boxes == 0 or #slots == 0 then
-        return 0
-    end
-
     local function findPlacedSlotByUID(playerData, uid)
         if uid == nil or not playerData or type(playerData.PlotSlimes) ~= "table" then
             return nil
@@ -4805,88 +5061,121 @@ local function doPlaceBoxesOnly()
         return true
     end
 
-    local targets = {}
-    local total = math.min(#boxes, #slots)
-    for i = 1, total do
-        table.insert(targets, {
-            uid = boxes[i].uid,
-            slot = slots[i].name,
-            stand = slots[i].stand,
-            done = false,
-        })
-    end
+    -- Keep placing forever until EVERY free slot is filled.
+    -- Does NOT stop because inventory has no boxes yet — waits and retries.
+    -- Only exit condition: getAvailableSlots() is empty (all slots full).
+    local totalPlaced = 0
 
-    local deadline = os.clock() + 14
-    local hopIndex = 1
+    while true do
+        local slots = getAvailableSlots()
 
-    while os.clock() < deadline do
-        local remainingList = {}
-        local data = getData()
-
-        for _, t in ipairs(targets) do
-            if not t.done then
-                if findPlacedSlotByUID(data, t.uid) then
-                    t.done = true
-                else
-                    table.insert(remainingList, t)
-                end
-            end
-        end
-
-        if #remainingList == 0 then
+        -- STOP ONLY WHEN NO FREE SLOTS LEFT
+        if #slots == 0 then
             break
         end
 
-        -- Cycle through remaining stands: teleport, then fire Place for
-        -- the current slot (required for near-check) and spam the rest.
-        if hopIndex > #remainingList then
-            hopIndex = 1
+        local boxes = getAllLuckyBlockPlaceEntries()
+
+        if #boxes == 0 then
+            -- Still have free slots but no boxes yet — wait and keep checking
+            if StatusLabel then
+                StatusLabel.Text = string.format(
+                    "Place Boxes: %d free slots | waiting for boxes...",
+                    #slots
+                )
+            end
+            task.wait(0.25)
+            continue
         end
 
-        local current = remainingList[hopIndex]
-        hopIndex += 1
+        local targets = {}
+        local total = math.min(#boxes, #slots)
+        for i = 1, total do
+            table.insert(targets, {
+                uid = boxes[i].uid,
+                slot = slots[i].name,
+                stand = slots[i].stand,
+                done = false,
+            })
+        end
 
-        if current and current.stand then
-            teleportToStand(current.stand)
-            -- tiny settle so server can see the player at the stand
-            task.wait(0.04)
+        if StatusLabel then
+            StatusLabel.Text = string.format(
+                "Place Boxes: filling %d free slots (%d boxes)...",
+                #slots,
+                #boxes
+            )
+        end
 
-            -- Fire the stand we are standing on first
-            if current.uid and current.slot then
-                pcall(function()
-                    placeRemote:FireServer(tostring(current.slot), current.uid)
-                end)
+        local passDeadline = os.clock() + 10
+        local hopIndex = 1
+
+        while os.clock() < passDeadline do
+            -- Stop mid-pass only if slots are now full
+            local stillFree = getAvailableSlots()
+            if #stillFree == 0 then
+                break
             end
 
-            -- Also spam every other remaining pair while we are here
-            for _, t in ipairs(remainingList) do
-                if t ~= current and t.uid and t.slot then
-                    pcall(function()
-                        placeRemote:FireServer(tostring(t.slot), t.uid)
-                    end)
+            local remainingList = {}
+            local data = getData()
+
+            for _, t in ipairs(targets) do
+                if not t.done then
+                    if findPlacedSlotByUID(data, t.uid) then
+                        t.done = true
+                        totalPlaced += 1
+                    else
+                        table.insert(remainingList, t)
+                    end
                 end
             end
-        else
-            -- No stand reference: still spam remotes
-            for _, t in ipairs(remainingList) do
-                if t.uid and t.slot then
+
+            if #remainingList == 0 then
+                break
+            end
+
+            if hopIndex > #remainingList then
+                hopIndex = 1
+            end
+
+            local current = remainingList[hopIndex]
+            hopIndex += 1
+
+            if current and current.stand then
+                teleportToStand(current.stand)
+                task.wait(0.04)
+
+                if current.uid and current.slot then
                     pcall(function()
-                        placeRemote:FireServer(tostring(t.slot), t.uid)
+                        placeRemote:FireServer(tostring(current.slot), current.uid)
                     end)
                 end
+
+                for _, t in ipairs(remainingList) do
+                    if t ~= current and t.uid and t.slot then
+                        pcall(function()
+                            placeRemote:FireServer(tostring(t.slot), t.uid)
+                        end)
+                    end
+                end
+            else
+                for _, t in ipairs(remainingList) do
+                    if t.uid and t.slot then
+                        pcall(function()
+                            placeRemote:FireServer(tostring(t.slot), t.uid)
+                        end)
+                    end
+                end
+                task.wait(0.05)
             end
-            task.wait(0.05)
         end
+
+        task.wait(0.1)
+        -- Loop continues; only breaks when #getAvailableSlots() == 0 above
     end
 
-    local placed = 0
-    for _, t in ipairs(targets) do
-        if t.done then
-            placed += 1
-        end
-    end
-
-    return placed
+    return totalPlaced
 end
 
 -- Spam-open ALL occupied slots (any lucky type). Server ignores non-boxes.
@@ -6179,14 +6468,14 @@ task.spawn(function()
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            -- Exact reference behavior if already carrying.
+            -- Already carrying → deposit at base
             if LocalPlayer:GetAttribute("holdingSlime") == true then
                 StatusLabel.Text =
                     "Lucky Block: carrying -> returning to base"
 
                 teleportToBase()
 
-                local t = os.clock() + 1
+                local t = os.clock() + 1.2
 
                 while luckyEnabled
                     and LocalPlayer:GetAttribute("holdingSlime")
@@ -6200,8 +6489,7 @@ task.spawn(function()
                 continue
             end
 
-            -- Keep the combined script's selected-type target detection.
-            -- ONLY the steal movement/prompt/deposit flow is replaced.
+            -- Selected-type target detection (Next Generation default, etc.)
             local block = getTargetLuckyBlock()
 
             if not block then
@@ -6218,122 +6506,33 @@ task.spawn(function()
 
             StatusLabel.Text =
                 tostring(selectedLuckyBlockType)
-                .. " Lucky Block found - stealing..."
+                .. " found — solidify + stand ON TOP..."
 
-            -- EXACT reference cloak step.
-            pcall(function()
-                activateCloak()
-            end)
+            -- Cycle-style steal:
+            -- solidify → cloak → stand on top → hover lock → zero hold → prompt x10 → base
+            local result = stealOneCycleStyle(block)
 
-            task.wait(0.2)
-
-            -- EXACT reference teleport:
-            -- directly under the target.
-            local root = getRoot()
-
-            if not root
-                or not block.part
-                or not block.part.Parent
-            then
-                luckyBlockBusy = false
-                task.wait(0.15)
-                continue
-            end
-
-            root.CFrame =
-                block.part.CFrame
-                * CFrame.new(0, -1, 0)
-
-            root.AssemblyLinearVelocity =
-                Vector3.zero
-
-            -- EXACT reference BodyVelocity float.
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "LuckyFloat"
-            bv.Velocity = Vector3.zero
-            bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-            bv.P = 1250
-            bv.Parent = root
-
-            task.wait(0.15)
-
-            -- EXACT reference prompt lookup.
-            local prompt = block.prompt
-
-            if (
-                not prompt
-                or not prompt.Parent
-            )
-                and block.model
-            then
-                for _, d in ipairs(
-                    block.model:GetDescendants()
-                ) do
-                    if d:IsA("ProximityPrompt")
-                        and d.Enabled
-                    then
-                        prompt = d
-                        break
-                    end
-                end
-            end
-
-            --------------------------------------------------
-            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
-            --
-            -- Exact reference teleport already completed above.
-            -- Immediately after arriving underneath the target:
-            -- 1) Force ALL current proximity prompts HoldDuration = 0
-            -- 2) Trigger the Lucky Block prompt / pick up
-            -- 3) Return to base
-            --------------------------------------------------
-
-            StatusLabel.Text =
-                tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> zero hold + pickup"
-
-            -- Exact loop requested by user, run immediately after teleport.
-            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
-                if v.ClassName == "ProximityPrompt" then
-                    v.HoldDuration = 0
-                end
-            end
-
-            local prompt = block.prompt
-
-            if (not prompt or not prompt.Parent) and block.model then
-                for _, d in ipairs(block.model:GetDescendants()) do
-                    if d:IsA("ProximityPrompt") and d.Enabled then
-                        prompt = d
-                        break
-                    end
-                end
-            end
-
-            if prompt and prompt.Parent then
-                prompt.HoldDuration = 0
+            if result == "deposited" then
+                StatusLabel.Text = "Deposited held item at base"
+            elseif result == true then
+                totalCollected += 1
 
                 StatusLabel.Text =
-                    tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> picking up"
+                    string.format(
+                        "Stolen #%d — returning to base",
+                        totalCollected
+                    )
 
-                -- Instant pickup / steal.
-                attemptSteal(prompt)
-
-                if bv and bv.Parent then
-                    bv:Destroy()
-                end
-
-                root = getRoot()
-
-                if root then
-                    root.AssemblyLinearVelocity = Vector3.zero
-                end
-
-                -- Return immediately after the pickup tap.
+                task.wait(0.2)
                 teleportToBase()
 
-                totalCollected += 1
+                local t = os.clock() + 5
+                while luckyEnabled
+                    and LocalPlayer:GetAttribute("holdingSlime")
+                    and os.clock() < t
+                do
+                    task.wait(0.1)
+                end
 
                 StatusLabel.Text =
                     string.format(
@@ -6341,18 +6540,15 @@ task.spawn(function()
                         totalCollected
                     )
             else
-                if bv and bv.Parent then
-                    bv:Destroy()
-                end
-
                 StatusLabel.Text =
-                    "Lucky Block prompt missing"
+                    tostring(selectedLuckyBlockType)
+                    .. " steal failed — retry"
+                task.wait(0.15)
             end
 
             luckyBlockBusy = false
         end
 
-        -- Same reference loop cadence.
         task.wait(0.08)
     end
 end)
