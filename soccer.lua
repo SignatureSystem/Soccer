@@ -1,7 +1,8 @@
--- Combined Script: JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
+-- Combined Script: NEXT GENERATION + JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
+-- + Next Generation Lucky Block (ID 2146 / Rarity "Next Generation") supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
 
@@ -61,10 +62,11 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Japan"] = 1, ["Icons"] = 2, ["Spain"] = 3 }
-local TARGET_RARITIES  = { ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
+local UPGRADE_PRIORITY = { ["Next Generation"] = 1, ["Alternative"] = 2, ["Japan"] = 3, ["Icons"] = 4, ["Spain"] = 5 }
+local TARGET_RARITIES  = { ["Next Generation"] = true, ["Alternative"] = true, ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
+    ["Next Generation"] = 10000000,
     ["Alternative"] = 9000000,
     ["Japan"] = 7000000,
     ["Icons"] = 5000000,
@@ -86,7 +88,7 @@ local RARITY_VALUE = {
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "OG", "Champions",
-    "Spain", "Icons", "Japan", "Alternative", "LIMITED",
+    "Spain", "Icons", "Japan", "Alternative", "Next Generation", "LIMITED",
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
@@ -100,12 +102,12 @@ for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
 for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
 
 -- Auto Upgrade rarity filter options.
--- Includes all current rarities, including LIMITED, Japan, Icons and Alternative.
+-- Includes all current rarities, including LIMITED, Japan, Icons, Alternative and Next Generation.
 local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan", "Alternative",
+    "Spain", "Icons", "Japan", "Alternative", "Next Generation",
 }
 
 local selectedUpgradeRarity = "All"
@@ -124,7 +126,8 @@ end
 local selectedUpgradeMutation = "All"
 
 -- Exact Lucky Block types found in the latest game slime registry.
--- New live entry: Japan Lucky Block (rarity Japan). Previous: Icons Lucky Block.
+-- Newest live entry: Next Generation Lucky Block (rarity Next Generation, ID 2146).
+-- Also includes Japan / Alternative / Icons tiers.
 -- The dropdown uses display labels; matching uses exact live model names.
 local LUCKY_BLOCK_OPTIONS = {
     "All",
@@ -150,6 +153,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Icons",
     "Japan",
     "Alternative",
+    "Next Generation",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -178,11 +182,19 @@ local LUCKY_BLOCK_MODEL_NAMES = {
     ["Spain"] = { ["Spain Lucky Block"] = true },
     ["Icons"] = { ["Icons Lucky Block"] = true },
     ["Japan"] = { ["Japan Lucky Block"] = true },
-    ["Alternative"] = { ["Alternative Lucky Block"] = true },
+    ["Alternative"] = {
+        ["Alternative Lucky Block"] = true,
+        ["Alternate Lucky Block"] = true,
+    },
+    ["Next Generation"] = {
+        ["Next Generation Lucky Block"] = true,
+        ["NextGen Lucky Block"] = true,
+        ["Next Gen Lucky Block"] = true,
+    },
 }
 
 -- Default to the newest live tier.
-local selectedLuckyBlockType = "Japan"
+local selectedLuckyBlockType = "Next Generation"
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -2409,6 +2421,20 @@ local function getUnopenedLuckyBlockSlots(filterType)
                 return true
             end
 
+            if filterType == "Next Generation" then
+                local rl = string.lower(r)
+                if rl == "next generation" or rl == "nextgen" or rl == "next gen" then
+                    return true
+                end
+            end
+
+            if filterType == "Alternative" then
+                local rl = string.lower(r)
+                if rl == "alternative" or rl == "alternate" then
+                    return true
+                end
+            end
+
             if string.lower(r) == string.lower(filterType) then
                 return true
             end
@@ -3209,6 +3235,12 @@ local function resolveHeldToolRarity(entry)
             local text = tostring(value)
             local lower = string.lower(text)
 
+            if lower:find("next generation") or lower:find("nextgen") or lower:find("next gen") then
+                return "Next Generation"
+            end
+            if lower:find("alternative") or lower:find("alternate") then
+                return "Alternative"
+            end
             if lower:find("japan") then return "Japan" end
             if lower:find("icons") then return "Icons" end
             if lower:find("spain") then return "Spain" end
@@ -3315,7 +3347,11 @@ local function isLuckyBlock(tool)
     if typ and tostring(typ):lower():find("lucky") then return true end
     local name = tostring(tool.Name):lower()
     if name:find("lucky") or name:find("box") or name:find("crate") then return true end
-    for _, n in ipairs({"spain", "champions", "og", "exclusive", "limited", "divine", "slime god", "secret"}) do
+    for _, n in ipairs({
+        "spain", "champions", "og", "exclusive", "limited", "divine",
+        "slime god", "secret", "japan", "icons", "alternative", "alternate",
+        "next generation", "nextgen", "next gen",
+    }) do
         if name:find(n) then return true end
     end
     return false
@@ -3370,6 +3406,20 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
 
         if filterType == "Limited" and r == "LIMITED" then
             return true
+        end
+
+        if filterType == "Next Generation" then
+            local rl = string.lower(r)
+            if rl == "next generation" or rl == "nextgen" or rl == "next gen" then
+                return true
+            end
+        end
+
+        if filterType == "Alternative" then
+            local rl = string.lower(r)
+            if rl == "alternative" or rl == "alternate" then
+                return true
+            end
         end
 
         if string.lower(r) == string.lower(filterType) then
@@ -3839,6 +3889,15 @@ local function normalizeUpgradeRarity(rarity)
     if rarity == "Player God" then
         return "Slime God"
     end
+
+    local lower = string.lower(rarity)
+    if lower == "nextgen" or lower == "next gen" or lower == "next-generation" then
+        return "Next Generation"
+    end
+    if lower == "alternate" then
+        return "Alternative"
+    end
+
     return rarity
 end
 
@@ -4438,6 +4497,69 @@ local function getTargetLuckyBlock()
                 matches =
                     allowedNames ~= nil
                     and allowedNames[modelName] == true
+            end
+
+            -- Rarity / ID / attribute fallback (covers Next Generation ID 2146 and aliases).
+            if not matches then
+                local lowerName = string.lower(modelName)
+                local rarityAttr =
+                    model:GetAttribute("Rarity")
+                    or model:GetAttribute("_Rarity")
+                    or model:GetAttribute("rarity")
+                local idAttr =
+                    model:GetAttribute("ID")
+                    or model:GetAttribute("Id")
+                    or model:GetAttribute("id")
+                    or model:GetAttribute("_RegisteredID")
+                    or model:GetAttribute("RegisteredID")
+                    or model:GetAttribute("LuckyBlockID")
+                local blockNameAttr =
+                    model:GetAttribute("LuckyBlockName")
+                    or model:GetAttribute("BlockName")
+                    or model:GetAttribute("DisplayName")
+
+                local function matchesNextGen()
+                    local r = rarityAttr and string.lower(tostring(rarityAttr)) or ""
+                    local bn = blockNameAttr and string.lower(tostring(blockNameAttr)) or ""
+                    local id = idAttr and tostring(idAttr) or ""
+                    return
+                        lowerName:find("next generation", 1, true)
+                        or lowerName:find("nextgen", 1, true)
+                        or r == "next generation"
+                        or r == "nextgen"
+                        or bn:find("next generation", 1, true)
+                        or bn:find("nextgen", 1, true)
+                        or id == "2146"
+                end
+
+                local function matchesAlternative()
+                    local r = rarityAttr and string.lower(tostring(rarityAttr)) or ""
+                    local bn = blockNameAttr and string.lower(tostring(blockNameAttr)) or ""
+                    local id = idAttr and tostring(idAttr) or ""
+                    return
+                        lowerName:find("alternative", 1, true)
+                        or lowerName:find("alternate", 1, true)
+                        or r == "alternative"
+                        or r == "alternate"
+                        or bn:find("alternative", 1, true)
+                        or bn:find("alternate", 1, true)
+                        or id == "1263"
+                end
+
+                if selectedLuckyBlockType == "All" then
+                    if matchesNextGen() or matchesAlternative() then
+                        matches = true
+                    end
+                elseif selectedLuckyBlockType == "Next Generation" then
+                    matches = matchesNextGen()
+                elseif selectedLuckyBlockType == "Alternative" then
+                    matches = matchesAlternative()
+                elseif rarityAttr
+                    and string.lower(tostring(rarityAttr))
+                        == string.lower(selectedLuckyBlockType)
+                then
+                    matches = true
+                end
             end
 
             if not matches then
@@ -6473,7 +6595,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
+print("[AutoFarm] NEXT GENERATION + JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
 print("Place Boxes = teleport-hop + spam Place Slime near each slot | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
