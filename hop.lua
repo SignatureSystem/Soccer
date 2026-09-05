@@ -1,11 +1,11 @@
--- Minimal Alternate Lucky Block Stealer + timer + count
+-- Minimal Next Generation Lucky Block Stealer + timer + count
 -- Target:
--- Name: Alternate Lucky Block
--- Rarity: Alternative
--- ID: 1263
+-- Name: Next Generation Lucky Block
+-- Rarity: Next Generation
+-- ID: 2146
 -- Auto-starts on execute.
 -- Fast scan; hops to lowest-pop public server (max 1 player)
--- if no Alternate Lucky Block / Alternative target exists.
+-- if no Next Generation Lucky Block / NextGen target exists.
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -14,10 +14,10 @@ local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
 
 local TARGET = {
-    Name = "Alternate Lucky Block",
-    Rarity = "Alternative",
-    ID = "1263",
-    MinValue = 700000000
+    Name = "Next Generation Lucky Block",
+    Rarity = "Next Generation",
+    ID = "2146",
+    MinValue = 10000000
 }
 
 local enabled, busy, total = true, false, 0
@@ -50,13 +50,14 @@ local function fmtTime(sec)
 end
 
 
--- Robust Alternate Lucky Block detection.
+-- Robust Next Generation Lucky Block detection.
 -- Supports:
---   Alternate Lucky Block
---   Alternative
---   ID 1263
+--   Next Generation Lucky Block
+--   Next Generation
+--   NextGen
+--   ID 2146
 -- without changing the actual stealing mechanism.
-local function isAlternateBlock(m)
+local function isNextGenBlock(m)
 
     if not m or not m:IsA("Model") then
         return false
@@ -69,11 +70,15 @@ local function isAlternateBlock(m)
     -- 1. Exact / partial model name
     --------------------------------------------------
 
-    if lowerName:find("alternate lucky block", 1, true) then
+    if lowerName:find("next generation lucky block", 1, true) then
         return true
     end
 
-    if lowerName:find("alternative", 1, true) then
+    if lowerName:find("next generation", 1, true) then
+        return true
+    end
+
+    if lowerName:find("nextgen", 1, true) then
         return true
     end
 
@@ -86,8 +91,11 @@ local function isAlternateBlock(m)
         or m:GetAttribute("_Rarity")
         or m:GetAttribute("rarity")
 
-    if rarity and tostring(rarity):lower() == "alternative" then
-        return true
+    if rarity then
+        local r = tostring(rarity):lower()
+        if r == "next generation" or r == "nextgen" then
+            return true
+        end
     end
 
     --------------------------------------------------
@@ -103,7 +111,10 @@ local function isAlternateBlock(m)
     if blockName then
         local bn = tostring(blockName):lower()
 
-        if bn:find("alternate lucky block", 1, true) then
+        if bn:find("next generation lucky block", 1, true)
+            or bn:find("next generation", 1, true)
+            or bn:find("nextgen", 1, true)
+        then
             return true
         end
     end
@@ -150,15 +161,13 @@ local function isAlternateBlock(m)
                 return true
             end
 
-            if value:lower() == "alternative" then
-                return true
-            end
+            local vl = value:lower()
 
-            if value:lower():find(
-                "alternate lucky block",
-                1,
-                true
-            ) then
+            if vl == "next generation"
+                or vl == "nextgen"
+                or vl:find("next generation lucky block", 1, true)
+                or vl:find("next generation", 1, true)
+            then
                 return true
             end
         end
@@ -352,7 +361,7 @@ local function findBlock()
         if
             m:IsA("Model")
             and not m:GetAttribute("Carrying")
-            and isAlternateBlock(m)
+            and isNextGenBlock(m)
         then
 
             local part =
@@ -429,7 +438,7 @@ local function findBlock()
 end
 
 
-local function countAlternateBlocks()
+local function countNextGenBlocks()
 
     local live =
         workspace:FindFirstChild("Live")
@@ -448,7 +457,7 @@ local function countAlternateBlocks()
         if
             m:IsA("Model")
             and not m:GetAttribute("Carrying")
-            and isAlternateBlock(m)
+            and isNextGenBlock(m)
         then
 
             n += 1
@@ -873,7 +882,9 @@ pcall(function()
         "JapanStealer",
         "JIStealer",
         "AlternativeStealer",
-        "AlternateStealer"
+        "AlternateStealer",
+        "NextGenStealer",
+        "NextGenerationStealer"
     }
 
     for _, name in ipairs(names) do
@@ -891,7 +902,7 @@ end)
 local gui =
     Instance.new("ScreenGui")
 
-gui.Name = "AlternateStealer"
+gui.Name = "NextGenStealer"
 gui.ResetOnSpawn = false
 gui.Parent = PG
 
@@ -963,7 +974,7 @@ btn.BackgroundColor3 =
 btn.BorderSizePixel = 0
 
 btn.Text =
-    "Steal Alternate: ON"
+    "Steal NextGen: ON"
 
 btn.TextColor3 =
     Color3.fromRGB(
@@ -1085,7 +1096,7 @@ statusLbl.Position =
 statusLbl.BackgroundTransparency = 1
 
 statusLbl.Text =
-    "Auto-run | scanning Alternate..."
+    "Auto-run | scanning NextGen..."
 
 statusLbl.TextColor3 =
     Color3.fromRGB(
@@ -1110,8 +1121,8 @@ local function setOn(on)
 
     btn.Text =
         on
-        and "Steal Alternate: ON"
-        or "Steal Alternate: OFF"
+        and "Steal NextGen: ON"
+        or "Steal NextGen: OFF"
 
     btn.TextColor3 =
         on
@@ -1152,7 +1163,7 @@ local function setOn(on)
             "Time: 00:00"
 
         statusLbl.Text =
-            "Scanning Alternate Lucky Block..."
+            "Scanning Next Generation Lucky Block..."
 
     else
 
@@ -1270,19 +1281,19 @@ task.spawn(function()
 
 
             ------------------------------------------
-            -- Alternate Lucky Block presence scan
+            -- Next Generation Lucky Block presence scan
             ------------------------------------------
 
-            local alternateCount =
-                countAlternateBlocks()
+            local nextGenCount =
+                countNextGenBlocks()
 
-            if alternateCount <= 0 then
+            if nextGenCount <= 0 then
 
                 emptyScans += 1
 
                 statusLbl.Text =
                     string.format(
-                        "No Alternate (%d/%d) — will hop",
+                        "No NextGen (%d/%d) — will hop",
                         emptyScans,
                         EMPTY_SCANS_BEFORE_HOP
                     )
@@ -1312,7 +1323,7 @@ task.spawn(function()
 
 
             ------------------------------------------
-            -- Select highest value Alternate target
+            -- Select highest value NextGen target
             ------------------------------------------
 
             local b =
@@ -1321,7 +1332,7 @@ task.spawn(function()
             if not b then
 
                 statusLbl.Text =
-                    "Alternate seen — retargeting..."
+                    "NextGen seen — retargeting..."
 
                 busy = false
 
@@ -1332,7 +1343,7 @@ task.spawn(function()
 
 
             statusLbl.Text =
-                "Alternate Lucky Block found — stealing..."
+                "Next Generation Lucky Block found — stealing..."
 
 
             ------------------------------------------
@@ -1489,7 +1500,7 @@ task.spawn(function()
 
 
                 statusLbl.Text =
-                    "Alternate stolen — depositing..."
+                    "NextGen stolen — depositing..."
 
 
                 task.wait(0.25)
@@ -1519,7 +1530,7 @@ task.spawn(function()
 
 
                 statusLbl.Text =
-                    "Scanning Alternate Lucky Block..."
+                    "Scanning Next Generation Lucky Block..."
 
 
             else
@@ -1546,7 +1557,7 @@ end)
 
 
 print(
-    "[AlternateStealer] TARGET:",
+    "[NextGenStealer] TARGET:",
     TARGET.Name,
     "| Rarity:",
     TARGET.Rarity,
