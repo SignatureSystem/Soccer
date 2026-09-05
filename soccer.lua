@@ -1183,6 +1183,7 @@ local rebirthEnabled, jumpUpgradeEnabled, boxesAutoEnabled = false, false, false
 local invisEnabled = false
 local totalCollected = 0
 local luckyBlockBusy, actionBusy = false, false
+local placeBoxesCancel, placeBoxesRunning = false, false
 
 local _Lib = nil
 local CollectRemote, UpgradeRemote, RebirthRemote, JumpUpgradeRemote
@@ -5061,15 +5062,19 @@ local function doPlaceBoxesOnly()
         return true
     end
 
-    -- Keep placing forever until EVERY free slot is filled.
-    -- Does NOT stop because inventory has no boxes yet — waits and retries.
-    -- Only exit condition: getAvailableSlots() is empty (all slots full).
+    -- Keep placing until every free slot is filled, OR user cancels
+    -- by clicking Place Boxes again (placeBoxesCancel = true).
     local totalPlaced = 0
+    placeBoxesCancel = false
 
     while true do
+        if placeBoxesCancel then
+            break
+        end
+
         local slots = getAvailableSlots()
 
-        -- STOP ONLY WHEN NO FREE SLOTS LEFT
+        -- STOP when no free slots left
         if #slots == 0 then
             break
         end
@@ -5077,10 +5082,12 @@ local function doPlaceBoxesOnly()
         local boxes = getAllLuckyBlockPlaceEntries()
 
         if #boxes == 0 then
-            -- Still have free slots but no boxes yet — wait and keep checking
+            if placeBoxesCancel then
+                break
+            end
             if StatusLabel then
                 StatusLabel.Text = string.format(
-                    "Place Boxes: %d free slots | waiting for boxes...",
+                    "Place Boxes: %d free slots | waiting for boxes... (click to stop)",
                     #slots
                 )
             end
@@ -5101,7 +5108,7 @@ local function doPlaceBoxesOnly()
 
         if StatusLabel then
             StatusLabel.Text = string.format(
-                "Place Boxes: filling %d free slots (%d boxes)...",
+                "Place Boxes: filling %d free slots (%d boxes)... (click to stop)",
                 #slots,
                 #boxes
             )
@@ -5111,7 +5118,10 @@ local function doPlaceBoxesOnly()
         local hopIndex = 1
 
         while os.clock() < passDeadline do
-            -- Stop mid-pass only if slots are now full
+            if placeBoxesCancel then
+                break
+            end
+
             local stillFree = getAvailableSlots()
             if #stillFree == 0 then
                 break
@@ -5146,6 +5156,10 @@ local function doPlaceBoxesOnly()
                 teleportToStand(current.stand)
                 task.wait(0.04)
 
+                if placeBoxesCancel then
+                    break
+                end
+
                 if current.uid and current.slot then
                     pcall(function()
                         placeRemote:FireServer(tostring(current.slot), current.uid)
@@ -5171,8 +5185,11 @@ local function doPlaceBoxesOnly()
             end
         end
 
+        if placeBoxesCancel then
+            break
+        end
+
         task.wait(0.1)
-        -- Loop continues; only breaks when #getAvailableSlots() == 0 above
     end
 
     return totalPlaced
@@ -5939,26 +5956,43 @@ PlaceBtn.MouseButton1Click:Connect(function()
 end)
 
 BoxesBtn.MouseButton1Click:Connect(function()
+    -- Second click while placing → cancel place phase
+    if placeBoxesRunning then
+        placeBoxesCancel = true
+        BoxesBtn.Text = "Stopping..."
+        StatusLabel.Text = "Place + Open: stopping place phase..."
+        return
+    end
+
     if actionBusy then
         StatusLabel.Text = "Another action is still running..."
         return
     end
 
     actionBusy = true
+    placeBoxesRunning = true
+    placeBoxesCancel = false
 
     local ok, err = xpcall(function()
-        -- PHASE 1 = EXACT same function as "Place Boxes"
-        BoxesBtn.Text = "Placing..."
+        BoxesBtn.Text = "Placing... (click stop)"
         StatusLabel.Text =
             "Place + Open: placing lucky boxes..."
 
         local placed =
             doPlaceBoxesOnly()
 
-        -- Important replication settle before Open Boxes scans PlotSlimes.
+        placeBoxesRunning = false
+
+        if placeBoxesCancel then
+            StatusLabel.Text = string.format(
+                "Place + Open STOPPED during place | placed %d",
+                placed
+            )
+            return
+        end
+
         task.wait(0.25)
 
-        -- PHASE 2 = EXACT same function as "Open Boxes"
         BoxesBtn.Text = "Opening..."
         StatusLabel.Text =
             string.format(
@@ -5986,19 +6020,54 @@ BoxesBtn.MouseButton1Click:Connect(function()
     end
 
     BoxesBtn.Text = "Place + Open Boxes"
+    placeBoxesRunning = false
+    placeBoxesCancel = false
     actionBusy = false
 end)
 
 PlaceBoxesBtn.MouseButton1Click:Connect(function()
-    if actionBusy then return end
+    -- Second click while placing → instant stop
+    if placeBoxesRunning then
+        placeBoxesCancel = true
+        PlaceBoxesBtn.Text = "Stopping..."
+        StatusLabel.Text = "Place Boxes: stopping..."
+        return
+    end
+
+    if actionBusy then
+        return
+    end
+
     actionBusy = true
-    PlaceBoxesBtn.Text = "Spam..."
-    local p = doPlaceBoxesOnly()
-    StatusLabel.Text = string.format(
-        "Place ALL lucky boxes: %d targets (spam)",
-        p
-    )
+    placeBoxesRunning = true
+    placeBoxesCancel = false
+    PlaceBoxesBtn.Text = "Spam... (click stop)"
+    PlaceBoxesBtn.TextColor3 = Color3.fromRGB(255, 180, 100)
+
+    local p = 0
+    local ok, err = xpcall(function()
+        p = doPlaceBoxesOnly()
+    end, debug.traceback)
+
+    if not ok then
+        warn("[PlaceBoxes] ERROR:", err)
+        StatusLabel.Text = "Place Boxes error: " .. tostring(err):match("^[^\n]+")
+    elseif placeBoxesCancel then
+        StatusLabel.Text = string.format(
+            "Place Boxes STOPPED | placed %d before cancel",
+            p
+        )
+    else
+        StatusLabel.Text = string.format(
+            "Place ALL lucky boxes done | placed %d (slots full)",
+            p
+        )
+    end
+
     PlaceBoxesBtn.Text = "Place Boxes"
+    PlaceBoxesBtn.TextColor3 = Color3.fromRGB(120, 255, 150)
+    placeBoxesRunning = false
+    placeBoxesCancel = false
     actionBusy = false
 end)
 
