@@ -226,8 +226,8 @@ pcall(function() ScreenGui.Parent = PlayerGui or CoreGui end)
 if not ScreenGui.Parent then ScreenGui.Parent = CoreGui end
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 250, 0, 794)
-MainFrame.Position = UDim2.new(0, 20, 0.5, -397)
+MainFrame.Size = UDim2.new(0, 250, 0, 700)
+MainFrame.Position = UDim2.new(0, 20, 0.5, -350)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BackgroundTransparency = 0.05
 MainFrame.BorderSizePixel = 0
@@ -271,7 +271,7 @@ sideArrowStroke.Thickness = 1.5
 
 local GiftPanel = Instance.new("Frame")
 GiftPanel.Name = "GiftPanel"
-GiftPanel.Size = UDim2.new(0, 220, 0, 326)
+GiftPanel.Size = UDim2.new(0, 220, 0, 560)
 GiftPanel.Position = UDim2.new(1, 32, 0, 36)
 GiftPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 31)
 GiftPanel.BackgroundTransparency = 0.03
@@ -473,6 +473,63 @@ AutoAcceptGiftBtn.ZIndex = 116
 AutoAcceptGiftBtn.Parent = GiftPanel
 Instance.new("UICorner", AutoAcceptGiftBtn).CornerRadius = UDim.new(0, 7)
 
+-- ============================================
+-- SIDE PANEL: AUTO UPGRADE + BOX ACTIONS
+-- ============================================
+local SideFarmLabel = Instance.new("TextLabel")
+SideFarmLabel.Size = UDim2.new(1, -20, 0, 16)
+SideFarmLabel.Position = UDim2.new(0, 10, 0, 318)
+SideFarmLabel.BackgroundTransparency = 1
+SideFarmLabel.Text = "Farm Tools"
+SideFarmLabel.TextColor3 = Color3.fromRGB(200, 210, 230)
+SideFarmLabel.TextSize = 11
+SideFarmLabel.Font = Enum.Font.GothamBold
+SideFarmLabel.TextXAlignment = Enum.TextXAlignment.Left
+SideFarmLabel.ZIndex = 116
+SideFarmLabel.Parent = GiftPanel
+
+local UpgradeBtn = Instance.new("TextButton")
+UpgradeBtn.Name = "UpgradeToggle"
+UpgradeBtn.Size = UDim2.new(1, -20, 0, 30)
+UpgradeBtn.Position = UDim2.new(0, 10, 0, 336)
+UpgradeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+UpgradeBtn.BorderSizePixel = 0
+UpgradeBtn.Text = "Auto Upgrade: OFF"
+UpgradeBtn.TextColor3 = Color3.fromRGB(255, 90, 90)
+UpgradeBtn.TextSize = 11
+UpgradeBtn.Font = Enum.Font.GothamBold
+UpgradeBtn.ZIndex = 116
+UpgradeBtn.Parent = GiftPanel
+Instance.new("UICorner", UpgradeBtn).CornerRadius = UDim.new(0, 7)
+
+local BoxesBtn = Instance.new("TextButton")
+BoxesBtn.Name = "BoxesBtn"
+BoxesBtn.Size = UDim2.new(1, -20, 0, 30)
+BoxesBtn.Position = UDim2.new(0, 10, 0, 390)
+BoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 40, 20)
+BoxesBtn.BorderSizePixel = 0
+BoxesBtn.Text = "Place + Open Boxes"
+BoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
+BoxesBtn.TextSize = 11
+BoxesBtn.Font = Enum.Font.GothamBold
+BoxesBtn.ZIndex = 116
+BoxesBtn.Parent = GiftPanel
+Instance.new("UICorner", BoxesBtn).CornerRadius = UDim.new(0, 7)
+
+local OpenBoxesBtn = Instance.new("TextButton")
+OpenBoxesBtn.Name = "OpenBoxesBtn"
+OpenBoxesBtn.Size = UDim2.new(1, -20, 0, 30)
+OpenBoxesBtn.Position = UDim2.new(0, 10, 0, 426)
+OpenBoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 45, 25)
+OpenBoxesBtn.BorderSizePixel = 0
+OpenBoxesBtn.Text = "Open Boxes"
+OpenBoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
+OpenBoxesBtn.TextSize = 11
+OpenBoxesBtn.Font = Enum.Font.GothamBold
+OpenBoxesBtn.ZIndex = 116
+OpenBoxesBtn.Parent = GiftPanel
+Instance.new("UICorner", OpenBoxesBtn).CornerRadius = UDim.new(0, 7)
+
 LowestProfitCountBox.FocusLost:Connect(function()
     local count = math.floor(tonumber(LowestProfitCountBox.Text) or 0)
     if count < 1 then
@@ -507,7 +564,7 @@ end
 
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0, 230, 0, 44)
-StatusLabel.Position = UDim2.new(0, 10, 0, 742)
+StatusLabel.Position = UDim2.new(0, 10, 0, 648)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Text = "Loading..."
 StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
@@ -519,7 +576,6 @@ StatusLabel.TextWrapped = true
 StatusLabel.Parent = MainFrame
 
 local CollectBtn   = createButton("CollectToggle", 30, "Auto Collect: OFF")
-local UpgradeBtn   = createButton("UpgradeToggle", 64, "Auto Upgrade: OFF")
 
 -- ============================================
 -- AUTO UPGRADE RARITY + MUTATION FILTERS
@@ -538,30 +594,30 @@ local PickupRangeDropList
 
 local UpgradeRarityDropBtn = Instance.new("TextButton")
 UpgradeRarityDropBtn.Name = "UpgradeRarityDrop"
-UpgradeRarityDropBtn.Size = UDim2.new(0, 106, 0, 30)
-UpgradeRarityDropBtn.Position = UDim2.new(0, 15, 0, 98)
+UpgradeRarityDropBtn.Size = UDim2.new(0, 96, 0, 28)
+UpgradeRarityDropBtn.Position = UDim2.new(0, 10, 0, 354)
 UpgradeRarityDropBtn.BackgroundColor3 = Color3.fromRGB(28, 42, 62)
 UpgradeRarityDropBtn.BorderSizePixel = 0
 UpgradeRarityDropBtn.Text = "Rarity: ▼ All"
 UpgradeRarityDropBtn.TextColor3 = Color3.fromRGB(150, 205, 255)
 UpgradeRarityDropBtn.TextSize = 10
 UpgradeRarityDropBtn.Font = Enum.Font.GothamBold
-UpgradeRarityDropBtn.ZIndex = 50
-UpgradeRarityDropBtn.Parent = MainFrame
+UpgradeRarityDropBtn.ZIndex = 116
+UpgradeRarityDropBtn.Parent = GiftPanel
 Instance.new("UICorner", UpgradeRarityDropBtn).CornerRadius = UDim.new(0, 8)
 
 local UpgradeMutationDropBtn = Instance.new("TextButton")
 UpgradeMutationDropBtn.Name = "UpgradeMutationDrop"
-UpgradeMutationDropBtn.Size = UDim2.new(0, 106, 0, 30)
-UpgradeMutationDropBtn.Position = UDim2.new(0, 129, 0, 98)
+UpgradeMutationDropBtn.Size = UDim2.new(0, 96, 0, 28)
+UpgradeMutationDropBtn.Position = UDim2.new(0, 114, 0, 354)
 UpgradeMutationDropBtn.BackgroundColor3 = Color3.fromRGB(48, 34, 62)
 UpgradeMutationDropBtn.BorderSizePixel = 0
 UpgradeMutationDropBtn.Text = "Mutation: ▼ All"
 UpgradeMutationDropBtn.TextColor3 = Color3.fromRGB(220, 180, 255)
 UpgradeMutationDropBtn.TextSize = 10
 UpgradeMutationDropBtn.Font = Enum.Font.GothamBold
-UpgradeMutationDropBtn.ZIndex = 50
-UpgradeMutationDropBtn.Parent = MainFrame
+UpgradeMutationDropBtn.ZIndex = 116
+UpgradeMutationDropBtn.Parent = GiftPanel
 Instance.new("UICorner", UpgradeMutationDropBtn).CornerRadius = UDim.new(0, 8)
 
 -- AUTO UPGRADE FILTERS ENABLED:
@@ -573,16 +629,16 @@ UpgradeMutationDropBtn.Visible = true
 
 local UpgradeRarityDropList = Instance.new("ScrollingFrame")
 UpgradeRarityDropList.Name = "UpgradeRarityDropList"
-UpgradeRarityDropList.Size = UDim2.new(0, 220, 0, 180)
-UpgradeRarityDropList.Position = UDim2.new(0, 15, 0, 130)
+UpgradeRarityDropList.Size = UDim2.new(0, 200, 0, 150)
+UpgradeRarityDropList.Position = UDim2.new(0, 10, 0, 384)
 UpgradeRarityDropList.BackgroundColor3 = Color3.fromRGB(20, 28, 40)
 UpgradeRarityDropList.BorderSizePixel = 0
 UpgradeRarityDropList.Visible = false
 UpgradeRarityDropList.ScrollBarThickness = 4
 UpgradeRarityDropList.CanvasSize =
     UDim2.new(0, 0, 0, #UPGRADE_RARITY_OPTIONS * 26)
-UpgradeRarityDropList.ZIndex = 60
-UpgradeRarityDropList.Parent = MainFrame
+UpgradeRarityDropList.ZIndex = 130
+UpgradeRarityDropList.Parent = GiftPanel
 Instance.new("UICorner", UpgradeRarityDropList).CornerRadius = UDim.new(0, 7)
 
 local upgradeRarityListLayout = Instance.new("UIListLayout")
@@ -591,16 +647,16 @@ upgradeRarityListLayout.Parent = UpgradeRarityDropList
 
 local UpgradeMutationDropList = Instance.new("ScrollingFrame")
 UpgradeMutationDropList.Name = "UpgradeMutationDropList"
-UpgradeMutationDropList.Size = UDim2.new(0, 220, 0, 180)
-UpgradeMutationDropList.Position = UDim2.new(0, 15, 0, 130)
+UpgradeMutationDropList.Size = UDim2.new(0, 200, 0, 150)
+UpgradeMutationDropList.Position = UDim2.new(0, 10, 0, 384)
 UpgradeMutationDropList.BackgroundColor3 = Color3.fromRGB(32, 22, 42)
 UpgradeMutationDropList.BorderSizePixel = 0
 UpgradeMutationDropList.Visible = false
 UpgradeMutationDropList.ScrollBarThickness = 4
 UpgradeMutationDropList.CanvasSize =
     UDim2.new(0, 0, 0, #UPGRADE_MUTATION_OPTIONS * 26)
-UpgradeMutationDropList.ZIndex = 65
-UpgradeMutationDropList.Parent = MainFrame
+UpgradeMutationDropList.ZIndex = 135
+UpgradeMutationDropList.Parent = GiftPanel
 Instance.new("UICorner", UpgradeMutationDropList).CornerRadius = UDim.new(0, 7)
 
 local upgradeMutationListLayout = Instance.new("UIListLayout")
@@ -629,7 +685,7 @@ for i, rarityName in ipairs(UPGRADE_RARITY_OPTIONS) do
     item.Font = Enum.Font.Gotham
     item.TextXAlignment = Enum.TextXAlignment.Left
     item.LayoutOrder = i
-    item.ZIndex = 61
+    item.ZIndex = 131
     item.Parent = UpgradeRarityDropList
 
     item.MouseButton1Click:Connect(function()
@@ -658,7 +714,7 @@ for i, mutationName in ipairs(UPGRADE_MUTATION_OPTIONS) do
     item.Font = Enum.Font.Gotham
     item.TextXAlignment = Enum.TextXAlignment.Left
     item.LayoutOrder = i
-    item.ZIndex = 66
+    item.ZIndex = 136
     item.Parent = UpgradeMutationDropList
 
     item.MouseButton1Click:Connect(function()
@@ -725,7 +781,7 @@ UpgradeMutationDropBtn.MouseButton1Click:Connect(function()
         .. mutationLabel
 end)
 
-local LuckyBtn     = createButton("LuckyToggle", 132, "Lucky Block: OFF")
+local LuckyBtn     = createButton("LuckyToggle", 64, "Lucky Block: OFF")
 
 -- ============================================
 -- LUCKY BLOCK TYPE FILTER
@@ -734,7 +790,7 @@ local LuckyBtn     = createButton("LuckyToggle", 132, "Lucky Block: OFF")
 local LuckyTypeDropBtn = Instance.new("TextButton")
 LuckyTypeDropBtn.Name = "LuckyTypeDrop"
 LuckyTypeDropBtn.Size = UDim2.new(0, 220, 0, 30)
-LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 166)
+LuckyTypeDropBtn.Position = UDim2.new(0, 15, 0, 98)
 LuckyTypeDropBtn.BackgroundColor3 = Color3.fromRGB(58, 45, 22)
 LuckyTypeDropBtn.BorderSizePixel = 0
 LuckyTypeDropBtn.Text = "Lucky Type: ▼  " .. selectedLuckyBlockType
@@ -748,7 +804,7 @@ Instance.new("UICorner", LuckyTypeDropBtn).CornerRadius = UDim.new(0, 8)
 LuckyTypeDropList = Instance.new("ScrollingFrame")
 LuckyTypeDropList.Name = "LuckyTypeDropList"
 LuckyTypeDropList.Size = UDim2.new(0, 220, 0, 190)
-LuckyTypeDropList.Position = UDim2.new(0, 15, 0, 198)
+LuckyTypeDropList.Position = UDim2.new(0, 15, 0, 130)
 LuckyTypeDropList.BackgroundColor3 = Color3.fromRGB(35, 28, 18)
 LuckyTypeDropList.BorderSizePixel = 0
 LuckyTypeDropList.Visible = false
@@ -795,10 +851,9 @@ LuckyTypeDropBtn.MouseButton1Click:Connect(function()
     LuckyTypeDropList.Visible = not LuckyTypeDropList.Visible
 end)
 
-local RebirthBtn   = createButton("RebirthToggle", 200, "Auto Rebirth: OFF")
-local JumpBtn      = createButton("JumpToggle", 234, "Auto +10 Jump: OFF")
-local BoxesAutoBtn = createButton("BoxesAutoToggle", 268, "Auto Place+Open Boxes: OFF")
-local InvisBtn     = createButton("InvisToggle", 302, "Invis Cloak: OFF")
+local RebirthBtn   = createButton("RebirthToggle", 132, "Auto Rebirth: OFF")
+local JumpBtn      = createButton("JumpToggle", 166, "Auto +10 Jump: OFF")
+local InvisBtn     = createButton("InvisToggle", 200, "Invis Cloak: OFF")
 
 -- 10-slot pickup ranges: 1-10, 11-20, ... 91-100.
 -- These are non-overlapping groups of exactly 10 slots each.
@@ -817,7 +872,7 @@ local selectedPickupRange = PICKUP_RANGE_OPTIONS[1]
 local PickupRangeDropBtn = Instance.new("TextButton")
 PickupRangeDropBtn.Name = "PickupRangeDrop"
 PickupRangeDropBtn.Size = UDim2.new(0, 140, 0, 30)
-PickupRangeDropBtn.Position = UDim2.new(0, 15, 0, 344)
+PickupRangeDropBtn.Position = UDim2.new(0, 15, 0, 234)
 PickupRangeDropBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
 PickupRangeDropBtn.BorderSizePixel = 0
 PickupRangeDropBtn.Text = "▼  " .. selectedPickupRange.label
@@ -831,7 +886,7 @@ Instance.new("UICorner", PickupRangeDropBtn).CornerRadius = UDim.new(0, 8)
 local PickupBtn = Instance.new("TextButton")
 PickupBtn.Name = "PickupBtn"
 PickupBtn.Size = UDim2.new(0, 72, 0, 30)
-PickupBtn.Position = UDim2.new(0, 163, 0, 344)
+PickupBtn.Position = UDim2.new(0, 163, 0, 234)
 PickupBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 70)
 PickupBtn.BorderSizePixel = 0
 PickupBtn.Text = "Pick Up"
@@ -845,7 +900,7 @@ Instance.new("UICorner", PickupBtn).CornerRadius = UDim.new(0, 8)
 PickupRangeDropList = Instance.new("ScrollingFrame")
 PickupRangeDropList.Name = "PickupRangeDropList"
 PickupRangeDropList.Size = UDim2.new(0, 220, 0, 156)
-PickupRangeDropList.Position = UDim2.new(0, 15, 0, 376)
+PickupRangeDropList.Position = UDim2.new(0, 15, 0, 266)
 PickupRangeDropList.BackgroundColor3 = Color3.fromRGB(25, 24, 42)
 PickupRangeDropList.BorderSizePixel = 0
 PickupRangeDropList.Visible = false
@@ -897,7 +952,7 @@ end)
 local RandomPickupCountBox = Instance.new("TextBox")
 RandomPickupCountBox.Name = "RandomPickupCount"
 RandomPickupCountBox.Size = UDim2.new(0, 140, 0, 30)
-RandomPickupCountBox.Position = UDim2.new(0, 15, 0, 378)
+RandomPickupCountBox.Position = UDim2.new(0, 15, 0, 268)
 RandomPickupCountBox.BackgroundColor3 = Color3.fromRGB(37, 37, 48)
 RandomPickupCountBox.BorderSizePixel = 0
 RandomPickupCountBox.PlaceholderText = "Random pick count"
@@ -913,7 +968,7 @@ Instance.new("UICorner", RandomPickupCountBox).CornerRadius = UDim.new(0, 8)
 local RandomPickupBtn = Instance.new("TextButton")
 RandomPickupBtn.Name = "RandomPickupBtn"
 RandomPickupBtn.Size = UDim2.new(0, 72, 0, 30)
-RandomPickupBtn.Position = UDim2.new(0, 163, 0, 378)
+RandomPickupBtn.Position = UDim2.new(0, 163, 0, 268)
 RandomPickupBtn.BackgroundColor3 = Color3.fromRGB(45, 35, 70)
 RandomPickupBtn.BorderSizePixel = 0
 RandomPickupBtn.Text = "Pick Up"
@@ -933,14 +988,13 @@ RandomPickupCountBox.FocusLost:Connect(function()
     RandomPickupCountBox.Text = tostring(count)
 end)
 
-local PlaceBtn     = createButton("PlaceBtn", 412, "Place Slimes (CURRENT CASH first)")
-local BoxesBtn     = createButton("BoxesBtn", 446, "Place + Open Boxes")
+local PlaceBtn     = createButton("PlaceBtn", 302, "Place Slimes (CURRENT CASH first)")
 
 -- Side-by-side: Place Boxes | Open Boxes
 local PlaceBoxesBtn = Instance.new("TextButton")
 PlaceBoxesBtn.Name = "PlaceBoxesBtn"
-PlaceBoxesBtn.Size = UDim2.new(0, 106, 0, 30)
-PlaceBoxesBtn.Position = UDim2.new(0, 15, 0, 480)
+PlaceBoxesBtn.Size = UDim2.new(0, 220, 0, 30)
+PlaceBoxesBtn.Position = UDim2.new(0, 15, 0, 336)
 PlaceBoxesBtn.BackgroundColor3 = Color3.fromRGB(40, 55, 40)
 PlaceBoxesBtn.BorderSizePixel = 0
 PlaceBoxesBtn.Text = "Place Boxes"
@@ -949,19 +1003,6 @@ PlaceBoxesBtn.TextSize = 11
 PlaceBoxesBtn.Font = Enum.Font.GothamBold
 PlaceBoxesBtn.Parent = MainFrame
 Instance.new("UICorner", PlaceBoxesBtn).CornerRadius = UDim.new(0, 8)
-
-local OpenBoxesBtn = Instance.new("TextButton")
-OpenBoxesBtn.Name = "OpenBoxesBtn"
-OpenBoxesBtn.Size = UDim2.new(0, 106, 0, 30)
-OpenBoxesBtn.Position = UDim2.new(0, 129, 0, 480)
-OpenBoxesBtn.BackgroundColor3 = Color3.fromRGB(55, 45, 25)
-OpenBoxesBtn.BorderSizePixel = 0
-OpenBoxesBtn.Text = "Open Boxes"
-OpenBoxesBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
-OpenBoxesBtn.TextSize = 11
-OpenBoxesBtn.Font = Enum.Font.GothamBold
-OpenBoxesBtn.Parent = MainFrame
-Instance.new("UICorner", OpenBoxesBtn).CornerRadius = UDim.new(0, 8)
 
 -- ============================================
 -- MANUAL PICK / PLACE DUAL FILTERS
@@ -990,7 +1031,7 @@ do
 
     local PickFilterLabel = Instance.new("TextLabel")
     PickFilterLabel.Size = UDim2.new(0, 220, 0, 16)
-    PickFilterLabel.Position = UDim2.new(0, 15, 0, 518)
+    PickFilterLabel.Position = UDim2.new(0, 15, 0, 374)
     PickFilterLabel.BackgroundTransparency = 1
     PickFilterLabel.Text = "Pick Up by Rarity + Mutation:"
     PickFilterLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
@@ -1001,7 +1042,7 @@ do
 
     local PlaceFilterLabel = Instance.new("TextLabel")
     PlaceFilterLabel.Size = UDim2.new(0, 220, 0, 16)
-    PlaceFilterLabel.Position = UDim2.new(0, 15, 0, 606)
+    PlaceFilterLabel.Position = UDim2.new(0, 15, 0, 462)
     PlaceFilterLabel.BackgroundTransparency = 1
     PlaceFilterLabel.Text = "Place by Rarity + Mutation:"
     PlaceFilterLabel.TextColor3 = Color3.fromRGB(210, 180, 255)
@@ -1096,7 +1137,7 @@ do
 
     ManualFilters.pickRarityButton, ManualFilters.pickRarityList =
         makeFilterDropdown(
-            "PickRarityFilter", 15, 536, 566, "R",
+            "PickRarityFilter", 15, 392, 422, "R",
             rarityOptions, "pickRarity",
             Color3.fromRGB(35, 40, 55),
             Color3.fromRGB(185, 210, 255),
@@ -1107,7 +1148,7 @@ do
 
     ManualFilters.pickMutationButton, ManualFilters.pickMutationList =
         makeFilterDropdown(
-            "PickMutationFilter", 129, 536, 566, "M",
+            "PickMutationFilter", 129, 392, 422, "M",
             mutationOptions, "pickMutation",
             Color3.fromRGB(48, 34, 62),
             Color3.fromRGB(225, 195, 255),
@@ -1119,7 +1160,7 @@ do
     ManualFilters.pickButton = Instance.new("TextButton")
     ManualFilters.pickButton.Name = "PickDualFilterBtn"
     ManualFilters.pickButton.Size = UDim2.new(0, 220, 0, 28)
-    ManualFilters.pickButton.Position = UDim2.new(0, 15, 0, 570)
+    ManualFilters.pickButton.Position = UDim2.new(0, 15, 0, 426)
     ManualFilters.pickButton.BackgroundColor3 = Color3.fromRGB(50, 40, 80)
     ManualFilters.pickButton.BorderSizePixel = 0
     ManualFilters.pickButton.Text = "Pick Matching Players"
@@ -1131,7 +1172,7 @@ do
 
     ManualFilters.placeRarityButton, ManualFilters.placeRarityList =
         makeFilterDropdown(
-            "PlaceRarityFilter", 15, 624, 654, "R",
+            "PlaceRarityFilter", 15, 480, 510, "R",
             rarityOptions, "placeRarity",
             Color3.fromRGB(35, 48, 44),
             Color3.fromRGB(175, 230, 195),
@@ -1142,7 +1183,7 @@ do
 
     ManualFilters.placeMutationButton, ManualFilters.placeMutationList =
         makeFilterDropdown(
-            "PlaceMutationFilter", 129, 624, 654, "M",
+            "PlaceMutationFilter", 129, 480, 510, "M",
             mutationOptions, "placeMutation",
             Color3.fromRGB(45, 35, 65),
             Color3.fromRGB(225, 205, 255),
@@ -1154,7 +1195,7 @@ do
     ManualFilters.placeButton = Instance.new("TextButton")
     ManualFilters.placeButton.Name = "PlaceDualFilterBtn"
     ManualFilters.placeButton.Size = UDim2.new(0, 220, 0, 28)
-    ManualFilters.placeButton.Position = UDim2.new(0, 15, 0, 658)
+    ManualFilters.placeButton.Position = UDim2.new(0, 15, 0, 514)
     ManualFilters.placeButton.BackgroundColor3 = Color3.fromRGB(48, 38, 68)
     ManualFilters.placeButton.BorderSizePixel = 0
     ManualFilters.placeButton.Text = "Place Matching Players"
@@ -1638,10 +1679,8 @@ local function setJumpUpgradeState(on)
     JumpBtn.BackgroundColor3 = on and Color3.fromRGB(30, 60, 40) or Color3.fromRGB(40, 40, 50)
 end
 local function setBoxesAutoState(on)
+    -- Auto Place+Open Boxes removed from GUI; state kept for stopAll safety.
     boxesAutoEnabled = on
-    BoxesAutoBtn.Text = on and "Auto Place+Open Boxes: ON" or "Auto Place+Open Boxes: OFF"
-    BoxesAutoBtn.TextColor3 = on and Color3.fromRGB(255, 200, 80) or Color3.fromRGB(255, 90, 90)
-    BoxesAutoBtn.BackgroundColor3 = on and Color3.fromRGB(60, 45, 20) or Color3.fromRGB(40, 40, 50)
 end
 local function setInvisState(on)
     invisEnabled = on
@@ -1684,7 +1723,6 @@ end)
 LuckyBtn.MouseButton1Click:Connect(function() setLuckyState(not luckyEnabled) end)
 RebirthBtn.MouseButton1Click:Connect(function() setRebirthState(not rebirthEnabled) end)
 JumpBtn.MouseButton1Click:Connect(function() setJumpUpgradeState(not jumpUpgradeEnabled) end)
-BoxesAutoBtn.MouseButton1Click:Connect(function() setBoxesAutoState(not boxesAutoEnabled) end)
 InvisBtn.MouseButton1Click:Connect(function() setInvisState(not invisEnabled) end)
 
 -- ============================================
