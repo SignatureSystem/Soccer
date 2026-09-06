@@ -28,7 +28,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan",
+    "Spain", "Icons", "Japan", "Alternative", "Next Generation",
 }
 
 local ALL_MUTATIONS = {
@@ -59,6 +59,10 @@ local state = {
     selectedChecks = {},
     visibleItems = {},
     batchBusy = false,
+
+    -- Mutation totals panel (bottom dropdown)
+    mutationPanelOpen = false,
+    mutationSource = "All", -- All | Inventory | Placed
 }
 
 -- ============================================================
@@ -871,6 +875,50 @@ local function teleportToPlacedItem(item)
     return true, "Teleported"
 end
 
+-- Server requires the player near the target stand for Place Slime.
+local function getStandBySlotName(slotName)
+    local plot = getMyPlot()
+    local stands = plot and plot:FindFirstChild("Stands")
+    if not stands then
+        return nil
+    end
+    return stands:FindFirstChild(tostring(slotName))
+end
+
+local function teleportToStandSlot(slotName, standModel)
+    local root = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return false
+    end
+
+    local stand = standModel or getStandBySlotName(slotName)
+    if not stand then
+        return false
+    end
+
+    local part =
+        stand.PrimaryPart
+        or stand:FindFirstChild("Main")
+        or stand:FindFirstChildWhichIsA("BasePart", true)
+
+    if not part then
+        return false
+    end
+
+    if part:IsA("Model") then
+        part = part.PrimaryPart or part:FindFirstChildWhichIsA("BasePart", true)
+    end
+    if not part or not part:IsA("BasePart") then
+        return false
+    end
+
+    root.CFrame = part.CFrame * CFrame.new(0, 3, 3)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+    return true
+end
+
 local function getItemKey(item)
     if not item then
         return nil
@@ -1274,6 +1322,276 @@ AutoRefreshBtn.TextSize = 9
 AutoRefreshBtn.Font = Enum.Font.GothamBold
 AutoRefreshBtn.Parent = Main
 Instance.new("UICorner", AutoRefreshBtn).CornerRadius = UDim.new(0, 6)
+
+-- ============================================================
+-- MUTATION TOTALS — small arrow at bottom of main frame.
+-- Opens a panel listing quantity of each mutation.
+-- Filters: Inventory / Placed / All (totals only).
+-- ============================================================
+
+local MutationArrowBtn = Instance.new("TextButton")
+MutationArrowBtn.Name = "MutationArrow"
+MutationArrowBtn.Size = UDim2.new(0, 28, 0, 16)
+MutationArrowBtn.Position = UDim2.new(0.5, -14, 1, -4)
+MutationArrowBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+MutationArrowBtn.BorderSizePixel = 0
+MutationArrowBtn.Text = "v"
+MutationArrowBtn.TextColor3 = Color3.fromRGB(210, 210, 230)
+MutationArrowBtn.TextSize = 11
+MutationArrowBtn.Font = Enum.Font.GothamBold
+MutationArrowBtn.ZIndex = 55
+MutationArrowBtn.Parent = Main
+Instance.new("UICorner", MutationArrowBtn).CornerRadius = UDim.new(0, 5)
+do
+    local s = Instance.new("UIStroke", MutationArrowBtn)
+    s.Color = Color3.fromRGB(80, 80, 105)
+    s.Thickness = 1
+end
+
+local MutationPanel = Instance.new("Frame")
+MutationPanel.Name = "MutationPanel"
+MutationPanel.Size = UDim2.new(0, 320, 0, 250)
+MutationPanel.Position = UDim2.new(0.5, -160, 1, 6)
+MutationPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 32)
+MutationPanel.BackgroundTransparency = 0.02
+MutationPanel.BorderSizePixel = 0
+MutationPanel.Visible = false
+MutationPanel.ClipsDescendants = true
+MutationPanel.ZIndex = 60
+MutationPanel.Parent = Main
+Instance.new("UICorner", MutationPanel).CornerRadius = UDim.new(0, 8)
+do
+    local s = Instance.new("UIStroke", MutationPanel)
+    s.Color = Color3.fromRGB(85, 85, 110)
+    s.Thickness = 1.5
+end
+
+local MutationPanelTitle = Instance.new("TextLabel")
+MutationPanelTitle.Size = UDim2.new(1, -12, 0, 22)
+MutationPanelTitle.Position = UDim2.new(0, 8, 0, 4)
+MutationPanelTitle.BackgroundTransparency = 1
+MutationPanelTitle.Text = "Mutation totals"
+MutationPanelTitle.TextColor3 = Color3.fromRGB(235, 235, 245)
+MutationPanelTitle.TextSize = 11
+MutationPanelTitle.Font = Enum.Font.GothamBold
+MutationPanelTitle.TextXAlignment = Enum.TextXAlignment.Left
+MutationPanelTitle.ZIndex = 61
+MutationPanelTitle.Parent = MutationPanel
+
+local MutationFilterRow = Instance.new("Frame")
+MutationFilterRow.Size = UDim2.new(1, -12, 0, 24)
+MutationFilterRow.Position = UDim2.new(0, 6, 0, 28)
+MutationFilterRow.BackgroundTransparency = 1
+MutationFilterRow.ZIndex = 61
+MutationFilterRow.Parent = MutationPanel
+
+local mutationFilterButtons = {}
+
+local function makeMutFilterCheck(name, x)
+    local btn = Instance.new("TextButton")
+    btn.Name = "MutFilter_" .. name
+    btn.Size = UDim2.new(0, 96, 0, 22)
+    btn.Position = UDim2.new(0, x, 0, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(38, 38, 50)
+    btn.BorderSizePixel = 0
+    btn.Text = "[ ] " .. name
+    btn.TextColor3 = Color3.fromRGB(190, 190, 205)
+    btn.TextSize = 10
+    btn.Font = Enum.Font.GothamBold
+    btn.ZIndex = 62
+    btn.Parent = MutationFilterRow
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    mutationFilterButtons[name] = btn
+    return btn
+end
+
+makeMutFilterCheck("Inventory", 0)
+makeMutFilterCheck("Placed", 102)
+makeMutFilterCheck("All", 204)
+
+local function updateMutationFilterVisuals()
+    for name, btn in pairs(mutationFilterButtons) do
+        local on = state.mutationSource == name
+        btn.Text = (on and "[X] " or "[ ] ") .. name
+        btn.BackgroundColor3 = on
+            and Color3.fromRGB(48, 70, 55)
+            or Color3.fromRGB(38, 38, 50)
+        btn.TextColor3 = on
+            and Color3.fromRGB(140, 255, 170)
+            or Color3.fromRGB(190, 190, 205)
+    end
+end
+
+local MutationList = Instance.new("ScrollingFrame")
+MutationList.Name = "MutationList"
+MutationList.Size = UDim2.new(1, -12, 0, 180)
+MutationList.Position = UDim2.new(0, 6, 0, 56)
+MutationList.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+MutationList.BorderSizePixel = 0
+MutationList.ScrollBarThickness = 4
+MutationList.CanvasSize = UDim2.new(0, 0, 0, 0)
+MutationList.ZIndex = 61
+MutationList.Parent = MutationPanel
+Instance.new("UICorner", MutationList).CornerRadius = UDim.new(0, 6)
+
+local MutationListLayout = Instance.new("UIListLayout")
+MutationListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+MutationListLayout.Padding = UDim.new(0, 2)
+MutationListLayout.Parent = MutationList
+
+local MutationEmptyLabel = Instance.new("TextLabel")
+MutationEmptyLabel.Size = UDim2.new(1, -8, 0, 24)
+MutationEmptyLabel.Position = UDim2.new(0, 4, 0, 4)
+MutationEmptyLabel.BackgroundTransparency = 1
+MutationEmptyLabel.Text = "No slimes found"
+MutationEmptyLabel.TextColor3 = Color3.fromRGB(150, 150, 165)
+MutationEmptyLabel.TextSize = 10
+MutationEmptyLabel.Font = Enum.Font.Gotham
+MutationEmptyLabel.Visible = false
+MutationEmptyLabel.ZIndex = 62
+MutationEmptyLabel.Parent = MutationList
+
+local function clearMutationListRows()
+    for _, child in ipairs(MutationList:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+end
+
+local function computeMutationTotals()
+    local items, err = collectSlimes()
+    local counts = {}
+    local total = 0
+
+    if type(items) ~= "table" then
+        return counts, 0, err
+    end
+
+    for _, item in ipairs(items) do
+        if state.mutationSource == "All"
+            or item.source == state.mutationSource
+        then
+            local mut = item.mutation
+            if item.noMutation or mut == nil or mut == "" then
+                mut = "None"
+            end
+            counts[mut] = (counts[mut] or 0) + 1
+            total += 1
+        end
+    end
+
+    return counts, total, nil
+end
+
+local function refreshMutationPanel()
+    if not (MutationPanel and MutationPanel.Parent) then
+        return
+    end
+
+    updateMutationFilterVisuals()
+    clearMutationListRows()
+
+    local counts, total, err = computeMutationTotals()
+    local rows = {}
+    for mut, n in pairs(counts) do
+        table.insert(rows, { name = mut, count = n })
+    end
+
+    table.sort(rows, function(a, b)
+        if a.count ~= b.count then
+            return a.count > b.count
+        end
+        return tostring(a.name) < tostring(b.name)
+    end)
+
+    if err then
+        MutationEmptyLabel.Visible = true
+        MutationEmptyLabel.Text = tostring(err)
+        MutationList.CanvasSize = UDim2.new(0, 0, 0, 28)
+        MutationPanelTitle.Text = "Mutation totals"
+        return
+    end
+
+    if #rows == 0 then
+        MutationEmptyLabel.Visible = true
+        MutationEmptyLabel.Text = "No slimes (" .. tostring(state.mutationSource) .. ")"
+        MutationList.CanvasSize = UDim2.new(0, 0, 0, 28)
+        MutationPanelTitle.Text = "Mutation totals (0)"
+        return
+    end
+
+    MutationEmptyLabel.Visible = false
+    MutationPanelTitle.Text = string.format(
+        "Mutation totals — %d (%s)",
+        total,
+        state.mutationSource
+    )
+
+    for i, row in ipairs(rows) do
+        local line = Instance.new("Frame")
+        line.Size = UDim2.new(1, -8, 0, 22)
+        line.BackgroundColor3 = (i % 2 == 0)
+            and Color3.fromRGB(34, 34, 44)
+            or Color3.fromRGB(28, 28, 36)
+        line.BorderSizePixel = 0
+        line.LayoutOrder = i
+        line.ZIndex = 62
+        line.Parent = MutationList
+        Instance.new("UICorner", line).CornerRadius = UDim.new(0, 4)
+
+        local nameLbl = Instance.new("TextLabel")
+        nameLbl.Size = UDim2.new(1, -70, 1, 0)
+        nameLbl.Position = UDim2.new(0, 8, 0, 0)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text = tostring(row.name)
+        nameLbl.TextColor3 = Color3.fromRGB(220, 220, 235)
+        nameLbl.TextSize = 11
+        nameLbl.Font = Enum.Font.Gotham
+        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+        nameLbl.ZIndex = 63
+        nameLbl.Parent = line
+
+        local countLbl = Instance.new("TextLabel")
+        countLbl.Size = UDim2.new(0, 56, 1, 0)
+        countLbl.Position = UDim2.new(1, -60, 0, 0)
+        countLbl.BackgroundTransparency = 1
+        countLbl.Text = "x" .. tostring(row.count)
+        countLbl.TextColor3 = Color3.fromRGB(140, 220, 255)
+        countLbl.TextSize = 11
+        countLbl.Font = Enum.Font.GothamBold
+        countLbl.TextXAlignment = Enum.TextXAlignment.Right
+        countLbl.ZIndex = 63
+        countLbl.Parent = line
+    end
+
+    MutationList.CanvasSize = UDim2.new(0, 0, 0, #rows * 24 + 4)
+end
+
+local function setMutationPanelOpen(open)
+    state.mutationPanelOpen = open == true
+    MutationPanel.Visible = state.mutationPanelOpen
+    if state.mutationPanelOpen then
+        MutationArrowBtn.Text = "^"
+        refreshMutationPanel()
+    else
+        MutationArrowBtn.Text = "v"
+    end
+end
+
+MutationArrowBtn.MouseButton1Click:Connect(function()
+    setMutationPanelOpen(not state.mutationPanelOpen)
+end)
+
+for name, btn in pairs(mutationFilterButtons) do
+    btn.MouseButton1Click:Connect(function()
+        state.mutationSource = name
+        refreshMutationPanel()
+    end)
+end
+
+updateMutationFilterVisuals()
+
 
 local function clearAllChecks()
     state.selectedChecks = {}
@@ -1794,6 +2112,10 @@ refreshList = function()
 
     updateSelectAllVisual()
 
+    if state.mutationPanelOpen then
+        pcall(refreshMutationPanel)
+    end
+
     -- If the selected placed slime disappeared after pickup/refresh,
     -- close the detail panel.
     if state.selected then
@@ -2172,6 +2494,7 @@ local function startBatchPlace(selectedInv)
         return false, "No free unlocked slot"
     end
 
+    -- Pair each selected inventory slime with a free stand (includes Alternative / Next Gen).
     local targets = {}
     local count = math.min(#selectedInv, #freeSlots)
     for i = 1, count do
@@ -2179,6 +2502,7 @@ local function startBatchPlace(selectedInv)
         table.insert(targets, {
             uid = item.uid,
             slot = freeSlots[i].name,
+            stand = freeSlots[i].stand,
             key = getItemKey(item),
             done = false,
         })
@@ -2188,11 +2512,11 @@ local function startBatchPlace(selectedInv)
 
     task.spawn(function()
         local remote = state.placeRemote
-        local deadline = os.clock() + 12
-        local lastFire = 0
+        local deadline = os.clock() + 20
+        local hopIndex = 1
 
         while Gui.Parent and os.clock() < deadline do
-            local remaining = 0
+            local remainingList = {}
             local data = getData()
 
             for _, t in ipairs(targets) do
@@ -2202,19 +2526,37 @@ local function startBatchPlace(selectedInv)
                         t.done = true
                         state.selectedChecks[t.key] = nil
                     else
-                        remaining += 1
+                        table.insert(remainingList, t)
                     end
                 end
             end
 
-            if remaining == 0 then
+            if #remainingList == 0 then
                 break
             end
 
-            if os.clock() - lastFire >= 0.05 then
-                lastFire = os.clock()
-                for _, t in ipairs(targets) do
-                    if not t.done then
+            -- Cycle hop: teleport beside each remaining stand, then fire Place.
+            -- Server near-check rejects place if you are not at the stand.
+            if hopIndex > #remainingList then
+                hopIndex = 1
+            end
+
+            local current = remainingList[hopIndex]
+            hopIndex += 1
+
+            if current then
+                teleportToStandSlot(current.slot, current.stand)
+                task.wait(0.05)
+
+                if current.uid and current.slot then
+                    pcall(function()
+                        remote:FireServer(tostring(current.slot), current.uid)
+                    end)
+                end
+
+                -- Also spam other remaining pairs while near this stand
+                for _, t in ipairs(remainingList) do
+                    if t ~= current and t.uid and t.slot then
                         pcall(function()
                             remote:FireServer(tostring(t.slot), t.uid)
                         end)
@@ -2222,8 +2564,11 @@ local function startBatchPlace(selectedInv)
                 end
             end
 
-            setBatchButtonText(string.format("Spam place %d left", remaining))
-            task.wait(0.03)
+            setBatchButtonText(string.format(
+                "TP+place %d left",
+                #remainingList
+            ))
+            task.wait(0.04)
         end
 
         local placed = 0
@@ -2459,6 +2804,10 @@ local function placeInventoryItem(item)
         return false, equipMessage
     end
 
+    -- Server requires proximity to the stand — teleport first.
+    teleportToStandSlot(slot.name, slot.stand)
+    task.wait(0.08)
+
     local fired, err = pcall(function()
         state.placeRemote:FireServer(slot.name, item.uid)
     end)
@@ -2467,8 +2816,9 @@ local function placeInventoryItem(item)
         return false, tostring(err)
     end
 
-    -- Confirm the exact UID moved into PlotSlimes.
-    local deadline = os.clock() + 3.0
+    -- Keep near the stand and re-fire briefly until confirmed.
+    local deadline = os.clock() + 4.0
+    local lastFire = 0
     while os.clock() < deadline do
         local data = getData()
         local placedSlot = findPlacedEntryByUID(data, item.uid)
@@ -2477,7 +2827,15 @@ local function placeInventoryItem(item)
             return true, "Placed in Slot " .. tostring(placedSlot)
         end
 
-        task.wait(0.10)
+        if os.clock() - lastFire >= 0.15 then
+            lastFire = os.clock()
+            teleportToStandSlot(slot.name, slot.stand)
+            pcall(function()
+                state.placeRemote:FireServer(slot.name, item.uid)
+            end)
+        end
+
+        task.wait(0.08)
     end
 
     return false, "Place sent, not confirmed"
