@@ -44,9 +44,12 @@ local MAX_LEVEL = 100
 -- and fires Upgrade Slime for every placed entry concurrently.
 -- If PlotSlimes is temporarily unavailable, it falls back to every
 -- current stand under MyPlot.Stands.
-local UPGRADE_SPAM_ROUNDS = 2
+local UPGRADE_SPAM_ROUNDS = 1
 local UPGRADE_SPAM_GAP = 0.05
 local UPGRADE_CYCLE_DELAY = 0.10
+-- Auto Upgrade batches: 25 cheapest next-upgrades, wait 2s, next 25, etc.
+local UPGRADE_BATCH_SIZE = 25
+local UPGRADE_BATCH_WAIT = 2.0
 
 local REBIRTH_INTERVAL = 5
 local JUMP_UPGRADE_INTERVAL = 0.5
@@ -4957,52 +4960,62 @@ local function doOpenBoxesOnly()
         return 0
     end
 
-    local occupiedSlots = getAllOccupiedSlots()
-    if #occupiedSlots == 0 then
-        -- Also try unopened lucky slots from plot data (all types)
-        local names = getUnopenedLuckyBlockSlots("All")
-        for _, name in ipairs(names) do
-            table.insert(occupiedSlots, { name = name })
-        end
+    -- Detect ONLY unopened lucky blocks currently on the plot.
+    -- Example: 150 unopened boxes → fire Open Lucky Block 150 times at once.
+    local slotNames = getUnopenedLuckyBlockSlots("All")
+    if type(slotNames) ~= "table" then
+        slotNames = {}
     end
 
-    if #occupiedSlots == 0 then
-        return 0
-    end
-
-    local slotNames = {}
-    local seen = {}
-    for _, slot in ipairs(occupiedSlots) do
-        local n = tostring(slot.name or slot)
-        if n ~= "" and not seen[n] then
-            seen[n] = true
-            table.insert(slotNames, n)
-        end
-    end
-
-    -- Also merge explicit unopened lucky slots
-    for _, name in ipairs(getUnopenedLuckyBlockSlots("All")) do
+    -- Deduplicate just in case
+    local unique, seen = {}, {}
+    for _, name in ipairs(slotNames) do
         local n = tostring(name)
         if n ~= "" and not seen[n] then
             seen[n] = true
-            table.insert(slotNames, n)
+            table.insert(unique, n)
         end
     end
+    slotNames = unique
 
+    local count = #slotNames
+    if count == 0 then
+        if StatusLabel then
+            StatusLabel.Text = "Open Boxes: 0 unopened lucky blocks on plot"
+        end
+        return 0
+    end
+
+    if StatusLabel then
+        StatusLabel.Text = string.format(
+            "Open Boxes: firing %d unopened boxes at once...",
+            count
+        )
+    end
+
+    -- Fire ALL opens in one simultaneous burst (N boxes → N fires)
     local fired = 0
-    local rounds = 10
-
-    for _ = 1, rounds do
-        for _, slotName in ipairs(slotNames) do
+    for _, slotName in ipairs(slotNames) do
+        task.spawn(function()
             if pcall(function()
-                remote:FireServer(slotName)
+                remote:FireServer(tostring(slotName))
             end) then
                 fired += 1
             end
-        end
+        end)
     end
 
-    return #slotNames
+    -- Brief settle so parallel fires go out before returning
+    task.wait(0.05)
+
+    if StatusLabel then
+        StatusLabel.Text = string.format(
+            "Open Boxes: fired %d unopened lucky blocks",
+            count
+        )
+    end
+
+    return count
 end
 
 -- Universal Place + Open.
@@ -6196,123 +6209,107 @@ task.spawn(function()
         end
 
         local ok, err = xpcall(function()
-            -- Read BOTH dropdown filters LIVE every cycle.
-            -- getPrioritizedUpgrades() already:
-            --   * scans the player's currently placed stands
-            --   * excludes Lucky Blocks
-            --   * excludes max-level entries
-            --   * matches selectedUpgradeRarity
-            --   * matches selectedUpgradeMutation, including event mutations
+            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 25
+            local batchWait = tonumber(UPGRADE_BATCH_WAIT) or 2.0
             local rarityAtDecision = selectedUpgradeRarity
             local mutationAtDecision = selectedUpgradeMutation
 
-            local upgrades, stats =
-                getPrioritizedUpgrades()
+            -- Fresh scan every batch: cheapest 25 → fire → wait → rescan → next 25
+            local upgrades, stats = getPrioritizedUpgrades()
 
-            -- If the user changed a dropdown while the scan was running,
-            -- discard this cycle and immediately rebuild from the new filters.
             if rarityAtDecision ~= selectedUpgradeRarity
                 or mutationAtDecision ~= selectedUpgradeMutation
             then
                 return
             end
 
-            local slots = {}
-
-            for _, info in ipairs(upgrades) do
-                if info and info.id then
-                    table.insert(
-                        slots,
-                        tostring(info.id)
-                    )
+            table.sort(upgrades, function(a, b)
+                local ac = tonumber(a and a.cost) or math.huge
+                local bc = tonumber(b and b.cost) or math.huge
+                if ac ~= bc then
+                    return ac < bc
                 end
-            end
+                local al = tonumber(a and a.level) or 1
+                local bl = tonumber(b and b.level) or 1
+                if al ~= bl then
+                    return al < bl
+                end
+                return (tonumber(a and a.id) or math.huge)
+                    < (tonumber(b and b.id) or math.huge)
+            end)
 
-            if #slots == 0 then
-                StatusLabel.Text =
-                    string.format(
-                        "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
-                        upgradeRarityDisplayName(rarityAtDecision),
-                        upgradeMutationDisplayName(mutationAtDecision),
-                        stats and stats.occupied or 0
-                    )
-
+            if #upgrades == 0 then
+                StatusLabel.Text = string.format(
+                    "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
+                    upgradeRarityDisplayName(rarityAtDecision),
+                    upgradeMutationDisplayName(mutationAtDecision),
+                    stats and stats.occupied or 0
+                )
                 task.wait(0.15)
                 return
             end
 
-            StatusLabel.Text =
-                string.format(
-                    "Auto Upgrade | R:%s + M:%s | SPAM %d matching slots",
-                    upgradeRarityDisplayName(rarityAtDecision),
-                    upgradeMutationDisplayName(mutationAtDecision),
-                    #slots
-                )
+            -- Take only the 25 cheapest from this rescan
+            local batch = {}
+            local limit = math.min(batchSize, #upgrades)
+            for i = 1, limit do
+                local info = upgrades[i]
+                if info and info.id then
+                    table.insert(batch, {
+                        id = tostring(info.id),
+                        cost = tonumber(info.cost) or 0,
+                    })
+                end
+            end
+
+            StatusLabel.Text = string.format(
+                "Auto Upgrade | R:%s M:%s | cheapest %d of %d matching (rescan each batch)",
+                upgradeRarityDisplayName(rarityAtDecision),
+                upgradeMutationDisplayName(mutationAtDecision),
+                #batch,
+                #upgrades
+            )
 
             local firedCount = 0
-
-            -- Keep the CURRENT fast all-available spam behavior,
-            -- but ONLY for slots matching BOTH selected filters.
-            for round = 1, UPGRADE_SPAM_ROUNDS do
+            for _, entry in ipairs(batch) do
                 if not upgradeEnabled then
                     break
                 end
-
-                -- Stop this batch immediately if either dropdown changes.
                 if rarityAtDecision ~= selectedUpgradeRarity
                     or mutationAtDecision ~= selectedUpgradeMutation
                 then
                     break
                 end
 
-                for _, slotName in ipairs(slots) do
-                    task.spawn(function()
-                        -- Re-check the selected filter snapshot before firing.
-                        if rarityAtDecision ~= selectedUpgradeRarity
-                            or mutationAtDecision ~= selectedUpgradeMutation
-                            or not upgradeEnabled
-                        then
-                            return
-                        end
-
-                        local fired =
-                            FireUpgradeSlot(
-                                slotName
-                            )
-
-                        if fired then
-                            firedCount += 1
-                        end
-                    end)
-                end
-
-                if round < UPGRADE_SPAM_ROUNDS then
-                    task.wait(UPGRADE_SPAM_GAP)
-                end
+                task.spawn(function()
+                    if rarityAtDecision ~= selectedUpgradeRarity
+                        or mutationAtDecision ~= selectedUpgradeMutation
+                        or not upgradeEnabled
+                    then
+                        return
+                    end
+                    if FireUpgradeSlot(entry.id) then
+                        firedCount += 1
+                    end
+                end)
             end
 
-            StatusLabel.Text =
-                string.format(
-                    "Auto Upgrade | R:%s M:%s | %d slots | %d requests",
-                    upgradeRarityDisplayName(rarityAtDecision),
-                    upgradeMutationDisplayName(mutationAtDecision),
-                    #slots,
-                    firedCount
+            -- Wait 2s so costs/levels update, then outer loop rescans for next 25
+            if upgradeEnabled then
+                StatusLabel.Text = string.format(
+                    "Auto Upgrade | fired ~%d cheapest | rescan next 25 in %.1fs...",
+                    #batch,
+                    batchWait
                 )
-
-            task.wait(UPGRADE_CYCLE_DELAY)
+                task.wait(batchWait)
+            end
         end, debug.traceback)
 
         if not ok then
-            warn(
-                "[AutoUpgrade] ERROR:",
-                err
-            )
-
+            warn("[AutoUpgrade] ERROR:", err)
             StatusLabel.Text =
                 "Auto Upgrade error: "
-                .. tostring(err):match("^[^\\n]+")
-
+                .. tostring(err):match("^[^\n]+")
             task.wait(0.25)
         end
 
