@@ -3,14 +3,13 @@
   ----------------------------------------
   Loop:
     1) Always scan for active events: Cursed, Joker, Sky, Huge
-    2) If any is active:
+    2) If any is active (Cursed / Joker / Sky / Huge ONLY):
          - Place ALL lucky boxes from inventory into free slots
-         - Open those placed boxes
-         - Pickup ONLY from slots we opened this run
-           (never touch other plot slots)
-         - Also open any lucky boxes already sitting on plot slots
-         - KEEP: Cursed, Stellar, Divine, Fallen mutations + is_huge items
-         - SELL everything else that was picked up
+         - Open those placed boxes + any existing lucky boxes already on plot
+         - NEVER open outside those events
+         - Pickup ONLY from slots opened this run (never normal player slots)
+         - KEEP on plot: Cursed, Stellar, Divine, Fallen, Huge (is_huge)
+         - SELL every other mutation/none from those pickups
          - Hop server
     3) If no target event:
          - Steal Next Generation Lucky Boxes (solidify + stand on top + prompt)
@@ -821,8 +820,8 @@ local function mutationIsKeep(mut)
     return n ~= nil and KEEP_MUTATIONS[n] == true
 end
 
--- Collect mutation strings from a PlotSlimes entry / tool / attributes
-local function collectMutationsFromEntry(entry, tool)
+-- Collect mutation strings from a PlotSlimes entry / tool / attributes / live model
+local function collectMutationsFromEntry(entry, tool, slotName)
     local found = {}
 
     local function add(v)
@@ -837,15 +836,17 @@ local function collectMutationsFromEntry(entry, tool)
         add(entry.Mutation)
         add(entry.mutationName)
         add(entry.MutationName)
+        add(entry.mut)
+        add(entry.Mut)
 
-        local eventMutations = entry.event_mutations or entry.EventMutations
+        local eventMutations = entry.event_mutations or entry.EventMutations or entry.eventMutations
         if type(eventMutations) == "table" then
             for k, v in pairs(eventMutations) do
-                if type(k) == "string" and type(v) ~= "string" then
+                if type(k) == "string" and (v == true or v == 1 or type(v) == "number") then
                     add(k)
-                elseif type(v) == "string" or type(v) == "number" then
+                elseif type(v) == "string" then
                     add(v)
-                elseif type(k) == "string" then
+                elseif type(k) == "string" and type(v) ~= "table" then
                     add(k)
                 end
             end
@@ -859,6 +860,29 @@ local function collectMutationsFromEntry(entry, tool)
         add(tool:GetAttribute("Mutation"))
         add(tool:GetAttribute("event_mutation"))
         add(tool:GetAttribute("EventMutation"))
+        add(tool:GetAttribute("eventMutation"))
+    end
+
+    -- Live placed model attributes (often more up-to-date right after open)
+    if slotName ~= nil then
+        local folder = getPlayerSlimesFolder()
+        local model = folder and folder:FindFirstChild(tostring(slotName))
+        if model then
+            add(model:GetAttribute("mutation"))
+            add(model:GetAttribute("Mutation"))
+            add(model:GetAttribute("event_mutation"))
+            add(model:GetAttribute("EventMutation"))
+            add(model:GetAttribute("Rarity"))
+            -- scan StringValues
+            for _, child in ipairs(model:GetDescendants()) do
+                if child:IsA("StringValue") or child:IsA("StringValue") then
+                    local cn = child.Name:lower()
+                    if cn:find("mut", 1, true) then
+                        add(child.Value)
+                    end
+                end
+            end
+        end
     end
 
     return found
@@ -887,18 +911,34 @@ local function entryIsHuge(entry, tool)
 end
 
 -- Keep if: Cursed/Stellar/Divine/Fallen mutation OR is_huge trait
-local function entryHasKeepMutation(entry, tool)
+-- ONLY these are kept on plot; everything else from this script's opens is sold.
+local function entryHasKeepMutation(entry, tool, slotName)
     if entryIsHuge(entry, tool) then
         return true, "huge"
     end
 
-    local found = collectMutationsFromEntry(entry, tool)
+    local found = collectMutationsFromEntry(entry, tool, slotName)
     for name in pairs(found) do
         if KEEP_MUTATIONS[name] then
             return true, name
         end
     end
     return false, nil
+end
+
+local function isStillLuckyBlockEntry(entry)
+    if type(entry) ~= "table" then
+        return false
+    end
+    if entry.production_is_lucky_block == true then
+        return true
+    end
+    local typ = string.lower(tostring(entry.Type or entry.type or ""))
+    local nm = string.lower(tostring(entry.Name or entry.name or entry.id or ""))
+    if typ:find("lucky", 1, true) or nm:find("lucky block", 1, true) then
+        return true
+    end
+    return false
 end
 
 -- Existing unopened lucky boxes already on the player's plot slots
@@ -1194,9 +1234,19 @@ local function doOpenSlots(slotNames)
         return 0
     end
 
-    setStatus(string.format("Opening %d slots...", #slotNames))
+    -- SAFETY: never open unless a target event is active
+    if not hasTargetEvent() then
+        setStatus("Open blocked — no Cursed/Joker/Sky/Huge event")
+        return 0
+    end
+
+    setStatus(string.format("Opening %d slots (event active)...", #slotNames))
     for _ = 1, 12 do
         if not enabled or hopping then
+            break
+        end
+        if not hasTargetEvent() then
+            setStatus("Event ended mid-open — stop opening")
             break
         end
         for _, name in ipairs(slotNames) do
@@ -1224,12 +1274,13 @@ local function doPickupFromSlotsExceptKeep(slotNames)
         return {}
     end
 
+    -- ONLY these slots (placed+opened by this script run)
     local targetSet = {}
     for _, s in ipairs(slotNames) do
         targetSet[tostring(s)] = true
     end
 
-    -- Snapshot inventory UIDs before pickup
+    -- Snapshot inventory UIDs before we touch anything
     local before = {}
     do
         local data = getData()
@@ -1245,11 +1296,30 @@ local function doPickupFromSlotsExceptKeep(slotNames)
         end
     end
 
+    -- Wait briefly for open results to resolve (lucky → real slime)
+    setStatus("Waiting for opens to resolve...")
+    local resolveDeadline = os.clock() + 4
+    while os.clock() < resolveDeadline and enabled and not hopping do
+        local data = getData()
+        local plotSlimes = (data and data.PlotSlimes) or {}
+        local stillLucky = 0
+        for slotName in pairs(targetSet) do
+            local entry = plotSlimes[slotName] or plotSlimes[tonumber(slotName)]
+            if type(entry) == "table" and isStillLuckyBlockEntry(entry) then
+                stillLucky += 1
+            end
+        end
+        if stillLucky == 0 then
+            break
+        end
+        task.wait(0.15)
+    end
+
     local keptOnPlot = 0
-    local deadline = os.clock() + 16
+    local deadline = os.clock() + 18
     local lastFire = 0
 
-    setStatus("Pickup opened slots (keep high muts)...")
+    setStatus("Pickup non-keep from script slots only...")
 
     while os.clock() < deadline and enabled and not hopping do
         local data = getData()
@@ -1258,13 +1328,20 @@ local function doPickupFromSlotsExceptKeep(slotNames)
 
         for slotName in pairs(targetSet) do
             local entry = plotSlimes[slotName] or plotSlimes[tonumber(slotName)]
-            if type(entry) == "table" then
-                local keep, mutName = entryHasKeepMutation(entry, nil)
+            if type(entry) ~= "table" then
+                -- Already empty / picked
+                targetSet[slotName] = nil
+            elseif isStillLuckyBlockEntry(entry) then
+                -- Still a box — leave for now (open may still be resolving)
+                table.insert(still, slotName)
+            else
+                local keep = entryHasKeepMutation(entry, nil, slotName)
                 if keep then
-                    -- Leave high-value mutation on the plot — do NOT pick up
+                    -- KEEP on plot: Cursed / Stellar / Divine / Fallen / Huge
                     keptOnPlot += 1
                     targetSet[slotName] = nil
                 else
+                    -- Any other mutation / none → pick up to sell
                     table.insert(still, slotName)
                 end
             end
@@ -1282,10 +1359,15 @@ local function doPickupFromSlotsExceptKeep(slotNames)
                 end)
             end
         end
+        setStatus(string.format(
+            "Pickup non-keep: %d left | kept on plot %d",
+            #still,
+            keptOnPlot
+        ))
         task.wait(0.03)
     end
 
-    -- UIDs newly in inventory = candidates to sell (re-check mutations)
+    -- Only NEW inventory UIDs from this pickup batch; re-check keep safety
     local sellable = {}
     local data = getData()
     if data and type(data.Inventory) == "table" then
@@ -1295,9 +1377,9 @@ local function doPickupFromSlotsExceptKeep(slotNames)
                 if u then
                     local key = tostring(u)
                     if not before[key] then
-                        local keep = entryHasKeepMutation(entry, nil)
+                        local keep = entryHasKeepMutation(entry, nil, nil)
                         if not keep then
-                            table.insert(sellable, key)
+                            table.insert(sellable, u) -- keep original type for remote
                         end
                     end
                 end
@@ -1306,15 +1388,13 @@ local function doPickupFromSlotsExceptKeep(slotNames)
     end
 
     setStatus(string.format(
-        "Pickup done | sellable %d | kept high mut / huge on plot",
-        #sellable
+        "Pickup done | sell %d | kept high mut/huge on plot %d",
+        #sellable,
+        keptOnPlot
     ))
     return sellable
 end
 
---------------------------------------------------
--- Sell only provided UIDs (never keep-mutations)
---------------------------------------------------
 local function doSellUIDs(uids)
     ensureRemotes()
     if not SellRemote then
@@ -1326,7 +1406,7 @@ local function doSellUIDs(uids)
         return 0
     end
 
-    -- Final safety filter against keep mutations
+    -- Final safety: never sell keep mutations / huge
     local safe = {}
     local data = getData()
     local inv = {}
@@ -1344,8 +1424,11 @@ local function doSellUIDs(uids)
     for _, uid in ipairs(uids) do
         local key = tostring(uid)
         local entry = inv[key]
-        if entry and not entryHasKeepMutation(entry, nil) then
-            table.insert(safe, key)
+        if entry and not entryHasKeepMutation(entry, nil, nil) then
+            table.insert(safe, uid)
+        elseif not entry then
+            -- UID list from earlier snapshot; still try sell if not known keep
+            table.insert(safe, uid)
         end
     end
 
@@ -1354,13 +1437,13 @@ local function doSellUIDs(uids)
         return 0
     end
 
-    setStatus(string.format("Selling %d (never keep-muts)...", #safe))
+    setStatus(string.format("Selling %d non-keep (script opens only)...", #safe))
     local targets = {}
     for _, uid in ipairs(safe) do
         table.insert(targets, { uid = uid, done = false })
     end
 
-    local deadline = os.clock() + 12
+    local deadline = os.clock() + 16
     local lastFire = 0
 
     while os.clock() < deadline and enabled and not hopping do
@@ -1380,7 +1463,7 @@ local function doSellUIDs(uids)
         local remaining = 0
         for _, t in ipairs(targets) do
             if not t.done then
-                if not stillHave[t.uid] then
+                if not stillHave[tostring(t.uid)] then
                     t.done = true
                 else
                     remaining += 1
@@ -1391,16 +1474,21 @@ local function doSellUIDs(uids)
             break
         end
 
-        if os.clock() - lastFire >= 0.05 then
+        if os.clock() - lastFire >= 0.04 then
             lastFire = os.clock()
             for _, t in ipairs(targets) do
                 if not t.done then
+                    -- Fire both raw and string forms — some executors/remotes differ
                     pcall(function()
                         SellRemote:FireServer(t.uid)
+                    end)
+                    pcall(function()
+                        SellRemote:FireServer(tostring(t.uid))
                     end)
                 end
             end
         end
+        setStatus(string.format("Selling non-keep: %d left", remaining))
         task.wait(0.03)
     end
 
@@ -1410,44 +1498,63 @@ local function doSellUIDs(uids)
             sold += 1
         end
     end
-    setStatus(string.format("Sold %d / %d", sold, #targets))
+    setStatus(string.format("Sold %d / %d non-keep", sold, #targets))
     return sold
 end
 
---------------------------------------------------
--- Full event pipeline
---------------------------------------------------
 local function runEventPipeline()
+    -- Hard gate: only run open/pickup/sell during target events
+    -- (Cursed / Joker / Sky / Huge). Main loop also checks this.
     local active = getActiveTargetEvents()
+    if #active == 0 then
+        setStatus("No target event — skip pipeline")
+        return
+    end
+
     setStatus("EVENT: " .. table.concat(active, ", ") .. " — place + open boxes")
 
     ensureRemotes()
     toBase()
     task.wait(0.2)
 
-    -- Lucky boxes already on the plot (open these too)
+    -- Re-check event still active before any open
+    if not hasTargetEvent() then
+        setStatus("Event ended before place — abort")
+        return
+    end
+
+    -- 1) Existing unopened lucky boxes already on plot
     local existingBoxSlots = getExistingLuckyBoxSlots()
 
-    -- Place inventory lucky boxes into free slots
+    -- 2) Place inventory lucky boxes into free slots
     local placedSlots = doPlaceAllLuckyBoxes()
     if not enabled or hopping then
         return
     end
 
-    -- Open: newly placed + any boxes that were already sitting on stands
+    -- Open targets = placed this run + existing lucky boxes on plot
+    -- Never includes normal (non-box) player slots.
     local openSlots = mergeSlotLists(placedSlots, existingBoxSlots)
 
-    if #openSlots == 0 then
+    if type(openSlots) ~= "table" or #openSlots == 0 then
         setStatus("Event active but no boxes to open — hop")
         task.wait(0.4)
         return
     end
 
+    -- Re-check event again right before opening (do not open outside events)
+    active = getActiveTargetEvents()
+    if #active == 0 then
+        setStatus("Event ended before open — abort (no open)")
+        return
+    end
+
     setStatus(string.format(
-        "Opening %d slots (%d placed + %d existing)...",
+        "Opening %d boxes (%d placed + %d existing) during %s...",
         #openSlots,
-        #placedSlots,
-        #existingBoxSlots
+        type(placedSlots) == "table" and #placedSlots or 0,
+        type(existingBoxSlots) == "table" and #existingBoxSlots or 0,
+        table.concat(active, ", ")
     ))
     task.wait(0.25)
     doOpenSlots(openSlots)
@@ -1455,9 +1562,9 @@ local function runEventPipeline()
         return
     end
 
-    task.wait(0.5)
-    setStatus("Pickup (keep Cursed/Stellar/Divine/Fallen/Huge)...")
-    -- Only from slots we opened this run (placed + existing boxes)
+    -- Event may end mid-pipeline; still finish pickup/sell for slots WE opened
+    task.wait(0.55)
+    setStatus("Pickup non-keep from opened box slots | keep Cursed/Stellar/Divine/Fallen/Huge")
     local sellable = doPickupFromSlotsExceptKeep(openSlots)
     if not enabled or hopping then
         return
