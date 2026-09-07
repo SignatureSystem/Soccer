@@ -66,7 +66,7 @@ local STAND_OFFSET = 3
 local EMPTY_SCANS_BEFORE_HOP = 3
 local SCAN_EMPTY_WAIT = 0.15
 local HOP_COOLDOWN = 2.0
-local MAX_SERVER_PLAYERS = math.huge -- no player limit; hop to any public server
+local MAX_SERVER_PLAYERS = 1
 
 --------------------------------------------------
 -- STATE
@@ -1837,9 +1837,10 @@ local function decodeJson(str)
     return nil
 end
 
-local function findAnyPublicJobId(placeId)
+local function findLowPopJobId(placeId)
     local cursor = ""
-    local candidates = {}
+    local bestId
+    local bestPlaying = math.huge
     local pages = 0
 
     while pages < 5 do
@@ -1859,17 +1860,24 @@ local function findAnyPublicJobId(placeId)
         end
 
         for _, server in ipairs(data.data) do
-            local playing = tonumber(server.playing) or 0
+            local playing = tonumber(server.playing) or 999
             local id = server.id or server.jobId
             if id
                 and tostring(id) ~= ""
                 and tostring(id) ~= tostring(game.JobId)
             then
-                table.insert(candidates, {
-                    id = tostring(id),
-                    playing = playing,
-                })
+                if playing <= MAX_SERVER_PLAYERS and playing < bestPlaying then
+                    bestPlaying = playing
+                    bestId = tostring(id)
+                    if playing == 0 then
+                        return bestId, bestPlaying
+                    end
+                end
             end
+        end
+
+        if bestId and bestPlaying <= MAX_SERVER_PLAYERS then
+            return bestId, bestPlaying
         end
 
         cursor = data.nextPageCursor
@@ -1877,18 +1885,7 @@ local function findAnyPublicJobId(placeId)
             break
         end
     end
-
-    if #candidates == 0 then
-        return nil, nil
-    end
-
-    -- Prefer lower pop when available, but NO hard player limit
-    table.sort(candidates, function(a, b)
-        return a.playing < b.playing
-    end)
-
-    local pick = candidates[1]
-    return pick.id, pick.playing
+    return bestId, bestPlaying
 end
 
 local function hopServer(reason)
@@ -1904,12 +1901,12 @@ local function hopServer(reason)
     enabled = false
     reason = reason or "hop"
 
-    setStatus("Finding any public server...")
+    setStatus("Finding <= " .. tostring(MAX_SERVER_PLAYERS) .. " player server...")
     local placeId = game.PlaceId
-    local jobId, playing = findAnyPublicJobId(placeId)
+    local jobId, playing = findLowPopJobId(placeId)
 
     if not jobId then
-        setStatus("No other public server found — retry later")
+        setStatus("No low-pop server — retry later")
         hopping = false
         enabled = true
         emptyScans = 0
