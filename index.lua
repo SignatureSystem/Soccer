@@ -1371,6 +1371,56 @@ local function resetCycleCounters()
 end
 
 -- Run Place → Open → Pickup → Sell for whatever was collected this batch
+-- ============================================================
+-- EVENT INTERRUPT: Place → Open → Pickup → Sell (then resume steal)
+-- Fires the moment Cursed / Joker / Sky / Huge becomes active.
+-- ============================================================
+local function runEventFarmPipeline()
+    local active = getActiveTargetEvents()
+    addLog("=== EVENT INTERRUPT: " .. table.concat(active, ", ")
+        .. " — stop steal → Place + Open + Pickup + Sell ===")
+
+    if LocalPlayer:GetAttribute("holdingSlime") == true then
+        setPhase("EVENT: Deposit held")
+        teleportToBase()
+        local t = os.clock() + 3
+        while LocalPlayer:GetAttribute("holdingSlime") and os.clock() < t and running do
+            task.wait(0.1)
+        end
+    end
+
+    teleportToBase()
+    task.wait(0.2)
+    if not running then return end
+
+    setPhase("EVENT: Placing all boxes")
+    pcall(doPlaceBoxesOnly)
+    task.wait(0.30)
+    if not running then return end
+
+    if hasTargetEvent() then
+        setPhase("EVENT: Opening all boxes")
+        pcall(doOpenBoxesOnly)
+        task.wait(0.90)
+        if not running then return end
+    else
+        addLog("Event ended before open — skip open")
+        setPhase("EVENT: skip open (ended)")
+    end
+
+    setPhase("EVENT: Picking up opened")
+    pcall(doPickupAllSpam)
+    task.wait(0.40)
+    if not running then return end
+
+    setPhase("EVENT: Selling non-lucky slimes")
+    pcall(doSellAllSpam)
+    task.wait(0.30)
+
+    addLog("=== EVENT PIPELINE DONE — resume stealing ===")
+    setPhase("Resume steal")
+end
+
 local function runPostCollectPipeline()
     addLog(string.format(
         "Batch collected %d — Place → (Open only if event) → Pickup → Sell",
@@ -1437,6 +1487,11 @@ local function runCycle()
         collectedThisCycle = 0
         countsByRarity[rarity] = 0
 
+        if hasTargetEvent() then
+            runEventFarmPipeline()
+            if not running then return end
+        end
+
         -- FIRST SCAN: if none of this rarity exist, skip whole batch
         if not hasLuckyBlockOfType(rarity) then
             addLog(string.format(
@@ -1458,8 +1513,22 @@ local function runCycle()
         local carryCount = 0  -- steals this trip before returning to base
 
         while running and collectedThisCycle < BATCH_SIZE do
+            if hasTargetEvent() then
+                addLog(string.format(
+                    "Event live mid-batch (%s) — interrupt steal",
+                    table.concat(getActiveTargetEvents(), ", ")
+                ))
+                if carryCount > 0 or LocalPlayer:GetAttribute("holdingSlime") == true then
+                    teleportToBase()
+                    task.wait(0.2)
+                end
+                runEventFarmPipeline()
+                if not running then return end
+                carryCount = 0
+            end
+
             setPhase(string.format(
-                "Batch %s %d/%d (carry %d/%d)",
+                "Stealing %s | %d/%d | trip %d/%d",
                 rarity,
                 collectedThisCycle,
                 BATCH_SIZE,
@@ -1648,6 +1717,19 @@ local function setRunning(on)
                         task.wait(0.15)
                         continue
                     end
+
+                    if hasTargetEvent() then
+                        local okE, errE = xpcall(runEventFarmPipeline, debug.traceback)
+                        if not okE then
+                            addLog("EVENT ERROR: " .. tostring(errE):match("^[^
+]+"))
+                            warn("[LuckyBoxCycle] event", errE)
+                        end
+                        task.wait(0.15)
+                        continue
+                    end
+
+                    setPhase("Steal pass starting")
                     local ok, err = xpcall(runCycle, debug.traceback)
                     if not ok then
                         addLog("ERROR: " .. tostring(err):match("^[^\n]+"))
@@ -1681,6 +1763,7 @@ addLog(string.format(
 ))
 addLog("On launch: Place+Open(if event)+Pickup+Sell first, then steal")
 addLog("Open ONLY during events: Cursed / Joker / Sky / Huge")
+addLog("Event start → interrupt steal → Place+Open+Pickup+Sell → resume")
 print("[LuckyBoxCycle] Loaded — wait character → startup pipeline → steal")
 
 -- UI shows STOP immediately (on by default)
