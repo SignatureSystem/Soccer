@@ -18,6 +18,11 @@
       - Then move to the NEXT LOWER rarity (never re-do current)
 
   Mechanisms reused from your AutoFarm + Slime Value Browser scripts.
+
+  OPEN RULE:
+    Lucky boxes are opened ONLY while one of these Workspace events is active:
+      event_Cursed, event_Joker, event_Sky, event_Huge
+    Outside those events: steal + place still run; Open is skipped.
 ]]
 
 local Players           = game:GetService("Players")
@@ -38,6 +43,29 @@ local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui", 10)
 local BATCH_SIZE = 100
 -- How many lucky boxes to steal in one trip before teleporting back to base
 local CARRY_BEFORE_BASE = 6
+
+-- Open Lucky Boxes ONLY during these workspace events
+local EVENT_ATTRIBUTES = {
+    "event_Cursed",
+    "event_Joker",
+    "event_Sky",
+    "event_Huge",
+}
+
+local function getActiveTargetEvents()
+    local active = {}
+    for _, attr in ipairs(EVENT_ATTRIBUTES) do
+        local v = Workspace:GetAttribute(attr)
+        if v ~= nil and v ~= false then
+            table.insert(active, attr:gsub("^event_", ""))
+        end
+    end
+    return active
+end
+
+local function hasTargetEvent()
+    return #getActiveTargetEvents() > 0
+end
 
 -- Highest value first → lowest last
 local TARGET_RARITIES = {
@@ -1135,6 +1163,16 @@ local function doOpenBoxesOnly()
         return 0
     end
 
+    -- SAFETY: only open during Cursed / Joker / Sky / Huge
+    if not hasTargetEvent() then
+        local active = getActiveTargetEvents()
+        addLog("Open BLOCKED — no Cursed/Joker/Sky/Huge event (boxes stay closed)")
+        return 0
+    end
+
+    local active = getActiveTargetEvents()
+    addLog("Open allowed during event: " .. table.concat(active, ", "))
+
     local occupied = getAllOccupiedSlots()
     local slotNames, seen = {}, {}
     for _, s in ipairs(occupied) do
@@ -1150,9 +1188,13 @@ local function doOpenBoxesOnly()
         return 0
     end
 
-    addLog(string.format("Opening %d slots (spam x10)...", #slotNames))
+    addLog(string.format("Opening %d slots (spam x10) during event...", #slotNames))
     for _ = 1, 10 do
         if not running then break end
+        if not hasTargetEvent() then
+            addLog("Event ended mid-open — stop opening")
+            break
+        end
         for _, name in ipairs(slotNames) do
             pcall(function() OpenRemote:FireServer(name) end)
         end
@@ -1208,14 +1250,43 @@ end
 -- ============================================================
 -- SELL ALL INVENTORY (spam) — from admin.lua
 -- ============================================================
-local function getInventoryUIDs()
+-- True if inventory entry is an unopened lucky box (must NOT be sold)
+local function inventoryEntryIsLuckyBlock(entry)
+    if type(entry) ~= "table" then
+        return false
+    end
+    if entry.production_is_lucky_block == true then
+        return true
+    end
+    local typ = string.lower(tostring(entry.Type or entry.type or ""))
+    local nm = string.lower(tostring(entry.Name or entry.name or entry.id or entry.Id or ""))
+    local id = string.lower(tostring(entry.id or entry.Id or ""))
+    if typ:find("lucky", 1, true) then
+        return true
+    end
+    if nm:find("lucky block", 1, true) or nm:find("luckyblock", 1, true) then
+        return true
+    end
+    if id:find("lucky", 1, true) and (id:find("block", 1, true) or nm:find("block", 1, true)) then
+        return true
+    end
+    if nm:find("lucky", 1, true) and nm:find("block", 1, true) then
+        return true
+    end
+    return false
+end
+
+-- Sell candidates: inventory UIDs that are NOT lucky boxes (opened slimes only)
+local function getSellableSlimeUIDs()
     local list = {}
     local data = getData()
-    if not data or type(data.Inventory) ~= "table" then return list end
+    if not data or type(data.Inventory) ~= "table" then
+        return list
+    end
     for _, entry in pairs(data.Inventory) do
         if type(entry) == "table" then
             local uid = entry.uid or entry.UID or entry.slimeUID
-            if uid ~= nil then
+            if uid ~= nil and not inventoryEntryIsLuckyBlock(entry) then
                 table.insert(list, tostring(uid))
             end
         end
@@ -1230,13 +1301,13 @@ local function doSellAllSpam()
         return 0
     end
 
-    local uids = getInventoryUIDs()
+    local uids = getSellableSlimeUIDs()
     if #uids == 0 then
-        addLog("Inventory empty — nothing to sell")
+        addLog("No non-lucky-block slimes to sell (lucky boxes kept)")
         return 0
     end
 
-    addLog(string.format("Selling %d inventory items (spam)...", #uids))
+    addLog(string.format("Selling %d non-lucky-block slimes (lucky boxes skipped)...", #uids))
     local deadline = os.clock() + 12
     local lastFire = 0
     local targets = {}
@@ -1302,7 +1373,7 @@ end
 -- Run Place → Open → Pickup → Sell for whatever was collected this batch
 local function runPostCollectPipeline()
     addLog(string.format(
-        "Batch collected %d — Place → Open → Pickup → Sell",
+        "Batch collected %d — Place → (Open only if event) → Pickup → Sell",
         collectedThisCycle
     ))
 
@@ -1311,10 +1382,17 @@ local function runPostCollectPipeline()
     task.wait(0.30)
     if not running then return end
 
-    setPhase("Opening boxes")
-    doOpenBoxesOnly()
-    task.wait(0.80)
-    if not running then return end
+    -- Open ONLY during Cursed / Joker / Sky / Huge
+    if hasTargetEvent() then
+        setPhase("Opening boxes (event)")
+        doOpenBoxesOnly()
+        task.wait(0.80)
+        if not running then return end
+    else
+        addLog("No target event — skip Open (boxes stay unopened on plot)")
+        setPhase("Skip open (no event)")
+        task.wait(0.15)
+    end
 
     setPhase("Picking up")
     doPickupAllSpam()
@@ -1514,16 +1592,22 @@ end
 
 -- First thing on launch: clear existing boxes / inventory before stealing
 local function runStartupPipeline()
-    addLog("=== STARTUP: Place → Open → Pickup → Sell (before steal) ===")
+    addLog("=== STARTUP: Place → Open(if event) → Pickup → Sell (before steal) ===")
     setPhase("Startup: Placing")
     pcall(doPlaceBoxesOnly)
     task.wait(0.30)
     if not running then return end
 
-    setPhase("Startup: Opening")
-    pcall(doOpenBoxesOnly)
-    task.wait(0.80)
-    if not running then return end
+    if hasTargetEvent() then
+        setPhase("Startup: Opening (event)")
+        pcall(doOpenBoxesOnly)
+        task.wait(0.80)
+        if not running then return end
+    else
+        addLog("Startup: no Cursed/Joker/Sky/Huge — skip Open")
+        setPhase("Startup: skip open")
+        task.wait(0.15)
+    end
 
     setPhase("Startup: Picking up")
     pcall(doPickupAllSpam)
@@ -1595,7 +1679,8 @@ addLog(string.format(
     BATCH_SIZE,
     CARRY_BEFORE_BASE
 ))
-addLog("On launch: Place+Open+Pickup+Sell first, then steal")
+addLog("On launch: Place+Open(if event)+Pickup+Sell first, then steal")
+addLog("Open ONLY during events: Cursed / Joker / Sky / Huge")
 print("[LuckyBoxCycle] Loaded — wait character → startup pipeline → steal")
 
 -- UI shows STOP immediately (on by default)
