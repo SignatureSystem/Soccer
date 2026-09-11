@@ -1250,43 +1250,14 @@ end
 -- ============================================================
 -- SELL ALL INVENTORY (spam) — from admin.lua
 -- ============================================================
--- True if inventory entry is an unopened lucky box (must NOT be sold)
-local function inventoryEntryIsLuckyBlock(entry)
-    if type(entry) ~= "table" then
-        return false
-    end
-    if entry.production_is_lucky_block == true then
-        return true
-    end
-    local typ = string.lower(tostring(entry.Type or entry.type or ""))
-    local nm = string.lower(tostring(entry.Name or entry.name or entry.id or entry.Id or ""))
-    local id = string.lower(tostring(entry.id or entry.Id or ""))
-    if typ:find("lucky", 1, true) then
-        return true
-    end
-    if nm:find("lucky block", 1, true) or nm:find("luckyblock", 1, true) then
-        return true
-    end
-    if id:find("lucky", 1, true) and (id:find("block", 1, true) or nm:find("block", 1, true)) then
-        return true
-    end
-    if nm:find("lucky", 1, true) and nm:find("block", 1, true) then
-        return true
-    end
-    return false
-end
-
--- Sell candidates: inventory UIDs that are NOT lucky boxes (opened slimes only)
-local function getSellableSlimeUIDs()
+local function getInventoryUIDs()
     local list = {}
     local data = getData()
-    if not data or type(data.Inventory) ~= "table" then
-        return list
-    end
+    if not data or type(data.Inventory) ~= "table" then return list end
     for _, entry in pairs(data.Inventory) do
         if type(entry) == "table" then
             local uid = entry.uid or entry.UID or entry.slimeUID
-            if uid ~= nil and not inventoryEntryIsLuckyBlock(entry) then
+            if uid ~= nil then
                 table.insert(list, tostring(uid))
             end
         end
@@ -1301,13 +1272,13 @@ local function doSellAllSpam()
         return 0
     end
 
-    local uids = getSellableSlimeUIDs()
+    local uids = getInventoryUIDs()
     if #uids == 0 then
-        addLog("No non-lucky-block slimes to sell (lucky boxes kept)")
+        addLog("Inventory empty — nothing to sell")
         return 0
     end
 
-    addLog(string.format("Selling %d non-lucky-block slimes (lucky boxes skipped)...", #uids))
+    addLog(string.format("Selling %d inventory items (spam)...", #uids))
     local deadline = os.clock() + 12
     local lastFire = 0
     local targets = {}
