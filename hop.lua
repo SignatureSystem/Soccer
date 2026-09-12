@@ -1,13 +1,11 @@
--- Minimal Backline Legends OR Next Generation Lucky Block Stealer + timer + count
--- Targets (Backline first for 8s, then fall back to NextGen if still failing):
+-- Minimal Backline Legends Lucky Block Stealer + timer + count
+-- Target ONLY:
 --   Backline Legends Lucky Block | Rarity: Backline Legends | ID: 2625
---   Next Generation Lucky Block  | Rarity: Next Generation  | ID: 2146
 -- Auto-starts on execute.
 -- Steal flow:
---   find target → solidify box → cloak → stand ON TOP → hover lock
---   → zero HoldDuration → fire prompt (up to 10 tries) → base on success
--- Fast scan; hops to lowest-pop public server (max 1 player)
--- if neither target exists.
+--   find target → solidify box → cloak → teleport EXACTLY on top (no hover lock)
+--   → zero HoldDuration → fire prompt → base on success
+-- Fast scan; hops after 20s countdown or if no Backline after empty scans.
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -17,7 +15,6 @@ local Workspace = game:GetService("Workspace")
 local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
 
--- Priority: lower number = preferred when distances are close
 local TARGETS = {
     {
         Key = "Backline Legends",
@@ -26,13 +23,6 @@ local TARGETS = {
         ID = "2625",
         Priority = 1,
     },
-    {
-        Key = "Next Generation",
-        Name = "Next Generation Lucky Block",
-        Rarity = "Next Generation",
-        ID = "2146",
-        Priority = 2,
-    },
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -40,11 +30,6 @@ local LUCKY_BLOCK_MODEL_NAMES = {
         ["Backline Legends Lucky Block"] = true,
         ["Backline Lucky Block"] = true,
         ["Backline Legends Block"] = true,
-    },
-    ["Next Generation"] = {
-        ["Next Generation Lucky Block"] = true,
-        ["NextGen Lucky Block"] = true,
-        ["Next Gen Lucky Block"] = true,
     },
 }
 
@@ -177,11 +162,6 @@ local function classifyTargetBlock(m)
     if blNames and blNames[modelName] then
         return "Backline Legends"
     end
-    local ngNames = LUCKY_BLOCK_MODEL_NAMES["Next Generation"]
-    if ngNames and ngNames[modelName] then
-        return "Next Generation"
-    end
-
     -- Backline (ID 2625)
     if idStr == "2625"
         or lowerName:find("backline", 1, true)
@@ -191,20 +171,7 @@ local function classifyTargetBlock(m)
         return "Backline Legends"
     end
 
-    -- Next Generation (ID 2146)
-    if idStr == "2146"
-        or lowerName:find("next generation", 1, true)
-        or lowerName:find("nextgen", 1, true)
-        or lowerName:find("next gen", 1, true)
-        or r:find("next gen", 1, true)
-        or r == "nextgeneration"
-        or bn:find("next generation", 1, true)
-        or bn:find("nextgen", 1, true)
-        or bn:find("next gen", 1, true)
-    then
-        return "Next Generation"
-    end
-
+    -- Next Generation intentionally ignored (Backline only)
     return nil
 end
 
@@ -453,6 +420,7 @@ local function makeLuckyBoxSolid(block)
 end
 
 
+-- Exactly on top of the box top face (small lift so HRP isn't clipped inside)
 local function standOnBoxCFrame(part)
     if not part or not part.Parent then
         return nil
@@ -491,7 +459,7 @@ end
 
 
 --------------------------------------------------
--- Full cycle-style steal: solidify → cloak → on top → hover → prompt
+-- Steal: solidify → cloak → teleport EXACTLY on top → prompt (no hover lock)
 --------------------------------------------------
 local function stealOne(preferredKind)
     -- Already holding → deposit only
@@ -504,24 +472,15 @@ local function stealOne(preferredKind)
         return "deposited"
     end
 
-    local block = getTargetLuckyBlock(preferredKind)
-    -- Fallback: if preferred kind missing, try the other / any target
-    if not block and preferredKind == "Backline Legends" then
-        block = getTargetLuckyBlock("Next Generation")
-            or getTargetLuckyBlock(nil)
-    elseif not block and preferredKind == "Next Generation" then
-        block = getTargetLuckyBlock("Backline Legends")
-            or getTargetLuckyBlock(nil)
-    elseif not block then
-        block = getTargetLuckyBlock(nil)
-    end
+    local block = getTargetLuckyBlock("Backline Legends")
+        or getTargetLuckyBlock(nil)
     if not block then
         return false
     end
 
     makeLuckyBoxSolid(block)
     pcall(activateCloak)
-    task.wait(0.15)
+    task.wait(0.1)
 
     local r = root()
     local hum = getHumanoid()
@@ -531,7 +490,7 @@ local function stealOne(preferredKind)
 
     makeLuckyBoxSolid(block)
 
-    -- Clear previous float objects
+    -- Remove any leftover float objects from older versions
     for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
         local old = r:FindFirstChild(name)
         if old then
@@ -539,122 +498,35 @@ local function stealOne(preferredKind)
         end
     end
 
-    -- BodyVelocity float
-    local bv = Instance.new("BodyVelocity")
-    bv.Name = "LuckyFloat"
-    bv.Velocity = Vector3.zero
-    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    bv.P = 1250
-    bv.Parent = r
-
-    -- BodyPosition lock
-    local bp = Instance.new("BodyPosition")
-    bp.Name = "LuckyHoverPos"
-    bp.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    bp.P = 20000
-    bp.D = 1500
-    bp.Parent = r
-
-    -- BodyGyro
-    local bg = Instance.new("BodyGyro")
-    bg.Name = "LuckyHoverGyro"
-    bg.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    bg.P = 3000
-    bg.D = 500
-    bg.Parent = r
+    -- Spawn exactly on top of the lucky box (no BodyMovers / hover lock)
+    local cf = standOnBoxCFrame(block.part)
+    if not cf then
+        return false
+    end
 
     if hum then
         pcall(function()
-            hum.PlatformStand = true
-            hum.AutoRotate = false
+            hum.PlatformStand = false
+            hum.AutoRotate = true
+            hum:ChangeState(Enum.HumanoidStateType.Running)
         end)
     end
 
-    local hovering = true
-    local hoverConn
+    r.CFrame = cf
+    r.AssemblyLinearVelocity = Vector3.zero
+    r.AssemblyAngularVelocity = Vector3.zero
+    task.wait(0.05)
 
-    local function applyHover()
-        if not hovering then
-            return false
-        end
-
-        local rr = root()
-        if not rr or not block.part or not block.part.Parent then
-            return false
-        end
-
-        local cf = standOnBoxCFrame(block.part)
-        if not cf then
-            return false
-        end
-
-        rr.CFrame = cf
-        rr.AssemblyLinearVelocity = Vector3.zero
-        rr.AssemblyAngularVelocity = Vector3.zero
-
-        if bp and bp.Parent then
-            bp.Position = cf.Position
-        end
-        if bg and bg.Parent then
-            bg.CFrame = CFrame.new(cf.Position)
-        end
-
-        -- Never sink through the box
-        local minY = block.part.Position.Y + (block.part.Size.Y * 0.5) + 1.5
-        if rr.Position.Y < minY then
-            local cf2 = standOnBoxCFrame(block.part)
-            if cf2 then
-                rr.CFrame = cf2
-            else
-                rr.CFrame = CFrame.new(rr.Position.X, minY, rr.Position.Z)
-            end
-            rr.AssemblyLinearVelocity = Vector3.zero
-        end
-
-        makeLuckyBoxSolid(block)
-        return true
-    end
-
-    hoverConn = RunService.Heartbeat:Connect(function()
-        if not hovering then
-            return
-        end
-        applyHover()
-    end)
-
-    local function cleanupHover()
-        hovering = false
-        if hoverConn then
-            hoverConn:Disconnect()
-            hoverConn = nil
-        end
-        for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
-            local rr = root()
-            local obj = rr and rr:FindFirstChild(name)
-            if obj then
-                obj:Destroy()
+    -- Re-assert position once (in case physics nudged you)
+    if block.part and block.part.Parent then
+        local cf2 = standOnBoxCFrame(block.part)
+        if cf2 then
+            r = root()
+            if r then
+                r.CFrame = cf2
+                r.AssemblyLinearVelocity = Vector3.zero
             end
         end
-        local rr = root()
-        if rr then
-            rr.AssemblyLinearVelocity = Vector3.zero
-            rr.AssemblyAngularVelocity = Vector3.zero
-        end
-        if hum then
-            pcall(function()
-                hum.PlatformStand = false
-                hum.AutoRotate = true
-            end)
-        end
-    end
-
-    -- Settle on top
-    for _ = 1, 6 do
-        if not applyHover() then
-            cleanupHover()
-            return false
-        end
-        task.wait(0.03)
     end
 
     -- Zero all prompt holds
@@ -677,8 +549,6 @@ local function stealOne(preferredKind)
     end
 
     if not prompt or not prompt.Parent then
-        -- Still try: some builds attach prompt late — fire any nearby after hover
-        cleanupHover()
         return false
     end
 
@@ -688,11 +558,16 @@ local function stealOne(preferredKind)
         prompt.MaxActivationDistance = math.max(prompt.MaxActivationDistance, 20)
     end)
 
-    -- Fire while locked on top (up to 14 tries)
     local stolen = false
     for try = 1, 14 do
-        if not applyHover() then
-            break
+        -- Stay on top each try (teleport only, no hover lock)
+        r = root()
+        if r and block.part and block.part.Parent then
+            local cf3 = standOnBoxCFrame(block.part)
+            if cf3 then
+                r.CFrame = cf3
+                r.AssemblyLinearVelocity = Vector3.zero
+            end
         end
 
         if (not prompt or not prompt.Parent) and block.model and block.model.Parent then
@@ -725,17 +600,10 @@ local function stealOne(preferredKind)
         task.wait(0.08)
     end
 
-    -- Brief settle for server register
-    for _ = 1, 5 do
-        applyHover()
-        task.wait(0.05)
-    end
-
     if LP:GetAttribute("holdingSlime") == true then
         stolen = true
     end
 
-    cleanupHover()
     return stolen == true
 end
 
@@ -976,7 +844,7 @@ pcall(function()
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "BacklineNextGenStealer"
+gui.Name = "BacklineStealer"
 gui.ResetOnSpawn = false
 gui.Parent = PG
 
@@ -995,7 +863,7 @@ btn.Size = UDim2.new(1, -20, 0, 34)
 btn.Position = UDim2.new(0, 10, 0, 8)
 btn.BackgroundColor3 = Color3.fromRGB(28, 52, 36)
 btn.BorderSizePixel = 0
-btn.Text = "Steal BL/NG: ON"
+btn.Text = "Steal Backline: ON"
 btn.TextColor3 = Color3.fromRGB(80, 255, 120)
 btn.TextSize = 14
 btn.Font = Enum.Font.GothamBold
@@ -1039,7 +907,7 @@ statusLbl.Parent = f
 
 local function setOn(on)
     enabled = on
-    btn.Text = on and "Steal BL/NG: ON" or "Steal BL/NG: OFF"
+    btn.Text = on and "Steal Backline: ON" or "Steal Backline: OFF"
     btn.TextColor3 = on
         and Color3.fromRGB(80, 255, 120)
         or Color3.fromRGB(255, 90, 90)
@@ -1054,7 +922,7 @@ local function setOn(on)
         sessionStart = os.clock() -- restart 20s countdown
         countLbl.Text = "Collected: 0"
         timeLbl.Text = string.format("Hop in: %ds", MAX_SERVER_TIME)
-        statusLbl.Text = "Scanning Backline / NextGen..."
+        statusLbl.Text = "Scanning Backline only..."
     else
         busy = false
         statusLbl.Text = "Paused"
@@ -1148,7 +1016,7 @@ task.spawn(function()
             if targetCount <= 0 then
                 emptyScans += 1
                 statusLbl.Text = string.format(
-                    "No BL/NG (%d/%d) — will hop",
+                    "No Backline (%d/%d) — will hop",
                     emptyScans,
                     EMPTY_SCANS_BEFORE_HOP
                 )
@@ -1163,46 +1031,12 @@ task.spawn(function()
             end
 
             emptyScans = 0
+            statusLbl.Text = string.format(
+                "Backline found (%d) — teleport on top",
+                blCount
+            )
 
-            ------------------------------------------
-            -- Priority: Backline first for BACKLINE_STEAL_TIMEOUT sec,
-            -- then fall back to NextGen if Backline still failing.
-            ------------------------------------------
-            local preferredKind = nil
-            if blCount > 0 then
-                if not backlineFocusStart then
-                    backlineFocusStart = os.clock()
-                end
-                local elapsed = os.clock() - backlineFocusStart
-                if elapsed < BACKLINE_STEAL_TIMEOUT then
-                    preferredKind = "Backline Legends"
-                    statusLbl.Text = string.format(
-                        "PRIORITY Backline (%.1fs/%ds) | BL:%d NG:%d",
-                        elapsed,
-                        BACKLINE_STEAL_TIMEOUT,
-                        blCount,
-                        ngCount
-                    )
-                else
-                    -- 8s of Backline attempts without success → allow NextGen
-                    preferredKind = (ngCount > 0) and "Next Generation" or "Backline Legends"
-                    statusLbl.Text = string.format(
-                        "Backline timeout → %s | BL:%d NG:%d",
-                        preferredKind == "Next Generation" and "NextGen" or "Backline",
-                        blCount,
-                        ngCount
-                    )
-                end
-            else
-                backlineFocusStart = nil
-                preferredKind = "Next Generation"
-                statusLbl.Text = string.format(
-                    "No Backline — NextGen | NG:%d",
-                    ngCount
-                )
-            end
-
-            local okSteal, result = pcall(stealOne, preferredKind)
+            local okSteal, result = pcall(stealOne, "Backline Legends")
             if not okSteal then
                 statusLbl.Text = "Steal error: " .. tostring(result):sub(1, 40)
                 warn("[HopBL/NG] stealOne", result)
@@ -1236,18 +1070,10 @@ task.spawn(function()
                     task.wait(0.1)
                 end
 
-                statusLbl.Text = "Scanning Backline / NextGen..."
+                statusLbl.Text = "Scanning Backline only..."
             else
                 -- Failed attempt; keep backlineFocusStart running
-                if preferredKind == "Backline Legends" and backlineFocusStart then
-                    local left = math.max(0, BACKLINE_STEAL_TIMEOUT - (os.clock() - backlineFocusStart))
-                    statusLbl.Text = string.format(
-                        "Backline fail — NextGen in %.1fs",
-                        left
-                    )
-                else
-                    statusLbl.Text = "Steal failed — retry"
-                end
+                statusLbl.Text = "Backline steal failed — retry"
                 task.wait(0.2)
             end
 
@@ -1260,12 +1086,10 @@ end)
 
 
 print(
-    "[BacklineNextGenStealer] targets: Backline Legends (2625) + Next Generation (2146)",
-    "| Backline priority 8s then NextGen fallback",
-    "| solidify + stand ON TOP + hover lock + zero hold prompt",
-    "| hop to <=1 player servers if neither present after",
-    EMPTY_SCANS_BEFORE_HOP,
-    "empty scans | hard hop after",
+    "[BacklineStealer] ONLY Backline Legends (ID 2625)",
+    "| teleport exactly ON TOP of box (no hover lock)",
+    "| solidify + zero hold prompt",
+    "| hop after empty scans or",
     MAX_SERVER_TIME,
-    "s in server"
+    "s countdown"
 )
