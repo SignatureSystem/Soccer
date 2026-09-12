@@ -6343,8 +6343,7 @@ task.spawn(function()
             warn("[AutoUpgrade] ERROR:", err)
             StatusLabel.Text =
                 "Auto Upgrade error: "
-                .. tostring(err):match("^[^
-]+")
+                .. tostring(err):match("^[^\n]+")
             task.wait(0.25)
         end
 
