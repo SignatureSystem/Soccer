@@ -1,5 +1,5 @@
 -- Minimal Backline Legends OR Next Generation Lucky Block Stealer + timer + count
--- Targets (steal whichever is available; prefer nearest, Backline wins ties):
+-- Targets (Backline first for 8s, then fall back to NextGen if still failing):
 --   Backline Legends Lucky Block | Rarity: Backline Legends | ID: 2625
 --   Next Generation Lucky Block  | Rarity: Next Generation  | ID: 2146
 -- Auto-starts on execute.
@@ -49,17 +49,23 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 }
 
 local STAND_OFFSET = 3
+-- If Backline is present, only try Backline for this many seconds before falling back to NextGen
+local BACKLINE_STEAL_TIMEOUT = 8
 
 local enabled, busy, total = true, false, 0
 local sessionStart = os.clock()
 
 local hopping = false
 local emptyScans = 0
+local backlineFocusStart = nil -- clock when we started exclusive Backline attempts
 
 local EMPTY_SCANS_BEFORE_HOP = 3
 local SCAN_EMPTY_WAIT = 0.15
 local HOP_COOLDOWN = 2.0
 local lastHopAt = 0
+-- Always hop after this many seconds in a server, even mid-steal
+local MAX_SERVER_TIME = 20
+
 
 local statusLbl
 
@@ -111,6 +117,7 @@ local function classifyTargetBlock(m)
         m:GetAttribute("Rarity")
         or m:GetAttribute("_Rarity")
         or m:GetAttribute("rarity")
+        or m:GetAttribute("rarityName")
     local r = rarity and tostring(rarity):lower() or ""
 
     local blockName =
@@ -127,40 +134,60 @@ local function classifyTargetBlock(m)
         or m:GetAttribute("_RegisteredID")
         or m:GetAttribute("RegisteredID")
         or m:GetAttribute("LuckyBlockID")
+        or m:GetAttribute("RegisteredId")
     local idStr = id and tostring(id) or ""
 
-    -- ValueBase children
+    -- ValueBase children (only set fields from matching child names)
     for _, childName in ipairs({
-        "ID", "Id", "RegisteredID", "_RegisteredID",
-        "Rarity", "_Rarity", "LuckyBlockName", "BlockName"
+        "ID", "Id", "RegisteredID", "_RegisteredID", "RegisteredId",
+        "Rarity", "_Rarity", "LuckyBlockName", "BlockName", "rarityName"
     }) do
         local obj = m:FindFirstChild(childName)
         if obj and obj:IsA("ValueBase") then
             local value = tostring(obj.Value)
             local vl = value:lower()
-            if idStr == "" then
+            local cn = childName:lower()
+            if idStr == "" and (cn == "id" or cn:find("registered", 1, true)) then
                 idStr = value
             end
-            if r == "" and (childName:lower():find("rarity")) then
+            if r == "" and cn:find("rarity", 1, true) then
                 r = vl
             end
-            if bn == "" and childName:lower():find("name") then
+            if bn == "" and (cn:find("name", 1, true) or cn:find("block", 1, true)) then
                 bn = vl
             end
         end
     end
 
+    -- CollectionService tags (game tags models "Backline Legends" / similar)
+    pcall(function()
+        local CS = game:GetService("CollectionService")
+        for _, tag in ipairs(CS:GetTags(m)) do
+            local tl = tostring(tag):lower()
+            if tl:find("backline", 1, true) then
+                r = r ~= "" and r or "backline legends"
+            elseif tl:find("next", 1, true) and tl:find("gen", 1, true) then
+                r = r ~= "" and r or "next generation"
+            end
+        end
+    end)
+
+    -- Exact model-name table match first
+    local blNames = LUCKY_BLOCK_MODEL_NAMES["Backline Legends"]
+    if blNames and blNames[modelName] then
+        return "Backline Legends"
+    end
+    local ngNames = LUCKY_BLOCK_MODEL_NAMES["Next Generation"]
+    if ngNames and ngNames[modelName] then
+        return "Next Generation"
+    end
+
     -- Backline (ID 2625)
     if idStr == "2625"
         or lowerName:find("backline", 1, true)
-        or r == "backline legends"
-        or r == "backline"
+        or r:find("backline", 1, true)
         or bn:find("backline", 1, true)
     then
-        return "Backline Legends"
-    end
-    local blNames = LUCKY_BLOCK_MODEL_NAMES["Backline Legends"]
-    if blNames and blNames[modelName] then
         return "Backline Legends"
     end
 
@@ -169,17 +196,12 @@ local function classifyTargetBlock(m)
         or lowerName:find("next generation", 1, true)
         or lowerName:find("nextgen", 1, true)
         or lowerName:find("next gen", 1, true)
-        or r == "next generation"
-        or r == "nextgen"
-        or r == "next gen"
+        or r:find("next gen", 1, true)
+        or r == "nextgeneration"
         or bn:find("next generation", 1, true)
         or bn:find("nextgen", 1, true)
         or bn:find("next gen", 1, true)
     then
-        return "Next Generation"
-    end
-    local ngNames = LUCKY_BLOCK_MODEL_NAMES["Next Generation"]
-    if ngNames and ngNames[modelName] then
         return "Next Generation"
     end
 
@@ -305,7 +327,8 @@ end
 --------------------------------------------------
 -- Find nearest Backline Legends target (cycle-style)
 --------------------------------------------------
-local function getTargetLuckyBlock()
+-- preferredKind: "Backline Legends" | "Next Generation" | nil (either)
+local function getTargetLuckyBlock(preferredKind)
     local live = Workspace:FindFirstChild("Live")
     local slimes = live and live:FindFirstChild("Slimes")
     if not slimes then
@@ -318,7 +341,7 @@ local function getTargetLuckyBlock()
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model") and not model:GetAttribute("Carrying") then
             local kind = classifyTargetBlock(model)
-            if kind then
+            if kind and (preferredKind == nil or kind == preferredKind) then
                 local primary =
                     model.PrimaryPart
                     or model:FindFirstChildWhichIsA("BasePart")
@@ -338,14 +361,19 @@ local function getTargetLuckyBlock()
                         bestPri = pri
                         local prompt
                         for _, d in ipairs(model:GetDescendants()) do
-                            if d:IsA("ProximityPrompt") and d.Enabled then
+                            if d:IsA("ProximityPrompt") then
                                 local at = tostring(d.ActionText or ""):lower()
-                                prompt = d
                                 if at:find("steal", 1, true)
                                     or at:find("pick", 1, true)
                                     or at:find("take", 1, true)
+                                    or at == ""
                                 then
-                                    break
+                                    prompt = d
+                                    if d.Enabled then
+                                        break
+                                    end
+                                elseif not prompt then
+                                    prompt = d
                                 end
                             end
                         end
@@ -465,7 +493,7 @@ end
 --------------------------------------------------
 -- Full cycle-style steal: solidify → cloak → on top → hover → prompt
 --------------------------------------------------
-local function stealOne()
+local function stealOne(preferredKind)
     -- Already holding → deposit only
     if LP:GetAttribute("holdingSlime") == true then
         toBase()
@@ -476,7 +504,17 @@ local function stealOne()
         return "deposited"
     end
 
-    local block = getTargetLuckyBlock()
+    local block = getTargetLuckyBlock(preferredKind)
+    -- Fallback: if preferred kind missing, try the other / any target
+    if not block and preferredKind == "Backline Legends" then
+        block = getTargetLuckyBlock("Next Generation")
+            or getTargetLuckyBlock(nil)
+    elseif not block and preferredKind == "Next Generation" then
+        block = getTargetLuckyBlock("Backline Legends")
+            or getTargetLuckyBlock(nil)
+    elseif not block then
+        block = getTargetLuckyBlock(nil)
+    end
     if not block then
         return false
     end
@@ -629,28 +667,37 @@ local function stealOne()
     local prompt = block.prompt
     if (not prompt or not prompt.Parent) and block.model then
         for _, d in ipairs(block.model:GetDescendants()) do
-            if d:IsA("ProximityPrompt") and d.Enabled then
+            if d:IsA("ProximityPrompt") then
                 prompt = d
-                break
+                if d.Enabled then
+                    break
+                end
             end
         end
     end
 
     if not prompt or not prompt.Parent then
+        -- Still try: some builds attach prompt late — fire any nearby after hover
         cleanupHover()
         return false
     end
 
-    -- Fire while locked on top (up to 10 tries)
+    pcall(function()
+        prompt.Enabled = true
+        prompt.HoldDuration = 0
+        prompt.MaxActivationDistance = math.max(prompt.MaxActivationDistance, 20)
+    end)
+
+    -- Fire while locked on top (up to 14 tries)
     local stolen = false
-    for try = 1, 10 do
+    for try = 1, 14 do
         if not applyHover() then
             break
         end
 
-        if not prompt.Parent and block.model and block.model.Parent then
+        if (not prompt or not prompt.Parent) and block.model and block.model.Parent then
             for _, d in ipairs(block.model:GetDescendants()) do
-                if d:IsA("ProximityPrompt") and d.Enabled then
+                if d:IsA("ProximityPrompt") then
                     prompt = d
                     break
                 end
@@ -658,7 +705,10 @@ local function stealOne()
         end
 
         if prompt and prompt.Parent then
-            prompt.HoldDuration = 0
+            pcall(function()
+                prompt.Enabled = true
+                prompt.HoldDuration = 0
+            end)
             attemptSteal(prompt)
         end
 
@@ -811,6 +861,7 @@ local function hopServer()
     hopping = true
     lastHopAt = os.clock()
     enabled = false
+    busy = false
 
     local placeId = game.PlaceId
 
@@ -971,6 +1022,7 @@ local function setOn(on)
     if on then
         total = 0
         emptyScans = 0
+        backlineFocusStart = nil
         sessionStart = os.clock()
         countLbl.Text = "Collected: 0"
         timeLbl.Text = "Time: 00:00"
@@ -1010,6 +1062,23 @@ task.spawn(function()
 
     while true do
         if hopping then
+            task.wait(0.2)
+            continue
+        end
+
+        -- Hard time limit: leave server after MAX_SERVER_TIME even if still stealing
+        if enabled
+            and not hopping
+            and sessionStart > 0
+            and (os.clock() - sessionStart) >= MAX_SERVER_TIME
+        then
+            statusLbl.Text = string.format(
+                "Server time %.0fs >= %ds — hopping",
+                os.clock() - sessionStart,
+                MAX_SERVER_TIME
+            )
+            busy = false
+            hopServer()
             task.wait(0.2)
             continue
         end
@@ -1059,16 +1128,53 @@ task.spawn(function()
             end
 
             emptyScans = 0
-            statusLbl.Text = string.format(
-                "BL:%d NG:%d — steal nearest",
-                blCount,
-                ngCount
-            )
 
             ------------------------------------------
-            -- Cycle-style steal (Backline or NextGen)
+            -- Priority: Backline first for BACKLINE_STEAL_TIMEOUT sec,
+            -- then fall back to NextGen if Backline still failing.
             ------------------------------------------
-            local result = stealOne()
+            local preferredKind = nil
+            if blCount > 0 then
+                if not backlineFocusStart then
+                    backlineFocusStart = os.clock()
+                end
+                local elapsed = os.clock() - backlineFocusStart
+                if elapsed < BACKLINE_STEAL_TIMEOUT then
+                    preferredKind = "Backline Legends"
+                    statusLbl.Text = string.format(
+                        "PRIORITY Backline (%.1fs/%ds) | BL:%d NG:%d",
+                        elapsed,
+                        BACKLINE_STEAL_TIMEOUT,
+                        blCount,
+                        ngCount
+                    )
+                else
+                    -- 8s of Backline attempts without success → allow NextGen
+                    preferredKind = (ngCount > 0) and "Next Generation" or "Backline Legends"
+                    statusLbl.Text = string.format(
+                        "Backline timeout → %s | BL:%d NG:%d",
+                        preferredKind == "Next Generation" and "NextGen" or "Backline",
+                        blCount,
+                        ngCount
+                    )
+                end
+            else
+                backlineFocusStart = nil
+                preferredKind = "Next Generation"
+                statusLbl.Text = string.format(
+                    "No Backline — NextGen | NG:%d",
+                    ngCount
+                )
+            end
+
+            local okSteal, result = pcall(stealOne, preferredKind)
+            if not okSteal then
+                statusLbl.Text = "Steal error: " .. tostring(result):sub(1, 40)
+                warn("[HopBL/NG] stealOne", result)
+                busy = false
+                task.wait(0.25)
+                continue
+            end
 
             if result == "deposited" then
                 statusLbl.Text = "Deposited held item"
@@ -1081,6 +1187,7 @@ task.spawn(function()
                 total += 1
                 countLbl.Text = "Collected: " .. total
                 statusLbl.Text = "Stolen — depositing..."
+                backlineFocusStart = nil -- reset priority timer on success
 
                 task.wait(0.25)
                 toBase()
@@ -1096,7 +1203,16 @@ task.spawn(function()
 
                 statusLbl.Text = "Scanning Backline / NextGen..."
             else
-                statusLbl.Text = "Steal failed — retry"
+                -- Failed attempt; keep backlineFocusStart running
+                if preferredKind == "Backline Legends" and backlineFocusStart then
+                    local left = math.max(0, BACKLINE_STEAL_TIMEOUT - (os.clock() - backlineFocusStart))
+                    statusLbl.Text = string.format(
+                        "Backline fail — NextGen in %.1fs",
+                        left
+                    )
+                else
+                    statusLbl.Text = "Steal failed — retry"
+                end
                 task.wait(0.2)
             end
 
@@ -1110,9 +1226,11 @@ end)
 
 print(
     "[BacklineNextGenStealer] targets: Backline Legends (2625) + Next Generation (2146)",
-    "| steal whichever available (prefer nearer / Backline on tie)",
+    "| Backline priority 8s then NextGen fallback",
     "| solidify + stand ON TOP + hover lock + zero hold prompt",
     "| hop to <=1 player servers if neither present after",
     EMPTY_SCANS_BEFORE_HOP,
-    "empty scans"
+    "empty scans | hard hop after",
+    MAX_SERVER_TIME,
+    "s in server"
 )
