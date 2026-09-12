@@ -1,5 +1,5 @@
 -- Minimal Backline Legends OR Next Generation Lucky Block Stealer + timer + count
--- Targets (Backline first for 8s, then fall back to NextGen if still failing):
+-- Targets (steal whichever is available; prefer nearest, Backline wins ties):
 --   Backline Legends Lucky Block | Rarity: Backline Legends | ID: 2625
 --   Next Generation Lucky Block  | Rarity: Next Generation  | ID: 2146
 -- Auto-starts on execute.
@@ -49,15 +49,12 @@ local LUCKY_BLOCK_MODEL_NAMES = {
 }
 
 local STAND_OFFSET = 3
--- If Backline is present, only try Backline for this many seconds before falling back to NextGen
-local BACKLINE_STEAL_TIMEOUT = 8
 
 local enabled, busy, total = true, false, 0
 local sessionStart = os.clock()
 
 local hopping = false
 local emptyScans = 0
-local backlineFocusStart = nil -- clock when we started exclusive Backline attempts
 
 local EMPTY_SCANS_BEFORE_HOP = 3
 local SCAN_EMPTY_WAIT = 0.15
@@ -308,8 +305,7 @@ end
 --------------------------------------------------
 -- Find nearest Backline Legends target (cycle-style)
 --------------------------------------------------
--- preferredKind: "Backline Legends" | "Next Generation" | nil (either)
-local function getTargetLuckyBlock(preferredKind)
+local function getTargetLuckyBlock()
     local live = Workspace:FindFirstChild("Live")
     local slimes = live and live:FindFirstChild("Slimes")
     if not slimes then
@@ -322,7 +318,7 @@ local function getTargetLuckyBlock(preferredKind)
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model") and not model:GetAttribute("Carrying") then
             local kind = classifyTargetBlock(model)
-            if kind and (preferredKind == nil or kind == preferredKind) then
+            if kind then
                 local primary =
                     model.PrimaryPart
                     or model:FindFirstChildWhichIsA("BasePart")
@@ -469,7 +465,7 @@ end
 --------------------------------------------------
 -- Full cycle-style steal: solidify → cloak → on top → hover → prompt
 --------------------------------------------------
-local function stealOne(preferredKind)
+local function stealOne()
     -- Already holding → deposit only
     if LP:GetAttribute("holdingSlime") == true then
         toBase()
@@ -480,7 +476,7 @@ local function stealOne(preferredKind)
         return "deposited"
     end
 
-    local block = getTargetLuckyBlock(preferredKind)
+    local block = getTargetLuckyBlock()
     if not block then
         return false
     end
@@ -1063,46 +1059,16 @@ task.spawn(function()
             end
 
             emptyScans = 0
+            statusLbl.Text = string.format(
+                "BL:%d NG:%d — steal nearest",
+                blCount,
+                ngCount
+            )
 
             ------------------------------------------
-            -- Priority: Backline first for BACKLINE_STEAL_TIMEOUT sec,
-            -- then fall back to NextGen if Backline still failing.
+            -- Cycle-style steal (Backline or NextGen)
             ------------------------------------------
-            local preferredKind = nil
-            if blCount > 0 then
-                if not backlineFocusStart then
-                    backlineFocusStart = os.clock()
-                end
-                local elapsed = os.clock() - backlineFocusStart
-                if elapsed < BACKLINE_STEAL_TIMEOUT then
-                    preferredKind = "Backline Legends"
-                    statusLbl.Text = string.format(
-                        "PRIORITY Backline (%.1fs/%ds) | BL:%d NG:%d",
-                        elapsed,
-                        BACKLINE_STEAL_TIMEOUT,
-                        blCount,
-                        ngCount
-                    )
-                else
-                    -- 8s of Backline attempts without success → allow NextGen
-                    preferredKind = (ngCount > 0) and "Next Generation" or "Backline Legends"
-                    statusLbl.Text = string.format(
-                        "Backline timeout → %s | BL:%d NG:%d",
-                        preferredKind == "Next Generation" and "NextGen" or "Backline",
-                        blCount,
-                        ngCount
-                    )
-                end
-            else
-                backlineFocusStart = nil
-                preferredKind = "Next Generation"
-                statusLbl.Text = string.format(
-                    "No Backline — NextGen | NG:%d",
-                    ngCount
-                )
-            end
-
-            local result = stealOne(preferredKind)
+            local result = stealOne()
 
             if result == "deposited" then
                 statusLbl.Text = "Deposited held item"
@@ -1115,7 +1081,6 @@ task.spawn(function()
                 total += 1
                 countLbl.Text = "Collected: " .. total
                 statusLbl.Text = "Stolen — depositing..."
-                backlineFocusStart = nil -- reset priority timer on success
 
                 task.wait(0.25)
                 toBase()
@@ -1131,16 +1096,7 @@ task.spawn(function()
 
                 statusLbl.Text = "Scanning Backline / NextGen..."
             else
-                -- Failed attempt; keep backlineFocusStart running
-                if preferredKind == "Backline Legends" and backlineFocusStart then
-                    local left = math.max(0, BACKLINE_STEAL_TIMEOUT - (os.clock() - backlineFocusStart))
-                    statusLbl.Text = string.format(
-                        "Backline fail — NextGen in %.1fs",
-                        left
-                    )
-                else
-                    statusLbl.Text = "Steal failed — retry"
-                end
+                statusLbl.Text = "Steal failed — retry"
                 task.wait(0.2)
             end
 
@@ -1154,7 +1110,7 @@ end)
 
 print(
     "[BacklineNextGenStealer] targets: Backline Legends (2625) + Next Generation (2146)",
-    "| Backline priority 8s then NextGen fallback",
+    "| steal whichever available (prefer nearer / Backline on tie)",
     "| solidify + stand ON TOP + hover lock + zero hold prompt",
     "| hop to <=1 player servers if neither present after",
     EMPTY_SCANS_BEFORE_HOP,
