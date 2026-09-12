@@ -850,11 +850,12 @@ local function findLowPopJobId(placeId)
 end
 
 
-local function hopServer()
+-- force=true: ignore cooldown (used by 20s countdown)
+local function hopServer(force)
     if hopping then
         return
     end
-    if os.clock() - lastHopAt < HOP_COOLDOWN then
+    if not force and os.clock() - lastHopAt < HOP_COOLDOWN then
         return
     end
 
@@ -868,24 +869,44 @@ local function hopServer()
     pcall(function()
         if statusLbl then
             statusLbl.Text =
-                "Finding server with <= "
+                "HOP NOW — finding server ( <= "
                 .. tostring(MAX_SERVER_PLAYERS)
-                .. " players..."
+                .. " players )..."
         end
     end)
 
     local jobId, playing = findLowPopJobId(placeId)
 
+    -- If no low-pop job found, still try a random public server teleport
     if not jobId then
         pcall(function()
             if statusLbl then
-                statusLbl.Text = "No 0-1 player server found — retry later"
+                statusLbl.Text = "No low-pop job — Teleport random public..."
             end
         end)
-        hopping = false
-        enabled = true
-        emptyScans = 0
-        task.wait(2)
+        local teleportedAny = pcall(function()
+            TeleportService:Teleport(placeId, LP)
+        end)
+        if not teleportedAny then
+            pcall(function()
+                if statusLbl then
+                    statusLbl.Text = "Teleport failed — retry in 2s"
+                end
+            end)
+            hopping = false
+            enabled = true
+            emptyScans = 0
+            -- restart countdown so we keep trying
+            sessionStart = os.clock()
+            task.wait(2)
+            return
+        end
+        task.delay(12, function()
+            hopping = false
+            enabled = true
+            emptyScans = 0
+            sessionStart = os.clock()
+        end)
         return
     end
 
@@ -911,18 +932,25 @@ local function hopServer()
     end
 
     if not teleported then
+        teleported = pcall(function()
+            TeleportService:Teleport(placeId, LP)
+        end)
+    end
+
+    if not teleported then
         pcall(function()
             if statusLbl then
-                statusLbl.Text = "Teleport failed — will retry"
+                statusLbl.Text = "Teleport failed — retry countdown"
             end
         end)
         hopping = false
         enabled = true
         emptyScans = 0
+        sessionStart = os.clock()
         return
     end
 
-    task.delay(10, function()
+    task.delay(12, function()
         hopping = false
         enabled = true
         emptyScans = 0
@@ -1023,9 +1051,9 @@ local function setOn(on)
         total = 0
         emptyScans = 0
         backlineFocusStart = nil
-        sessionStart = os.clock()
+        sessionStart = os.clock() -- restart 20s countdown
         countLbl.Text = "Collected: 0"
-        timeLbl.Text = "Time: 00:00"
+        timeLbl.Text = string.format("Hop in: %ds", MAX_SERVER_TIME)
         statusLbl.Text = "Scanning Backline / NextGen..."
     else
         busy = false
@@ -1042,14 +1070,37 @@ end)
 
 
 --------------------------------------------------
--- Timer
+-- Countdown 20 → 0 (always visible). Force-hop at 0 even mid-steal.
 --------------------------------------------------
 task.spawn(function()
     while true do
-        if enabled and sessionStart > 0 and not hopping then
-            timeLbl.Text = "Time: " .. fmtTime(os.clock() - sessionStart)
+        if hopping then
+            timeLbl.Text = "Hopping..."
+            task.wait(0.15)
+            continue
         end
-        task.wait(0.25)
+
+        if sessionStart <= 0 then
+            sessionStart = os.clock()
+        end
+
+        local elapsed = os.clock() - sessionStart
+        local left = math.max(0, math.ceil(MAX_SERVER_TIME - elapsed))
+
+        if enabled then
+            timeLbl.Text = string.format("Hop in: %ds", left)
+        else
+            timeLbl.Text = string.format("Paused | Hop in: %ds", left)
+        end
+
+        -- Independent of busy / stealOne: always hop when countdown hits 0
+        if enabled and not hopping and elapsed >= MAX_SERVER_TIME then
+            statusLbl.Text = "Countdown 0 — FORCE HOP (even if stealing)"
+            busy = false
+            hopServer(true)
+        end
+
+        task.wait(0.2)
     end
 end)
 
@@ -1059,26 +1110,10 @@ end)
 --------------------------------------------------
 task.spawn(function()
     task.wait(0.35)
+    sessionStart = os.clock() -- fresh 20s countdown on run
 
     while true do
         if hopping then
-            task.wait(0.2)
-            continue
-        end
-
-        -- Hard time limit: leave server after MAX_SERVER_TIME even if still stealing
-        if enabled
-            and not hopping
-            and sessionStart > 0
-            and (os.clock() - sessionStart) >= MAX_SERVER_TIME
-        then
-            statusLbl.Text = string.format(
-                "Server time %.0fs >= %ds — hopping",
-                os.clock() - sessionStart,
-                MAX_SERVER_TIME
-            )
-            busy = false
-            hopServer()
             task.wait(0.2)
             continue
         end
@@ -1120,7 +1155,7 @@ task.spawn(function()
                 busy = false
 
                 if emptyScans >= EMPTY_SCANS_BEFORE_HOP then
-                    hopServer()
+                    hopServer(true)
                 else
                     task.wait(SCAN_EMPTY_WAIT)
                 end
