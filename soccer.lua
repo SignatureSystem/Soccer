@@ -47,8 +47,8 @@ local MAX_LEVEL = 100
 local UPGRADE_SPAM_ROUNDS = 1
 local UPGRADE_SPAM_GAP = 0.05
 local UPGRADE_CYCLE_DELAY = 0.10
--- Auto Upgrade: scan all slots, 50 cheapest, 1s cooldown, rescan.
-local UPGRADE_BATCH_SIZE = 50
+-- Auto Upgrade: scan → 25 cheapest → spam those 25 → wait 1s → rescan loop.
+local UPGRADE_BATCH_SIZE = 25
 local UPGRADE_BATCH_WAIT = 1.0
 
 local REBIRTH_INTERVAL = 5
@@ -6243,17 +6243,17 @@ end
 task.spawn(function()
     while true do
         if not upgradeEnabled then
-            task.wait(UPGRADE_SCAN)
+            task.wait(0.25)
             continue
         end
 
         local ok, err = xpcall(function()
-            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 50
+            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 25
             local batchWait = tonumber(UPGRADE_BATCH_WAIT) or 1.0
             local rarityAtDecision = selectedUpgradeRarity
             local mutationAtDecision = selectedUpgradeMutation
 
-            -- Fresh scan every batch: cheapest 25 → fire → wait → rescan → next 25
+            -- Full scan of placed slots (rarity/mutation filters apply)
             local upgrades, stats = getPrioritizedUpgrades()
 
             if rarityAtDecision ~= selectedUpgradeRarity
@@ -6262,6 +6262,11 @@ task.spawn(function()
                 return
             end
 
+            if type(upgrades) ~= "table" then
+                upgrades = {}
+            end
+
+            -- Sort by least upgrade cost first
             table.sort(upgrades, function(a, b)
                 local ac = tonumber(a and a.cost) or math.huge
                 local bc = tonumber(b and b.cost) or math.huge
@@ -6279,80 +6284,54 @@ task.spawn(function()
 
             if #upgrades == 0 then
                 StatusLabel.Text = string.format(
-                    "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
+                    "Auto Upgrade | R:%s M:%s | 0 matching",
                     upgradeRarityDisplayName(rarityAtDecision),
-                    upgradeMutationDisplayName(mutationAtDecision),
-                    stats and stats.occupied or 0
+                    upgradeMutationDisplayName(mutationAtDecision)
                 )
-                task.wait(0.15)
+                task.wait(batchWait)
                 return
             end
 
-            -- Take only the 25 cheapest from this rescan
+            -- Take the 25 least-cost slots from this scan
             local batch = {}
             local limit = math.min(batchSize, #upgrades)
             for i = 1, limit do
                 local info = upgrades[i]
                 if info and info.id then
-                    table.insert(batch, {
-                        id = tostring(info.id),
-                        cost = tonumber(info.cost) or 0,
-                    })
+                    table.insert(batch, tostring(info.id))
                 end
             end
 
             StatusLabel.Text = string.format(
-                "Auto Upgrade | R:%s M:%s | cheapest %d of %d (1s rescan)",
-                upgradeRarityDisplayName(rarityAtDecision),
-                upgradeMutationDisplayName(mutationAtDecision),
+                "Auto Upgrade | cheapest %d of %d | spamming then %.0fs rescan",
                 #batch,
-                #upgrades
+                #upgrades,
+                batchWait
             )
 
-            local firedCount = 0
-            for _, entry in ipairs(batch) do
+            -- Spam upgrade on all 25 (parallel)
+            for _, slotId in ipairs(batch) do
                 if not upgradeEnabled then
                     break
                 end
-                if rarityAtDecision ~= selectedUpgradeRarity
-                    or mutationAtDecision ~= selectedUpgradeMutation
-                then
-                    break
-                end
-
                 task.spawn(function()
-                    if rarityAtDecision ~= selectedUpgradeRarity
-                        or mutationAtDecision ~= selectedUpgradeMutation
-                        or not upgradeEnabled
-                    then
-                        return
-                    end
-                    if FireUpgradeSlot(entry.id) then
-                        firedCount += 1
-                    end
+                    FireUpgradeSlot(slotId)
                 end)
             end
 
-            -- Wait 2s so costs/levels update, then outer loop rescans for next 25
-            if upgradeEnabled then
-                StatusLabel.Text = string.format(
-                    "Auto Upgrade | fired %d cheapest | rescan in %.1fs...",
-                    #batch,
-                    batchWait
-                )
-                task.wait(batchWait)
-            end
+            -- 1 second cooldown, then outer loop rescans
+            task.wait(batchWait)
         end, debug.traceback)
 
         if not ok then
             warn("[AutoUpgrade] ERROR:", err)
-            StatusLabel.Text =
-                "Auto Upgrade error: "
-                .. tostring(err):match("^[^\n]+")
-            task.wait(0.25)
+            pcall(function()
+                StatusLabel.Text =
+                    "Auto Upgrade error: "
+                    .. tostring(err):match("^[^\n]+")
+            end)
+            task.wait(1)
         end
-
-        task.wait(0.01)
     end
 end)
 
