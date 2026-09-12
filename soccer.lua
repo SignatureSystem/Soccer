@@ -30,7 +30,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 -- ============================================
 -- CONFIG
 -- ============================================
-local COLLECT_INTERVAL = 0.35
+local COLLECT_INTERVAL = 8
 local COLLECT_SCAN = 1.5
 local ONLY_WHEN_PADGUI_ENABLED = true
 
@@ -6059,7 +6059,7 @@ end
 -- LOOPS
 -- ============================================
 -- AUTO COLLECT
--- Every 5 seconds, collect earnings once from each currently occupied slot.
+-- Every 8 seconds, collect earnings once from each currently occupied slot.
 -- No spam: only real placed stands from PlotSlimes (fallback: stand models).
 task.spawn(function()
     while true do
@@ -6115,7 +6115,7 @@ task.spawn(function()
                 end)
             end
 
-            task.wait(5)
+            task.wait(COLLECT_INTERVAL)
         else
             task.wait(0.25)
         end
