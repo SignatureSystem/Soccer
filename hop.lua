@@ -1,14 +1,14 @@
--- Minimal Next Generation Lucky Block Stealer + timer + count
+-- Minimal Backline Legends Lucky Block Stealer + timer + count
 -- Target:
--- Name: Next Generation Lucky Block
--- Rarity: Next Generation
--- ID: 2146
+-- Name: Backline Legends Lucky Block
+-- Rarity: Backline Legends
+-- ID: 2625
 -- Auto-starts on execute.
 -- Steal flow (from Lucky Box Cycle):
 --   find target → solidify box → cloak → stand ON TOP → hover lock
 --   → zero HoldDuration → fire prompt (up to 10 tries) → base on success
 -- Fast scan; hops to lowest-pop public server (max 1 player)
--- if no Next Generation target exists.
+-- if no Backline Legends target exists.
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -19,18 +19,18 @@ local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
 
 local TARGET = {
-    Name = "Next Generation Lucky Block",
-    Rarity = "Next Generation",
-    ID = "2146",
+    Name = "Backline Legends Lucky Block",
+    Rarity = "Backline Legends",
+    ID = "2625",
     MinValue = 10000000
 }
 
 -- Model name lookup (exact names used by getTargetLuckyBlock)
 local LUCKY_BLOCK_MODEL_NAMES = {
-    ["Next Generation"] = {
-        ["Next Generation Lucky Block"] = true,
-        ["NextGen Lucky Block"] = true,
-        ["Next Gen Lucky Block"] = true,
+    ["Backline Legends"] = {
+        ["Backline Legends Lucky Block"] = true,
+        ["Backline Lucky Block"] = true,
+        ["Backline Legends Block"] = true,
     },
 }
 
@@ -84,8 +84,8 @@ local function fmtTime(sec)
 end
 
 
--- Robust Next Generation detection (name / rarity / ID / attrs / ValueBases)
-local function isNextGenBlock(m)
+-- Robust Backline Legends detection (name / rarity / ID / attrs / ValueBases)
+local function isBacklineBlock(m)
     if not m or not m:IsA("Model") then
         return false
     end
@@ -93,10 +93,10 @@ local function isNextGenBlock(m)
     local modelName = tostring(m.Name or "")
     local lowerName = modelName:lower()
 
-    if lowerName:find("next generation lucky block", 1, true)
-        or lowerName:find("next generation", 1, true)
-        or lowerName:find("nextgen", 1, true)
-        or lowerName:find("next gen", 1, true)
+    if lowerName:find("backline legends lucky block", 1, true)
+        or lowerName:find("backline legends", 1, true)
+        or lowerName:find("backline lucky block", 1, true)
+        or lowerName:find("backline", 1, true)
     then
         return true
     end
@@ -108,7 +108,7 @@ local function isNextGenBlock(m)
 
     if rarity then
         local r = tostring(rarity):lower()
-        if r == "next generation" or r == "nextgen" or r == "next gen" then
+        if r == "backline legends" or r == "backline" or r == "backline legends" then
             return true
         end
     end
@@ -121,9 +121,8 @@ local function isNextGenBlock(m)
 
     if blockName then
         local bn = tostring(blockName):lower()
-        if bn:find("next generation", 1, true)
-            or bn:find("nextgen", 1, true)
-            or bn:find("next gen", 1, true)
+        if bn:find("backline legends", 1, true)
+            or bn:find("backline", 1, true)
         then
             return true
         end
@@ -150,9 +149,9 @@ local function isNextGenBlock(m)
             local value = tostring(obj.Value)
             local vl = value:lower()
             if value == TARGET.ID
-                or vl == "next generation"
-                or vl == "nextgen"
-                or vl:find("next generation", 1, true)
+                or vl == "backline legends"
+                or vl == "backline"
+                or vl:find("backline", 1, true)
             then
                 return true
             end
@@ -160,7 +159,7 @@ local function isNextGenBlock(m)
     end
 
     -- Exact model-name table match
-    local allowed = LUCKY_BLOCK_MODEL_NAMES["Next Generation"]
+    local allowed = LUCKY_BLOCK_MODEL_NAMES["Backline Legends"]
     if allowed and allowed[modelName] then
         return true
     end
@@ -272,7 +271,7 @@ end
 
 
 --------------------------------------------------
--- Find nearest Next Gen target (cycle-style)
+-- Find nearest Backline Legends target (cycle-style)
 --------------------------------------------------
 local function getTargetLuckyBlock()
     local live = Workspace:FindFirstChild("Live")
@@ -287,7 +286,7 @@ local function getTargetLuckyBlock()
     for _, model in ipairs(slimes:GetChildren()) do
         if model:IsA("Model")
             and not model:GetAttribute("Carrying")
-            and isNextGenBlock(model)
+            and isBacklineBlock(model)
         then
             local primary =
                 model.PrimaryPart
@@ -327,7 +326,7 @@ local function getTargetLuckyBlock()
 end
 
 
-local function countNextGenBlocks()
+local function countBacklineBlocks()
     local live = Workspace:FindFirstChild("Live")
     local folder = live and live:FindFirstChild("Slimes")
     if not folder then
@@ -338,7 +337,7 @@ local function countNextGenBlocks()
     for _, m in ipairs(folder:GetChildren()) do
         if m:IsA("Model")
             and not m:GetAttribute("Carrying")
-            and isNextGenBlock(m)
+            and isBacklineBlock(m)
         then
             n += 1
         end
@@ -844,7 +843,8 @@ end
 pcall(function()
     for _, name in ipairs({
         "JapanStealer", "JIStealer", "AlternativeStealer",
-        "AlternateStealer", "NextGenStealer", "NextGenerationStealer"
+        "AlternateStealer", "NextGenStealer", "NextGenerationStealer",
+        "BacklineStealer", "BacklineLegendsStealer"
     }) do
         local old = PG:FindFirstChild(name)
         if old then
@@ -854,7 +854,7 @@ pcall(function()
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "NextGenStealer"
+gui.Name = "BacklineStealer"
 gui.ResetOnSpawn = false
 gui.Parent = PG
 
@@ -873,7 +873,7 @@ btn.Size = UDim2.new(1, -20, 0, 34)
 btn.Position = UDim2.new(0, 10, 0, 8)
 btn.BackgroundColor3 = Color3.fromRGB(28, 52, 36)
 btn.BorderSizePixel = 0
-btn.Text = "Steal NextGen: ON"
+btn.Text = "Steal Backline: ON"
 btn.TextColor3 = Color3.fromRGB(80, 255, 120)
 btn.TextSize = 14
 btn.Font = Enum.Font.GothamBold
@@ -906,7 +906,7 @@ statusLbl = Instance.new("TextLabel")
 statusLbl.Size = UDim2.new(1, -16, 0, 28)
 statusLbl.Position = UDim2.new(0, 8, 0, 92)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Text = "Auto-run | scanning NextGen..."
+statusLbl.Text = "Auto-run | scanning Backline..."
 statusLbl.TextColor3 = Color3.fromRGB(180, 190, 210)
 statusLbl.TextSize = 11
 statusLbl.Font = Enum.Font.Gotham
@@ -917,7 +917,7 @@ statusLbl.Parent = f
 
 local function setOn(on)
     enabled = on
-    btn.Text = on and "Steal NextGen: ON" or "Steal NextGen: OFF"
+    btn.Text = on and "Steal Backline: ON" or "Steal Backline: OFF"
     btn.TextColor3 = on
         and Color3.fromRGB(80, 255, 120)
         or Color3.fromRGB(255, 90, 90)
@@ -931,7 +931,7 @@ local function setOn(on)
         sessionStart = os.clock()
         countLbl.Text = "Collected: 0"
         timeLbl.Text = "Time: 00:00"
-        statusLbl.Text = "Scanning Next Generation Lucky Block..."
+        statusLbl.Text = "Scanning Backline Legends Lucky Block..."
     else
         busy = false
         statusLbl.Text = "Paused"
@@ -996,12 +996,12 @@ task.spawn(function()
             ------------------------------------------
             -- Presence scan
             ------------------------------------------
-            local nextGenCount = countNextGenBlocks()
+            local backlineCount = countBacklineBlocks()
 
-            if nextGenCount <= 0 then
+            if backlineCount <= 0 then
                 emptyScans += 1
                 statusLbl.Text = string.format(
-                    "No NextGen (%d/%d) — will hop",
+                    "No Backline (%d/%d) — will hop",
                     emptyScans,
                     EMPTY_SCANS_BEFORE_HOP
                 )
@@ -1016,7 +1016,7 @@ task.spawn(function()
             end
 
             emptyScans = 0
-            statusLbl.Text = "Next Generation found — solidify + stand on top..."
+            statusLbl.Text = "Backline found — solidify + stand on top..."
 
             ------------------------------------------
             -- Cycle-style steal
@@ -1033,7 +1033,7 @@ task.spawn(function()
             if result == true then
                 total += 1
                 countLbl.Text = "Collected: " .. total
-                statusLbl.Text = "NextGen stolen — depositing..."
+                statusLbl.Text = "Backline stolen — depositing..."
 
                 task.wait(0.25)
                 toBase()
@@ -1047,7 +1047,7 @@ task.spawn(function()
                     task.wait(0.1)
                 end
 
-                statusLbl.Text = "Scanning Next Generation Lucky Block..."
+                statusLbl.Text = "Scanning Backline Legends Lucky Block..."
             else
                 statusLbl.Text = "Steal failed — retry"
                 task.wait(0.2)
@@ -1062,7 +1062,7 @@ end)
 
 
 print(
-    "[NextGenStealer] TARGET:",
+    "[BacklineStealer] TARGET:",
     TARGET.Name,
     "| Rarity:",
     TARGET.Rarity,
