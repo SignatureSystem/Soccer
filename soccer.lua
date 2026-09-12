@@ -1,7 +1,7 @@
 -- Combined Script: NEXT GENERATION + JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
--- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
+-- + Lucky Box collector uses hop-style steal: solidify -> cloak -> teleport ON TOP (no hover) -> prompt -> base; NO server hop
 -- + Next Generation Lucky Block (ID 2146) + Backline Legends Lucky Block (ID 2625) supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
@@ -47,9 +47,10 @@ local MAX_LEVEL = 100
 local UPGRADE_SPAM_ROUNDS = 1
 local UPGRADE_SPAM_GAP = 0.05
 local UPGRADE_CYCLE_DELAY = 0.10
--- Auto Upgrade batches: 25 cheapest next-upgrades, wait 2s, next 25, etc.
-local UPGRADE_BATCH_SIZE = 25
-local UPGRADE_BATCH_WAIT = 2.0
+-- Auto Upgrade: spam ALL matching slots as fast as possible every cycle.
+local UPGRADE_BATCH_SIZE = 9999
+local UPGRADE_BATCH_WAIT = 0.05
+local UPGRADE_FIRE_GAP = 0.0
 
 local REBIRTH_INTERVAL = 5
 local JUMP_UPGRADE_INTERVAL = 0.5
@@ -6243,17 +6244,14 @@ end
 task.spawn(function()
     while true do
         if not upgradeEnabled then
-            task.wait(UPGRADE_SCAN)
+            task.wait(0.05)
             continue
         end
 
         local ok, err = xpcall(function()
-            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 25
-            local batchWait = tonumber(UPGRADE_BATCH_WAIT) or 2.0
             local rarityAtDecision = selectedUpgradeRarity
             local mutationAtDecision = selectedUpgradeMutation
 
-            -- Fresh scan every batch: cheapest 25 → fire → wait → rescan → next 25
             local upgrades, stats = getPrioritizedUpgrades()
 
             if rarityAtDecision ~= selectedUpgradeRarity
@@ -6262,55 +6260,25 @@ task.spawn(function()
                 return
             end
 
-            table.sort(upgrades, function(a, b)
-                local ac = tonumber(a and a.cost) or math.huge
-                local bc = tonumber(b and b.cost) or math.huge
-                if ac ~= bc then
-                    return ac < bc
-                end
-                local al = tonumber(a and a.level) or 1
-                local bl = tonumber(b and b.level) or 1
-                if al ~= bl then
-                    return al < bl
-                end
-                return (tonumber(a and a.id) or math.huge)
-                    < (tonumber(b and b.id) or math.huge)
-            end)
-
             if #upgrades == 0 then
                 StatusLabel.Text = string.format(
-                    "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
+                    "Auto Upgrade FAST | R:%s M:%s | 0 matching / %d occupied",
                     upgradeRarityDisplayName(rarityAtDecision),
                     upgradeMutationDisplayName(mutationAtDecision),
                     stats and stats.occupied or 0
                 )
-                task.wait(0.15)
+                task.wait(0.05)
                 return
             end
 
-            -- Take only the 25 cheapest from this rescan
-            local batch = {}
-            local limit = math.min(batchSize, #upgrades)
-            for i = 1, limit do
-                local info = upgrades[i]
-                if info and info.id then
-                    table.insert(batch, {
-                        id = tostring(info.id),
-                        cost = tonumber(info.cost) or 0,
-                    })
-                end
-            end
-
             StatusLabel.Text = string.format(
-                "Auto Upgrade | R:%s M:%s | cheapest %d of %d matching (rescan each batch)",
+                "Auto Upgrade FAST | R:%s M:%s | spamming %d slots",
                 upgradeRarityDisplayName(rarityAtDecision),
                 upgradeMutationDisplayName(mutationAtDecision),
-                #batch,
                 #upgrades
             )
 
-            local firedCount = 0
-            for _, entry in ipairs(batch) do
+            for _, info in ipairs(upgrades) do
                 if not upgradeEnabled then
                     break
                 end
@@ -6319,80 +6287,93 @@ task.spawn(function()
                 then
                     break
                 end
-
-                task.spawn(function()
-                    if rarityAtDecision ~= selectedUpgradeRarity
-                        or mutationAtDecision ~= selectedUpgradeMutation
-                        or not upgradeEnabled
-                    then
-                        return
-                    end
-                    if FireUpgradeSlot(entry.id) then
-                        firedCount += 1
-                    end
-                end)
+                if info and info.id then
+                    task.spawn(function()
+                        FireUpgradeSlot(tostring(info.id))
+                    end)
+                end
             end
 
-            -- Wait 2s so costs/levels update, then outer loop rescans for next 25
-            if upgradeEnabled then
-                StatusLabel.Text = string.format(
-                    "Auto Upgrade | fired ~%d cheapest | rescan next 25 in %.1fs...",
-                    #batch,
-                    batchWait
-                )
-                task.wait(batchWait)
-            end
+            task.wait(tonumber(UPGRADE_BATCH_WAIT) or 0.05)
         end, debug.traceback)
 
         if not ok then
             warn("[AutoUpgrade] ERROR:", err)
             StatusLabel.Text =
                 "Auto Upgrade error: "
-                .. tostring(err):match("^[^\n]+")
-            task.wait(0.25)
+                .. tostring(err):match("^[^
+]+")
+            task.wait(0.1)
         end
-
-        task.wait(0.01)
     end
 end)
+
+-- Hop-style steal helpers (teleport ON TOP, no hover lock)
+local STEAL_STAND_OFFSET = 3
+
+local function makeLuckyBoxSolid(block)
+    if not block then
+        return
+    end
+    local parts = {}
+    if block.model and block.model.Parent then
+        for _, d in ipairs(block.model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                table.insert(parts, d)
+            end
+        end
+    end
+    if block.part and block.part:IsA("BasePart") then
+        table.insert(parts, block.part)
+    end
+    for _, part in ipairs(parts) do
+        pcall(function()
+            part.CanCollide = true
+            part.CanTouch = true
+            part.CanQuery = true
+            if part.Massless ~= nil then
+                part.Massless = true
+            end
+        end)
+    end
+end
+
+local function standOnBoxCFrame(part)
+    if not part or not part.Parent then
+        return nil
+    end
+    local topY = part.Size.Y * 0.5 + STEAL_STAND_OFFSET
+    return part.CFrame * CFrame.new(0, topY, 0)
+end
 
 task.spawn(function()
     while true do
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            -- Exact reference behavior if already carrying.
             if LocalPlayer:GetAttribute("holdingSlime") == true then
                 StatusLabel.Text =
                     "Lucky Block: carrying -> returning to base"
-
                 teleportToBase()
-
                 local t = os.clock() + 1
-
                 while luckyEnabled
                     and LocalPlayer:GetAttribute("holdingSlime")
                     and os.clock() < t
                 do
                     task.wait(0.1)
                 end
-
                 luckyBlockBusy = false
                 task.wait(0.1)
                 continue
             end
 
-            -- Keep the combined script's selected-type target detection.
-            -- ONLY the steal movement/prompt/deposit flow is replaced.
             local block = getTargetLuckyBlock()
-
             if not block then
                 StatusLabel.Text = string.format(
                     "No %s boxes | Total: %d",
                     selectedLuckyBlockType,
                     totalCollected
                 )
-
                 luckyBlockBusy = false
                 task.wait(0.15)
                 continue
@@ -6400,148 +6381,156 @@ task.spawn(function()
 
             StatusLabel.Text =
                 tostring(selectedLuckyBlockType)
-                .. " Lucky Block found - stealing..."
+                .. " found — hop-style ON TOP steal"
 
-            -- EXACT reference cloak step.
+            makeLuckyBoxSolid(block)
             pcall(function()
                 activateCloak()
             end)
+            task.wait(0.1)
 
-            task.wait(0.2)
-
-            -- EXACT reference teleport:
-            -- directly under the target.
             local root = getRoot()
-
-            if not root
-                or not block.part
-                or not block.part.Parent
-            then
+            if not root or not block.part or not block.part.Parent then
                 luckyBlockBusy = false
                 task.wait(0.15)
                 continue
             end
 
-            root.CFrame =
-                block.part.CFrame
-                * CFrame.new(0, -1, 0)
-
-            root.AssemblyLinearVelocity =
-                Vector3.zero
-
-            -- EXACT reference BodyVelocity float.
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "LuckyFloat"
-            bv.Velocity = Vector3.zero
-            bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-            bv.P = 1250
-            bv.Parent = root
-
-            task.wait(0.15)
-
-            -- EXACT reference prompt lookup.
-            local prompt = block.prompt
-
-            if (
-                not prompt
-                or not prompt.Parent
-            )
-                and block.model
-            then
-                for _, d in ipairs(
-                    block.model:GetDescendants()
-                ) do
-                    if d:IsA("ProximityPrompt")
-                        and d.Enabled
-                    then
-                        prompt = d
-                        break
-                    end
+            for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
+                local old = root:FindFirstChild(name)
+                if old then
+                    old:Destroy()
                 end
             end
 
-            --------------------------------------------------
-            -- NO 1S WAIT -> ZERO HOLD -> PICKUP -> BASE
-            --
-            -- Exact reference teleport already completed above.
-            -- Immediately after arriving underneath the target:
-            -- 1) Force ALL current proximity prompts HoldDuration = 0
-            -- 2) Trigger the Lucky Block prompt / pick up
-            -- 3) Return to base
-            --------------------------------------------------
+            makeLuckyBoxSolid(block)
 
-            StatusLabel.Text =
-                tostring(selectedLuckyBlockType)
-                .. " Lucky Block -> zero hold + pickup"
+            local cf = standOnBoxCFrame(block.part)
+            if not cf then
+                luckyBlockBusy = false
+                task.wait(0.1)
+                continue
+            end
 
-            -- Exact loop requested by user, run immediately after teleport.
-            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do
-                if v.ClassName == "ProximityPrompt" then
+            root.CFrame = cf
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
+            task.wait(0.05)
+
+            root = getRoot()
+            if root and block.part and block.part.Parent then
+                local cf2 = standOnBoxCFrame(block.part)
+                if cf2 then
+                    root.CFrame = cf2
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end
+            end
+
+            for _, v in ipairs(Workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") then
                     v.HoldDuration = 0
                 end
             end
 
             local prompt = block.prompt
-
             if (not prompt or not prompt.Parent) and block.model then
                 for _, d in ipairs(block.model:GetDescendants()) do
-                    if d:IsA("ProximityPrompt") and d.Enabled then
+                    if d:IsA("ProximityPrompt") then
                         prompt = d
-                        break
+                        if d.Enabled then
+                            break
+                        end
                     end
                 end
             end
 
-            if prompt and prompt.Parent then
+            if not prompt or not prompt.Parent then
+                StatusLabel.Text = "Lucky Block prompt missing"
+                luckyBlockBusy = false
+                task.wait(0.1)
+                continue
+            end
+
+            pcall(function()
+                prompt.Enabled = true
                 prompt.HoldDuration = 0
+                prompt.MaxActivationDistance =
+                    math.max(prompt.MaxActivationDistance, 20)
+            end)
 
-                StatusLabel.Text =
-                    tostring(selectedLuckyBlockType)
-                    .. " Lucky Block -> picking up"
+            StatusLabel.Text =
+                tostring(selectedLuckyBlockType)
+                .. " -> on top + prompt spam"
 
-                -- Instant pickup / steal.
-                attemptSteal(prompt)
-
-                if bv and bv.Parent then
-                    bv:Destroy()
-                end
-
+            local stolen = false
+            for try = 1, 14 do
                 root = getRoot()
-
-                if root then
-                    root.AssemblyLinearVelocity = Vector3.zero
+                if root and block.part and block.part.Parent then
+                    local cf3 = standOnBoxCFrame(block.part)
+                    if cf3 then
+                        root.CFrame = cf3
+                        root.AssemblyLinearVelocity = Vector3.zero
+                    end
                 end
 
-                -- Return immediately after the pickup tap.
-                teleportToBase()
+                if (not prompt or not prompt.Parent)
+                    and block.model
+                    and block.model.Parent
+                then
+                    for _, d in ipairs(block.model:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") then
+                            prompt = d
+                            break
+                        end
+                    end
+                end
 
-                totalCollected += 1
+                if prompt and prompt.Parent then
+                    pcall(function()
+                        prompt.Enabled = true
+                        prompt.HoldDuration = 0
+                    end)
+                    attemptSteal(prompt)
+                end
 
-                StatusLabel.Text =
-                    string.format(
-                        "Picked up #%d -> returned to base",
-                        totalCollected
+                if LocalPlayer:GetAttribute("holdingSlime") == true then
+                    stolen = true
+                    break
+                end
+                if block.model
+                    and (
+                        not block.model.Parent
+                        or block.model:GetAttribute("Carrying") == true
                     )
-            else
-                if bv and bv.Parent then
-                    bv:Destroy()
+                then
+                    stolen = true
+                    break
                 end
+                task.wait(0.08)
+            end
 
-                StatusLabel.Text =
-                    "Lucky Block prompt missing"
+            if LocalPlayer:GetAttribute("holdingSlime") == true then
+                stolen = true
+            end
+
+            if stolen then
+                totalCollected += 1
+                teleportToBase()
+                StatusLabel.Text = string.format(
+                    "Picked up #%d -> returned to base",
+                    totalCollected
+                )
+            else
+                StatusLabel.Text = "Steal failed — retry"
             end
 
             luckyBlockBusy = false
         end
 
-        -- Same reference loop cadence.
         task.wait(0.08)
     end
 end)
 
--- Continuously accept incoming gifts while enabled.  The live game keeps
--- the current incoming gift UID on the gifting frame and its native Accept
--- button uses a 0.5-second cooldown, so this worker follows the same cadence.
 task.spawn(function()
     while true do
         if autoAcceptGiftsEnabled then
