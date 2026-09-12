@@ -2,7 +2,7 @@
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
 -- + Lucky Box collector uses exact reference steal flow: cloak -> underneath target -> BodyVelocity -> prompt -> base deposit; NO server hop
--- + Next Generation Lucky Block (ID 2146 / Rarity "Next Generation") supported in steal, place, open, place+open, auto upgrade, and filters
+-- + Next Generation Lucky Block (ID 2146) + Backline Legends Lucky Block (ID 2625) supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
 
@@ -65,10 +65,11 @@ local DELAY_PICK  = 0.12
 local IGNORE_LOCK = true
 
 -- Newest high tiers. Actual Auto Upgrade ordering remains cheapest-next-upgrade first.
-local UPGRADE_PRIORITY = { ["Next Generation"] = 1, ["Alternative"] = 2, ["Japan"] = 3, ["Icons"] = 4, ["Spain"] = 5 }
-local TARGET_RARITIES  = { ["Next Generation"] = true, ["Alternative"] = true, ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
+local UPGRADE_PRIORITY = { ["Backline Legends"] = 1, ["Next Generation"] = 2, ["Alternative"] = 3, ["Japan"] = 4, ["Icons"] = 5, ["Spain"] = 6 }
+local TARGET_RARITIES  = { ["Backline Legends"] = true, ["Next Generation"] = true, ["Alternative"] = true, ["Japan"] = true, ["Icons"] = true, ["Spain"] = true }
 
 local RARITY_VALUE = {
+    ["Backline Legends"] = 12000000,
     ["Next Generation"] = 10000000,
     ["Alternative"] = 9000000,
     ["Japan"] = 7000000,
@@ -91,7 +92,7 @@ local RARITY_VALUE = {
 local ALL_RARITIES = {
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "OG", "Champions",
-    "Spain", "Icons", "Japan", "Alternative", "Next Generation", "LIMITED",
+    "Spain", "Icons", "Japan", "Alternative", "Next Generation", "Backline Legends", "LIMITED",
 }
 
 -- Latest live mutation table includes Divine + Fallen at 5x.
@@ -105,12 +106,12 @@ for _, r in ipairs(ALL_RARITIES) do table.insert(PICK_OPTIONS, r) end
 for _, m in ipairs(ALL_MUTATIONS) do table.insert(PICK_OPTIONS, m) end
 
 -- Auto Upgrade rarity filter options.
--- Includes all current rarities, including LIMITED, Japan, Icons, Alternative and Next Generation.
+-- Includes all current rarities, including Backline Legends, Next Generation, Alternative, etc.
 local UPGRADE_RARITY_OPTIONS = {
     "All",
     "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret",
     "Slime God", "Divine", "Exclusive", "LIMITED", "OG", "Champions",
-    "Spain", "Icons", "Japan", "Alternative", "Next Generation",
+    "Spain", "Icons", "Japan", "Alternative", "Next Generation", "Backline Legends",
 }
 
 local selectedUpgradeRarity = "All"
@@ -129,8 +130,8 @@ end
 local selectedUpgradeMutation = "All"
 
 -- Exact Lucky Block types found in the latest game slime registry.
--- Newest live entry: Next Generation Lucky Block (rarity Next Generation, ID 2146).
--- Also includes Japan / Alternative / Icons tiers.
+-- Newest live entry: Backline Legends Lucky Block (rarity Backline Legends, ID 2625).
+-- Also includes Next Generation / Japan / Alternative / Icons tiers.
 -- The dropdown uses display labels; matching uses exact live model names.
 local LUCKY_BLOCK_OPTIONS = {
     "All",
@@ -157,6 +158,7 @@ local LUCKY_BLOCK_OPTIONS = {
     "Japan",
     "Alternative",
     "Next Generation",
+    "Backline Legends",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -194,10 +196,15 @@ local LUCKY_BLOCK_MODEL_NAMES = {
         ["NextGen Lucky Block"] = true,
         ["Next Gen Lucky Block"] = true,
     },
+    ["Backline Legends"] = {
+        ["Backline Legends Lucky Block"] = true,
+        ["Backline Lucky Block"] = true,
+        ["Backline Legends Block"] = true,
+    },
 }
 
 -- Default to the newest live tier.
-local selectedLuckyBlockType = "Next Generation"
+local selectedLuckyBlockType = "Backline Legends"
 
 -- Gift All state is declared before GUI construction so the side panel
 -- and the worker loop share the same locals.
@@ -2486,6 +2493,13 @@ local function getUnopenedLuckyBlockSlots(filterType)
                 end
             end
 
+            if filterType == "Backline Legends" then
+                local rl = string.lower(r)
+                if rl == "backline legends" or rl == "backline" then
+                    return true
+                end
+            end
+
             if filterType == "Alternative" then
                 local rl = string.lower(r)
                 if rl == "alternative" or rl == "alternate" then
@@ -3293,6 +3307,9 @@ local function resolveHeldToolRarity(entry)
             local text = tostring(value)
             local lower = string.lower(text)
 
+            if lower:find("backline") then
+                return "Backline Legends"
+            end
             if lower:find("next generation") or lower:find("nextgen") or lower:find("next gen") then
                 return "Next Generation"
             end
@@ -3469,6 +3486,13 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
         if filterType == "Next Generation" then
             local rl = string.lower(r)
             if rl == "next generation" or rl == "nextgen" or rl == "next gen" then
+                return true
+            end
+        end
+
+        if filterType == "Backline Legends" then
+            local rl = string.lower(r)
+            if rl == "backline legends" or rl == "backline" then
                 return true
             end
         end
@@ -4557,7 +4581,7 @@ local function getTargetLuckyBlock()
                     and allowedNames[modelName] == true
             end
 
-            -- Rarity / ID / attribute fallback (covers Next Generation ID 2146 and aliases).
+            -- Rarity / ID / attribute fallback (covers Backline 2625, NextGen 2146, aliases).
             if not matches then
                 local lowerName = string.lower(modelName)
                 local rarityAttr =
@@ -4587,7 +4611,20 @@ local function getTargetLuckyBlock()
                         or r == "nextgen"
                         or bn:find("next generation", 1, true)
                         or bn:find("nextgen", 1, true)
+                        or id == "2625"
                         or id == "2146"
+                end
+
+                local function matchesBackline()
+                    local r = rarityAttr and string.lower(tostring(rarityAttr)) or ""
+                    local bn = blockNameAttr and string.lower(tostring(blockNameAttr)) or ""
+                    local id = idAttr and tostring(idAttr) or ""
+                    return
+                        lowerName:find("backline", 1, true)
+                        or r == "backline legends"
+                        or r == "backline"
+                        or bn:find("backline", 1, true)
+                        or id == "2625"
                 end
 
                 local function matchesAlternative()
@@ -4605,9 +4642,11 @@ local function getTargetLuckyBlock()
                 end
 
                 if selectedLuckyBlockType == "All" then
-                    if matchesNextGen() or matchesAlternative() then
+                    if matchesBackline() or matchesNextGen() or matchesAlternative() then
                         matches = true
                     end
+                elseif selectedLuckyBlockType == "Backline Legends" then
+                    matches = matchesBackline()
                 elseif selectedLuckyBlockType == "Next Generation" then
                     matches = matchesNextGen()
                 elseif selectedLuckyBlockType == "Alternative" then
@@ -6738,7 +6777,7 @@ function goToBase()
 end
 
 print("========================================")
-print("[AutoFarm] NEXT GENERATION + JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift highest-cash priority + count/delay + Auto Accept + Lowest Profit")
+print("[AutoFarm] BACKLINE LEGENDS + NEXT GENERATION + JAPAN + ICONS + upgrade + steal + OPEN ALL boxes + Gift + Auto Accept + Lowest Profit")
 print("Place Boxes = teleport-hop + spam Place Slime near each slot | Open Boxes = burst open only")
 print("Commands: stopAll() | goToBase()")
 print("========================================")
