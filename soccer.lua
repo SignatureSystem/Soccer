@@ -1,7 +1,7 @@
 -- Combined Script: NEXT GENERATION + JAPAN + ICONS UPDATE + FILTERED DYNAMIC SPAM Auto Upgrade (RARITY + MUTATION / NO FLOOR LIMIT) + FILTERED Lucky Block Collector
 -- + UNIVERSAL Place ALL inventory lucky boxes + OPEN ALL slot boxes (spam, no wait) + 10-slot Pickup Range + Place-by-Mutation + CURRENT INDIVIDUAL earnings desc + Invis
 -- + expandable right-side Gift All inventory panel + HIGHEST CURRENT CASH/s gift priority + Gift Count/Delay + Auto Accept Gifts + Pick Lowest Profit by count
--- + Lucky Box collector uses hop.lua steal flow: solidify -> cloak -> teleport ON TOP (no hover) -> prompt spam -> base; NO server hop
+-- + Lucky Box collector uses hop.lua steal: solidify -> cloak -> ON TOP (no hover) -> prompt -> base; NO server hop
 -- + Next Generation Lucky Block (ID 2146) + Backline Legends Lucky Block (ID 2625) supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
@@ -4729,73 +4729,45 @@ local function getTargetLuckyBlock()
     return best
 end
 
--- Hop.lua steal helpers: solidify + stand ON TOP (no hover lock)
-local STEAL_STAND_OFFSET = 3
-
-local function makeLuckyBoxSolid(block)
-    if not block then
-        return
-    end
-    local parts = {}
-    if block.model and block.model.Parent then
-        for _, d in ipairs(block.model:GetDescendants()) do
-            if d:IsA("BasePart") then
-                table.insert(parts, d)
-            end
-        end
-        if block.model:IsA("BasePart") then
-            table.insert(parts, block.model)
-        end
-    end
-    if block.part and block.part:IsA("BasePart") then
-        table.insert(parts, block.part)
-    end
-    for _, part in ipairs(parts) do
-        pcall(function()
-            part.CanCollide = true
-            part.CanTouch = true
-            part.CanQuery = true
-            if part.Massless ~= nil then
-                part.Massless = true
-            end
-        end)
-    end
-end
-
-local function standOnBoxCFrame(part)
-    if not part or not part.Parent then
-        return nil
-    end
-    local topY = part.Size.Y * 0.5 + STEAL_STAND_OFFSET
-    return part.CFrame * CFrame.new(0, topY, 0)
-end
-
 local function attemptSteal(prompt)
     if not prompt or not prompt.Parent then
         return false
     end
 
+    -- Prompt hold is globally forced to zero.
     pcall(function()
         prompt.HoldDuration = 0
     end)
 
+    -- Instant proximity tap. No hold-duration wait.
     if typeof(fireproximityprompt) == "function" then
         local ok = pcall(function()
             fireproximityprompt(prompt)
         end)
+
         if ok then
             return true
         end
     end
 
+    -- Fallback.
     local ok = pcall(function()
         prompt:InputHoldBegin()
-        task.wait(0.05)
         prompt:InputHoldEnd()
     end)
 
     return ok
 end
+
+
+
+-- ============================================================
+-- UNIVERSAL LUCKY BOX PLACE / OPEN (ALL types)
+-- NO FIXED SLOT LIMIT: supports every current slot, including 100+.
+-- Place Boxes  -> every available free stand dynamically.
+-- Open Boxes   -> every occupied/placed slot dynamically.
+-- Does NOT use selectedLuckyBlockType filter.
+-- ============================================================
 
 local function getAllLuckyBlockPlaceEntries()
     -- Collect ALL lucky-block UIDs from tools + inventory data (any type).
@@ -6385,11 +6357,74 @@ task.spawn(function()
 end)
 
 task.spawn(function()
+    -- hop.lua helpers scoped HERE so they do not add main-chunk locals
+    local STEAL_STAND_OFFSET = 3
+
+    local function makeLuckyBoxSolid(block)
+        if not block then
+            return
+        end
+        local parts = {}
+        if block.model and block.model.Parent then
+            for _, d in ipairs(block.model:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    table.insert(parts, d)
+                end
+            end
+            if block.model:IsA("BasePart") then
+                table.insert(parts, block.model)
+            end
+        end
+        if block.part and block.part:IsA("BasePart") then
+            table.insert(parts, block.part)
+        end
+        for _, part in ipairs(parts) do
+            pcall(function()
+                part.CanCollide = true
+                part.CanTouch = true
+                part.CanQuery = true
+                if part.Massless ~= nil then
+                    part.Massless = true
+                end
+            end)
+        end
+    end
+
+    local function standOnBoxCFrame(part)
+        if not part or not part.Parent then
+            return nil
+        end
+        local topY = part.Size.Y * 0.5 + STEAL_STAND_OFFSET
+        return part.CFrame * CFrame.new(0, topY, 0)
+    end
+
+    local function hopAttemptSteal(prompt)
+        if not prompt or not prompt.Parent then
+            return false
+        end
+        pcall(function()
+            prompt.HoldDuration = 0
+        end)
+        if typeof(fireproximityprompt) == "function" then
+            local ok = pcall(function()
+                fireproximityprompt(prompt)
+            end)
+            if ok then
+                return true
+            end
+        end
+        local ok = pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(0.05)
+            prompt:InputHoldEnd()
+        end)
+        return ok
+    end
+
     while true do
         if luckyEnabled and not luckyBlockBusy then
             luckyBlockBusy = true
 
-            -- hop.lua: already carrying → deposit only
             if LocalPlayer:GetAttribute("holdingSlime") == true then
                 StatusLabel.Text = "Lucky Block: carrying -> returning to base"
                 teleportToBase()
@@ -6421,7 +6456,6 @@ task.spawn(function()
                 tostring(selectedLuckyBlockType)
                 .. " found — hop.lua ON TOP steal"
 
-            -- hop.lua: solidify → cloak
             makeLuckyBoxSolid(block)
             pcall(activateCloak)
             task.wait(0.1)
@@ -6433,7 +6467,6 @@ task.spawn(function()
                 continue
             end
 
-            -- Clear leftover float objects from older builds
             for _, name in ipairs({ "LuckyFloat", "LuckyHoverPos", "LuckyHoverGyro" }) do
                 local old = root:FindFirstChild(name)
                 if old then
@@ -6443,7 +6476,6 @@ task.spawn(function()
 
             makeLuckyBoxSolid(block)
 
-            -- hop.lua: teleport EXACTLY on top (no BodyMovers / hover lock)
             local cf = standOnBoxCFrame(block.part)
             if not cf then
                 luckyBlockBusy = false
@@ -6451,20 +6483,11 @@ task.spawn(function()
                 continue
             end
 
-            local hum = getRoot() and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if hum then
-                pcall(function()
-                    hum.PlatformStand = false
-                    hum.AutoRotate = true
-                end)
-            end
-
             root.CFrame = cf
             root.AssemblyLinearVelocity = Vector3.zero
             root.AssemblyAngularVelocity = Vector3.zero
             task.wait(0.05)
 
-            -- Re-snap once
             root = getRoot()
             if root and block.part and block.part.Parent then
                 local cf2 = standOnBoxCFrame(block.part)
@@ -6474,7 +6497,6 @@ task.spawn(function()
                 end
             end
 
-            -- Zero all prompt holds
             for _, v in ipairs(Workspace:GetDescendants()) do
                 if v:IsA("ProximityPrompt") then
                     v.HoldDuration = 0
@@ -6538,7 +6560,7 @@ task.spawn(function()
                         prompt.Enabled = true
                         prompt.HoldDuration = 0
                     end)
-                    attemptSteal(prompt)
+                    hopAttemptSteal(prompt)
                 end
 
                 if LocalPlayer:GetAttribute("holdingSlime") == true then
