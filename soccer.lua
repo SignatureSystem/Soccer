@@ -5,27 +5,29 @@
 -- + Next Generation Lucky Block (ID 2146) + Backline Legends Lucky Block (ID 2625) supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
-
--- INSTANT PROXIMITY PROMPTS
--- Existing prompts:
-for _, v in ipairs(workspace:GetDescendants()) do
-    if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0.09
-    end
-end
-
--- Future prompts that replicate/spawn later:
-workspace.DescendantAdded:Connect(function(v)
-    if v:IsA("ProximityPrompt") then
-        v.HoldDuration = 0.09
-    end
-end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:FindFirstChildOfClass("PlayerGui")
+
+print("[AutoFarm] script started")
+
+-- Instant prompts AFTER the GUI exists. Scanning all of workspace first
+-- freezes executors and looks like the script never loaded.
+task.spawn(function()
+    workspace.DescendantAdded:Connect(function(v)
+        if v:IsA("ProximityPrompt") then
+            v.HoldDuration = 0.09
+        end
+    end)
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then
+            v.HoldDuration = 0.09
+        end
+    end
+end)
 
 -- ============================================
 -- CONFIG
