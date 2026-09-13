@@ -47,8 +47,8 @@ local MAX_LEVEL = 100
 local UPGRADE_SPAM_ROUNDS = 1
 local UPGRADE_SPAM_GAP = 0.05
 local UPGRADE_CYCLE_DELAY = 0.10
--- Auto Upgrade: scan â†’ 25 cheapest â†’ spam all 25 â†’ wait 1s â†’ rescan.
-local UPGRADE_BATCH_SIZE = 25
+-- Auto Upgrade: scan least cost â†’ spam 50 cheapest â†’ rescan â†’ loop.
+local UPGRADE_BATCH_SIZE = 50
 local UPGRADE_BATCH_WAIT = 1.0
 
 local REBIRTH_INTERVAL = 5
@@ -6301,12 +6301,12 @@ task.spawn(function()
         end
 
         local ok, err = xpcall(function()
-            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 25
+            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 50
             local batchWait = tonumber(UPGRADE_BATCH_WAIT) or 1.0
             local rarityAtDecision = selectedUpgradeRarity
             local mutationAtDecision = selectedUpgradeMutation
 
-            -- Fresh scan every batch: cheapest 25 â†’ fire â†’ wait â†’ rescan â†’ next 25
+            -- Full scan â†’ sort least cost â†’ spam 50 â†’ wait â†’ rescan
             local upgrades, stats = getPrioritizedUpgrades()
 
             if rarityAtDecision ~= selectedUpgradeRarity
@@ -6341,7 +6341,7 @@ task.spawn(function()
                 return
             end
 
-            -- Take only the 25 cheapest from this rescan
+            -- Take the 50 cheapest from this full scan
             local batch = {}
             local limit = math.min(batchSize, #upgrades)
             for i = 1, limit do
@@ -6355,7 +6355,7 @@ task.spawn(function()
             end
 
             StatusLabel.Text = string.format(
-                "Auto Upgrade | R:%s M:%s | cheapest %d of %d (1s rescan)",
+                "Auto Upgrade | R:%s M:%s | cheapest %d of %d (rescan)",
                 upgradeRarityDisplayName(rarityAtDecision),
                 upgradeMutationDisplayName(mutationAtDecision),
                 #batch,
