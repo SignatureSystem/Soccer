@@ -1556,13 +1556,15 @@ local function ResolveUpgradeChannel()
 end
 
 local function FireUpgradeSlot(slotName)
-    -- Game client (CharacterBulkUpgradeController.Request):
-    --   Remote:Fire(slotKey, mode, uid, level)
-    -- mode = 1 | 10 | "Max" (bulk). We use 1 for reliable single-step spam.
+    -- Working packet (same as live stand button):
+    --   Upgrade Slime:FireServer(slot, 1, uid, level)
+    if LocalPlayer:GetAttribute("OldDataMigrationLocked") == true then
+        return false, "migration locked"
+    end
+
     slotName = tostring(slotName)
 
-    local uid = nil
-    local level = 1
+    local uid, level, slimeId = nil, 1, nil
     local data = getData and getData() or nil
     local plotSlimes = data and data.PlotSlimes
     if type(plotSlimes) == "table" then
@@ -1573,66 +1575,83 @@ local function FireUpgradeSlot(slotName)
         if type(entry) == "table" then
             uid = entry.uid or entry.UID or entry.Uuid or entry.uuid
             level = tonumber(entry.level or entry.Level) or 1
-            -- Skip pure lucky blocks (game rejects these)
-            local sid = entry.id or entry.Id
-            if sid ~= nil and getSlimeDef then
-                local def = getSlimeDef(sid)
-                if def and tostring(def.Type or "") == "Lucky Block" then
-                    return false, "lucky_block"
-                end
-            end
+            slimeId = entry.id or entry.Id
         end
+    end
+
+    if uid == nil then
+        local folder = getPlayerSlimesFolder and getPlayerSlimesFolder()
+        local model = folder and folder:FindFirstChild(slotName)
+        if model then
+            uid = model:GetAttribute("slimeUid") or model:GetAttribute("slimeUID")
+            level = tonumber(model:GetAttribute("level")) or level
+            slimeId = slimeId or model:GetAttribute("slimeId")
+        end
+    end
+
+    if slimeId ~= nil and getSlimeDef then
+        local def = getSlimeDef(slimeId)
+        if def and tostring(def.Type or "") == "Lucky Block" then
+            return false, "lucky_block"
+        end
+    end
+
+    if uid == nil then
+        return false, "no uid"
     end
 
     local mode = 1
-    local anyOk = false
+    local slotNum = tonumber(slotName)
+    local sent = false
 
-    local function tryFire(fireFn)
-        -- Preferred signature from live game
+    local function send(fireFn)
         local ok = pcall(function()
-            if uid ~= nil then
-                fireFn(slotName, mode, uid, level)
-            else
-                fireFn(slotName, mode)
-            end
+            fireFn(slotName, mode, uid, level)
         end)
         if ok then
-            return true
+            sent = true
         end
-        -- Fallbacks for older builds
-        ok = pcall(function()
-            fireFn(slotName)
-        end)
-        return ok
+        if slotNum then
+            ok = pcall(function()
+                fireFn(slotNum, mode, uid, level)
+            end)
+            if ok then
+                sent = true
+            end
+        end
     end
 
-    local channel = ResolveUpgradeChannel()
+    local channel = ResolveUpgradeChannel and ResolveUpgradeChannel() or nil
     if channel and typeof(channel.Fire) == "function" then
-        if tryFire(function(...)
+        send(function(...)
             channel:Fire(...)
-        end) then
-            anyOk = true
-        else
-            UpgradeChannel = nil
-        end
+        end)
     end
 
     local raw = ResolveUpgradeRemote and ResolveUpgradeRemote() or UpgradeRemote
-    if raw and raw.Parent and raw:IsA("RemoteEvent") then
-        if tryFire(function(...)
-            raw:FireServer(...)
-        end) then
-            anyOk = true
+    if not (raw and raw.Parent and raw:IsA("RemoteEvent")) then
+        local ok, ev = pcall(function()
+            return ReplicatedStorage.SharedModules.Network.Remotes["Upgrade Slime"]
+        end)
+        if ok and ev and ev:IsA("RemoteEvent") then
+            raw = ev
+            UpgradeRemote = ev
         end
     end
 
-    if not anyOk then
+    if raw and raw.Parent and raw:IsA("RemoteEvent") then
+        send(function(...)
+            raw:FireServer(...)
+        end)
+    end
+
+    if not sent then
         for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
             if v:IsA("RemoteEvent") and v.Name == "Upgrade Slime" then
-                if tryFire(function(...)
+                send(function(...)
                     v:FireServer(...)
-                end) then
-                    anyOk = true
+                end)
+                if sent then
                     UpgradeRemote = v
                     break
                 end
@@ -1640,9 +1659,8 @@ local function FireUpgradeSlot(slotName)
         end
     end
 
-    return anyOk
+    return sent
 end
-
 local function ResolveRemoteEventExact(name)
     for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
         if v:IsA("RemoteEvent") and v.Name == name then
@@ -6112,8 +6130,8 @@ end
 -- LOOPS
 -- ============================================
 -- AUTO COLLECT
--- Every 8 seconds, collect earnings once from each currently occupied slot.
--- No spam: only real placed stands from PlotSlimes (fallback: stand models).
+-- Collect occupied PlotSlimes only. Stagger fires so the client
+-- does not hitch from 80-100 Cash Effect remotes in one frame.
 task.spawn(function()
     while true do
         if collectEnabled and CollectRemote then
@@ -6125,27 +6143,11 @@ task.spawn(function()
 
             if type(plotSlimes) == "table" then
                 for slotName, entry in pairs(plotSlimes) do
-                    if entry ~= nil then
+                    if type(entry) == "table" then
                         local name = tostring(slotName)
                         if name ~= "" and not seen[name] then
                             seen[name] = true
                             table.insert(slots, name)
-                        end
-                    end
-                end
-            end
-
-            if #slots == 0 then
-                local plot = getMyPlot and getMyPlot() or nil
-                local stands = plot and plot:FindFirstChild("Stands")
-                if stands then
-                    for _, stand in ipairs(stands:GetChildren()) do
-                        if stand:IsA("Model") then
-                            local name = tostring(stand.Name)
-                            if name ~= "" and not seen[name] then
-                                seen[name] = true
-                                table.insert(slots, name)
-                            end
                         end
                     end
                 end
@@ -6166,6 +6168,7 @@ task.spawn(function()
                 pcall(function()
                     CollectRemote:FireServer(tostring(slotName))
                 end)
+                task.wait(0.03)
             end
 
             task.wait(COLLECT_INTERVAL)
@@ -6297,115 +6300,90 @@ task.spawn(function()
     while true do
         if not upgradeEnabled then
             task.wait(UPGRADE_SCAN)
-            continue
-        end
+        else
+            local ok, err = xpcall(function()
+                local rarityAtDecision = selectedUpgradeRarity
+                local mutationAtDecision = selectedUpgradeMutation
 
-        local ok, err = xpcall(function()
-            local batchSize = tonumber(UPGRADE_BATCH_SIZE) or 50
-            local batchWait = tonumber(UPGRADE_BATCH_WAIT) or 1.0
-            local rarityAtDecision = selectedUpgradeRarity
-            local mutationAtDecision = selectedUpgradeMutation
+                local upgrades, stats = getPrioritizedUpgrades()
 
-            -- Full scan â†’ sort least cost â†’ spam 50 â†’ wait â†’ rescan
-            local upgrades, stats = getPrioritizedUpgrades()
-
-            if rarityAtDecision ~= selectedUpgradeRarity
-                or mutationAtDecision ~= selectedUpgradeMutation
-            then
-                return
-            end
-
-            table.sort(upgrades, function(a, b)
-                local ac = tonumber(a and a.cost) or math.huge
-                local bc = tonumber(b and b.cost) or math.huge
-                if ac ~= bc then
-                    return ac < bc
-                end
-                local al = tonumber(a and a.level) or 1
-                local bl = tonumber(b and b.level) or 1
-                if al ~= bl then
-                    return al < bl
-                end
-                return (tonumber(a and a.id) or math.huge)
-                    < (tonumber(b and b.id) or math.huge)
-            end)
-
-            if #upgrades == 0 then
-                StatusLabel.Text = string.format(
-                    "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
-                    upgradeRarityDisplayName(rarityAtDecision),
-                    upgradeMutationDisplayName(mutationAtDecision),
-                    stats and stats.occupied or 0
-                )
-                task.wait(0.15)
-                return
-            end
-
-            -- Take the 50 cheapest from this full scan
-            local batch = {}
-            local limit = math.min(batchSize, #upgrades)
-            for i = 1, limit do
-                local info = upgrades[i]
-                if info and info.id then
-                    table.insert(batch, {
-                        id = tostring(info.id),
-                        cost = tonumber(info.cost) or 0,
-                    })
-                end
-            end
-
-            StatusLabel.Text = string.format(
-                "Auto Upgrade | R:%s M:%s | cheapest %d of %d (rescan)",
-                upgradeRarityDisplayName(rarityAtDecision),
-                upgradeMutationDisplayName(mutationAtDecision),
-                #batch,
-                #upgrades
-            )
-
-            local firedCount = 0
-            for _, entry in ipairs(batch) do
-                if not upgradeEnabled then
-                    break
-                end
                 if rarityAtDecision ~= selectedUpgradeRarity
                     or mutationAtDecision ~= selectedUpgradeMutation
                 then
-                    break
+                    return
                 end
 
-                task.spawn(function()
+                table.sort(upgrades, function(a, b)
+                    local ac = tonumber(a and a.cost) or math.huge
+                    local bc = tonumber(b and b.cost) or math.huge
+                    if ac ~= bc then
+                        return ac < bc
+                    end
+                    local al = tonumber(a and a.level) or 1
+                    local bl = tonumber(b and b.level) or 1
+                    if al ~= bl then
+                        return al < bl
+                    end
+                    return (tonumber(a and a.id) or math.huge)
+                        < (tonumber(b and b.id) or math.huge)
+                end)
+
+                if #upgrades == 0 then
+                    StatusLabel.Text = string.format(
+                        "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
+                        upgradeRarityDisplayName(rarityAtDecision),
+                        upgradeMutationDisplayName(mutationAtDecision),
+                        stats and stats.occupied or 0
+                    )
+                    task.wait(0.20)
+                    return
+                end
+
+                StatusLabel.Text = string.format(
+                    "Auto Upgrade | R:%s M:%s | %d matching (1-by-1)",
+                    upgradeRarityDisplayName(rarityAtDecision),
+                    upgradeMutationDisplayName(mutationAtDecision),
+                    #upgrades
+                )
+
+                local firedCount = 0
+                local i = 1
+                while i <= #upgrades and upgradeEnabled do
                     if rarityAtDecision ~= selectedUpgradeRarity
                         or mutationAtDecision ~= selectedUpgradeMutation
-                        or not upgradeEnabled
                     then
-                        return
+                        break
                     end
-                    if FireUpgradeSlot(entry.id) then
-                        firedCount += 1
+
+                    local info = upgrades[i]
+                    if info and info.id then
+                        if FireUpgradeSlot(tostring(info.id)) then
+                            firedCount = firedCount + 1
+                        end
+                        StatusLabel.Text = string.format(
+                            "Auto Upgrade | %d/%d slot %s lv %s",
+                            i,
+                            #upgrades,
+                            tostring(info.id),
+                            tostring(info.level or "?")
+                        )
                     end
-                end)
+
+                    task.wait(0.25)
+                    i = i + 1
+                end
+            end, debug.traceback)
+
+            if not ok then
+                warn("[AutoUpgrade] ERROR:", err)
+                StatusLabel.Text =
+                    "Auto Upgrade error: "
+                    .. tostring(err):match("^[^\n]+")
+                task.wait(0.25)
             end
 
-            -- Wait 2s so costs/levels update, then outer loop rescans for next 25
-            if upgradeEnabled then
-                StatusLabel.Text = string.format(
-                    "Auto Upgrade | fired %d cheapest | rescan in %.1fs...",
-                    #batch,
-                    batchWait
-                )
-                task.wait(batchWait)
-            end
-        end, debug.traceback)
-
-        if not ok then
-            warn("[AutoUpgrade] ERROR:", err)
-            StatusLabel.Text =
-                "Auto Upgrade error: "
-                .. tostring(err):match("^[^\n]+")
-            task.wait(0.25)
+            task.wait(0.05)
         end
-
-        task.wait(0.01)
     end
 end)
 
