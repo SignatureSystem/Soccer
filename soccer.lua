@@ -5,29 +5,27 @@
 -- + Next Generation Lucky Block (ID 2146) + Backline Legends Lucky Block (ID 2625) supported in steal, place, open, place+open, auto upgrade, and filters
 
 local Players = game:GetService("Players")
+
+-- INSTANT PROXIMITY PROMPTS
+-- Existing prompts:
+for _, v in ipairs(workspace:GetDescendants()) do
+    if v:IsA("ProximityPrompt") then
+        v.HoldDuration = 0.09
+    end
+end
+
+-- Future prompts that replicate/spawn later:
+workspace.DescendantAdded:Connect(function(v)
+    if v:IsA("ProximityPrompt") then
+        v.HoldDuration = 0.09
+    end
+end)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:FindFirstChildOfClass("PlayerGui")
-
-print("[AutoFarm] script started")
-
--- Instant prompts AFTER the GUI exists. Scanning all of workspace first
--- freezes executors and looks like the script never loaded.
-task.spawn(function()
-    workspace.DescendantAdded:Connect(function(v)
-        if v:IsA("ProximityPrompt") then
-            v.HoldDuration = 0.09
-        end
-    end)
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("ProximityPrompt") then
-            v.HoldDuration = 0.09
-        end
-    end
-end)
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 
 -- ============================================
 -- CONFIG
@@ -1557,147 +1555,111 @@ local function ResolveUpgradeChannel()
     return nil
 end
 
-local function v2FindUpgradeRemote()
-    local ok, ev = pcall(function()
-        return ReplicatedStorage.SharedModules.Network.Remotes["Upgrade Slime"]
-    end)
-    if ok and ev and ev:IsA("RemoteEvent") then
-        UpgradeRemote = ev
-        return ev
-    end
-    local net = ReplicatedStorage:FindFirstChild("SharedModules")
-    net = net and net:FindFirstChild("Network")
-    local remotes = net and net:FindFirstChild("Remotes")
-    if remotes then
-        local v = remotes:FindFirstChild("Upgrade Slime")
-        if v and v:IsA("RemoteEvent") then
-            UpgradeRemote = v
-            return v
-        end
-    end
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") and string.lower(v.Name) == "upgrade slime" then
-            UpgradeRemote = v
-            return v
-        end
-    end
-    return UpgradeRemote
-end
-
-local function v2GetUpgradeChannel()
-    if UpgradeChannel and type(UpgradeChannel) == "table" and typeof(UpgradeChannel.Fire) == "function" then
-        return UpgradeChannel
-    end
-    if _Lib and _Lib.GameRemoteRegistry and type(_Lib.GameRemoteRegistry.new) == "function" then
-        local ok, ch = pcall(function()
-            return _Lib.GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent")
-        end)
-        if ok and ch and typeof(ch.Fire) == "function" then
-            UpgradeChannel = ch
-            return ch
-        end
-    end
-    return nil
-end
-
-local function v2ReadUpgradeEntry(slotName)
-    slotName = tostring(slotName)
-    local data = getData and getData() or nil
-    local ps = data and data.PlotSlimes
-    local entry
-    if type(ps) == "table" then
-        entry = ps[slotName] or ps[tonumber(slotName)] or ps[tostring(slotName)]
-    end
-    local uid, level, id
-    if type(entry) == "table" then
-        uid = entry.uid or entry.UID
-        level = tonumber(entry.level or entry.Level)
-        id = entry.id or entry.Id
-    end
-    local folder = getPlayerSlimesFolder and getPlayerSlimesFolder()
-    local model = folder and folder:FindFirstChild(slotName)
-    if model then
-        uid = uid or model:GetAttribute("slimeUid") or model:GetAttribute("slimeUID")
-        level = level or tonumber(model:GetAttribute("level"))
-        id = id or model:GetAttribute("slimeId")
-    end
-    local my = getMyPlot and getMyPlot()
-    local stands = my and my:FindFirstChild("Stands")
-    local stand = stands and stands:FindFirstChild(slotName)
-    if stand then
-        uid = uid or stand:GetAttribute("slimeUid")
-        level = level or tonumber(stand:GetAttribute("level"))
-        id = id or stand:GetAttribute("slimeId")
-    end
-    return uid, tonumber(level) or 1, id
-end
-
-local function v2ListUpgradeSlots()
-    local out, seen = {}, {}
-    local function add(name)
-        name = tostring(name)
-        if name ~= "" and not seen[name] then
-            seen[name] = true
-            table.insert(out, name)
-        end
-    end
-    local data = getData and getData() or nil
-    if data and type(data.PlotSlimes) == "table" then
-        for k, v in pairs(data.PlotSlimes) do
-            if type(v) == "table" then
-                add(k)
-            end
-        end
-    end
-    local folder = getPlayerSlimesFolder and getPlayerSlimesFolder()
-    if folder then
-        for _, m in ipairs(folder:GetChildren()) do
-            add(m.Name)
-        end
-    end
-    table.sort(out, function(a, b)
-        local na, nb = tonumber(a), tonumber(b)
-        if na and nb then
-            return na < nb
-        end
-        return a < b
-    end)
-    return out
-end
-
 local function FireUpgradeSlot(slotName)
-    -- Exact Simple Auto Upgrade v2 packet
+    -- Working packet (same as live stand button):
+    --   Upgrade Slime:FireServer(slot, 1, uid, level)
     if LocalPlayer:GetAttribute("OldDataMigrationLocked") == true then
         return false, "migration locked"
     end
-    local uid, level, id = v2ReadUpgradeEntry(slotName)
-    if id ~= nil and getSlimeDef then
-        local def = getSlimeDef(id)
-        if def and tostring(def.Type or "") == "Lucky Block" then
-            return false, "lucky"
+
+    slotName = tostring(slotName)
+
+    local uid, level, slimeId = nil, 1, nil
+    local data = getData and getData() or nil
+    local plotSlimes = data and data.PlotSlimes
+    if type(plotSlimes) == "table" then
+        local entry =
+            plotSlimes[slotName]
+            or plotSlimes[tonumber(slotName)]
+            or plotSlimes[tostring(slotName)]
+        if type(entry) == "table" then
+            uid = entry.uid or entry.UID or entry.Uuid or entry.uuid
+            level = tonumber(entry.level or entry.Level) or 1
+            slimeId = entry.id or entry.Id
         end
     end
+
+    if uid == nil then
+        local folder = getPlayerSlimesFolder and getPlayerSlimesFolder()
+        local model = folder and folder:FindFirstChild(slotName)
+        if model then
+            uid = model:GetAttribute("slimeUid") or model:GetAttribute("slimeUID")
+            level = tonumber(model:GetAttribute("level")) or level
+            slimeId = slimeId or model:GetAttribute("slimeId")
+        end
+    end
+
+    if slimeId ~= nil and getSlimeDef then
+        local def = getSlimeDef(slimeId)
+        if def and tostring(def.Type or "") == "Lucky Block" then
+            return false, "lucky_block"
+        end
+    end
+
     if uid == nil then
         return false, "no uid"
     end
-    slotName = tostring(slotName)
+
+    local mode = 1
+    local slotNum = tonumber(slotName)
     local sent = false
-    local ch = v2GetUpgradeChannel()
-    if ch then
-        sent = pcall(function()
-            ch:Fire(slotName, 1, uid, level)
-        end) or sent
+
+    local function send(fireFn)
+        local ok = pcall(function()
+            fireFn(slotName, mode, uid, level)
+        end)
+        if ok then
+            sent = true
+        end
+        if slotNum then
+            ok = pcall(function()
+                fireFn(slotNum, mode, uid, level)
+            end)
+            if ok then
+                sent = true
+            end
+        end
     end
-    local raw = v2FindUpgradeRemote()
-    if raw then
-        sent = pcall(function()
-            raw:FireServer(slotName, 1, uid, level)
-        end) or sent
+
+    local channel = ResolveUpgradeChannel and ResolveUpgradeChannel() or nil
+    if channel and typeof(channel.Fire) == "function" then
+        send(function(...)
+            channel:Fire(...)
+        end)
     end
+
+    local raw = ResolveUpgradeRemote and ResolveUpgradeRemote() or UpgradeRemote
+    if not (raw and raw.Parent and raw:IsA("RemoteEvent")) then
+        local ok, ev = pcall(function()
+            return ReplicatedStorage.SharedModules.Network.Remotes["Upgrade Slime"]
+        end)
+        if ok and ev and ev:IsA("RemoteEvent") then
+            raw = ev
+            UpgradeRemote = ev
+        end
+    end
+
+    if raw and raw.Parent and raw:IsA("RemoteEvent") then
+        send(function(...)
+            raw:FireServer(...)
+        end)
+    end
+
     if not sent then
-        return false, "no remote"
+        for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+            if v:IsA("RemoteEvent") and v.Name == "Upgrade Slime" then
+                send(function(...)
+                    v:FireServer(...)
+                end)
+                if sent then
+                    UpgradeRemote = v
+                    break
+                end
+            end
+        end
     end
-    return true, uid, level
+
+    return sent
 end
 local function ResolveRemoteEventExact(name)
     for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
@@ -6339,71 +6301,88 @@ task.spawn(function()
         if not upgradeEnabled then
             task.wait(UPGRADE_SCAN)
         else
-            local rarityAtDecision = selectedUpgradeRarity
-            local mutationAtDecision = selectedUpgradeMutation
-            local filterOn = tostring(rarityAtDecision) ~= "All"
-                or tostring(mutationAtDecision) ~= "All"
+            local ok, err = xpcall(function()
+                local rarityAtDecision = selectedUpgradeRarity
+                local mutationAtDecision = selectedUpgradeMutation
 
-            local names = v2ListUpgradeSlots()
-            if filterOn and getPrioritizedUpgrades then
-                local upgrades = select(1, getPrioritizedUpgrades())
-                local allow = {}
-                for _, info in ipairs(upgrades or {}) do
-                    if info and info.id then
-                        allow[tostring(info.id)] = true
-                    end
-                end
-                local filtered = {}
-                for _, name in ipairs(names) do
-                    if allow[name] then
-                        table.insert(filtered, name)
-                    end
-                end
-                names = filtered
-            end
+                local upgrades, stats = getPrioritizedUpgrades()
 
-            if #names == 0 then
+                if rarityAtDecision ~= selectedUpgradeRarity
+                    or mutationAtDecision ~= selectedUpgradeMutation
+                then
+                    return
+                end
+
+                table.sort(upgrades, function(a, b)
+                    local ac = tonumber(a and a.cost) or math.huge
+                    local bc = tonumber(b and b.cost) or math.huge
+                    if ac ~= bc then
+                        return ac < bc
+                    end
+                    local al = tonumber(a and a.level) or 1
+                    local bl = tonumber(b and b.level) or 1
+                    if al ~= bl then
+                        return al < bl
+                    end
+                    return (tonumber(a and a.id) or math.huge)
+                        < (tonumber(b and b.id) or math.huge)
+                end)
+
+                if #upgrades == 0 then
+                    StatusLabel.Text = string.format(
+                        "Auto Upgrade | R:%s + M:%s | 0 matching / %d occupied",
+                        upgradeRarityDisplayName(rarityAtDecision),
+                        upgradeMutationDisplayName(mutationAtDecision),
+                        stats and stats.occupied or 0
+                    )
+                    task.wait(0.20)
+                    return
+                end
+
                 StatusLabel.Text = string.format(
-                    "Auto Upgrade | R:%s M:%s | 0 slots",
+                    "Auto Upgrade | R:%s M:%s | %d matching (1-by-1)",
                     upgradeRarityDisplayName(rarityAtDecision),
-                    upgradeMutationDisplayName(mutationAtDecision)
+                    upgradeMutationDisplayName(mutationAtDecision),
+                    #upgrades
                 )
-                task.wait(0.40)
-            else
-                StatusLabel.Text = string.format(
-                    "Auto Upgrade | v2 | %d slots",
-                    #names
-                )
+
+                local firedCount = 0
                 local i = 1
-                while i <= #names and upgradeEnabled do
+                while i <= #upgrades and upgradeEnabled do
                     if rarityAtDecision ~= selectedUpgradeRarity
                         or mutationAtDecision ~= selectedUpgradeMutation
                     then
                         break
                     end
-                    local name = names[i]
-                    local ok, a, b = FireUpgradeSlot(name)
-                    if ok then
+
+                    local info = upgrades[i]
+                    if info and info.id then
+                        if FireUpgradeSlot(tostring(info.id)) then
+                            firedCount = firedCount + 1
+                        end
                         StatusLabel.Text = string.format(
-                            "Auto Upgrade %d/%d slot %s lv %s",
+                            "Auto Upgrade | %d/%d slot %s lv %s",
                             i,
-                            #names,
-                            name,
-                            tostring(b)
-                        )
-                    else
-                        StatusLabel.Text = string.format(
-                            "Auto Upgrade %d/%d slot %s: %s",
-                            i,
-                            #names,
-                            name,
-                            tostring(a)
+                            #upgrades,
+                            tostring(info.id),
+                            tostring(info.level or "?")
                         )
                     end
+
                     task.wait(0.25)
                     i = i + 1
                 end
+            end, debug.traceback)
+
+            if not ok then
+                warn("[AutoUpgrade] ERROR:", err)
+                StatusLabel.Text =
+                    "Auto Upgrade error: "
+                    .. tostring(err):match("^[^\n]+")
+                task.wait(0.25)
             end
+
+            task.wait(0.05)
         end
     end
 end)
