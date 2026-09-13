@@ -1,6 +1,5 @@
--- Simple Auto Upgrade v3 — max profit per cash
--- Packet: Upgrade Slime (slotName, 1, uid, level)
--- Picks the upgrade with the best extra cash/s per dollar spent.
+-- Simple Auto Upgrade v2
+-- Live packet: Upgrade Slime (slotName, 1, uid, level)
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8,14 +7,6 @@ local CoreGui = game:GetService("CoreGui")
 local LP = Players.LocalPlayer
 
 local DELAY = 0.25
-local MAX_LEVEL = 100
-local GROWTH = 1.3
-
-local MUTATION_MULTI = {
-    None = 1, Golden = 2, Diamond = 2.5, Rainbow = 3,
-    Cursed = 4, Divine = 5, Fallen = 5, Joker = 5.5, Stellar = 6,
-    Volcanic = 2, Toxic = 2, Taco = 3, Cosmic = 3, Slimey = 3,
-}
 
 local function getHui()
     local ok, h = pcall(function()
@@ -47,7 +38,7 @@ end)
 gui.Parent = getHui()
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(250, 96)
+frame.Size = UDim2.fromOffset(230, 86)
 frame.Position = UDim2.new(0, 18, 0.45, 0)
 frame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
 frame.Active = true
@@ -67,7 +58,7 @@ btn.Parent = frame
 Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
 
 local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -16, 0, 38)
+status.Size = UDim2.new(1, -16, 0, 28)
 status.Position = UDim2.new(0, 8, 0, 50)
 status.BackgroundTransparency = 1
 status.Text = "Booting..."
@@ -169,12 +160,11 @@ local function readEntry(slotName)
     if type(ps) == "table" then
         entry = ps[slotName] or ps[tonumber(slotName)] or ps[tostring(slotName)]
     end
-    local uid, level, id, mutation
+    local uid, level, id
     if type(entry) == "table" then
         uid = entry.uid or entry.UID
         level = tonumber(entry.level or entry.Level)
         id = entry.id or entry.Id
-        mutation = entry.mutation or entry.Mutation
     end
     local folder = liveFolder()
     local model = folder and folder:FindFirstChild(tostring(slotName))
@@ -182,7 +172,6 @@ local function readEntry(slotName)
         uid = uid or model:GetAttribute("slimeUid") or model:GetAttribute("slimeUID")
         level = level or tonumber(model:GetAttribute("level"))
         id = id or model:GetAttribute("slimeId")
-        mutation = mutation or model:GetAttribute("mutation")
     end
     local my = plot()
     local stands = my and my:FindFirstChild("Stands")
@@ -191,62 +180,21 @@ local function readEntry(slotName)
         uid = uid or stand:GetAttribute("slimeUid")
         level = level or tonumber(stand:GetAttribute("level"))
         id = id or stand:GetAttribute("slimeId")
-        mutation = mutation or stand:GetAttribute("mutation")
     end
-    return uid, tonumber(level) or 1, id, mutation, data
+    return uid, tonumber(level) or 1, id
 end
 
-local function isLucky(def)
+local function isLucky(id)
+    local def = getCatalog(id)
     return def and tostring(def.Type or "") == "Lucky Block"
 end
 
-local function mutMulti(name)
-    if name == nil or name == "" or name == "None" then return 1 end
-    return MUTATION_MULTI[tostring(name)] or 1
-end
-
-local function rebirthMulti(data)
-    local L = lib()
-    local r = 1
-    if type(data) == "table" then
-        r = tonumber(data.Rebirth or data.Rebirths) or 1
-    end
-    if L and L.Rebirths then
-        local row = L.Rebirths[r] or L.Rebirths[tostring(r)]
-        if type(row) == "table" then
-            r = tonumber(row.CashMulti) or r
-        end
-    end
-    if r < 1 then r = 1 end
-    return r
-end
-
-local function earnFactor(level, R)
-    return R + (level ^ 1.05 - 1) * math.sqrt(R)
-end
-
--- extra cash/s you gain by buying this one level, per dollar of cost
-local function scoreUpgrade(level, sellPrice, baseMps, mutation, R, cash)
-    if not level or level >= MAX_LEVEL then return nil end
-    sellPrice = tonumber(sellPrice)
-    baseMps = tonumber(baseMps) or 0
-    if not sellPrice or sellPrice <= 0 then return nil end
-    local cost = math.round(sellPrice * 2 * GROWTH ^ (level - 1))
-    if cost <= 0 then return nil end
-    if type(cash) == "number" and cash < cost then
-        return nil, cost, "no cash"
-    end
-    local m = mutMulti(mutation)
-    local delta = baseMps * m * (earnFactor(level + 1, R) - earnFactor(level, R))
-    if delta < 0 then delta = 0 end
-    -- higher = more profit per cash. low level and high mutation win.
-    return delta / cost, cost, delta
-end
-
-local function fireSlot(slotName, uid, level)
+local function fireSlot(slotName)
     if LP:GetAttribute("OldDataMigrationLocked") == true then
         return false, "migration locked"
     end
+    local uid, level, id = readEntry(slotName)
+    if isLucky(id) then return false, "lucky" end
     if uid == nil then return false, "no uid" end
     slotName = tostring(slotName)
     local sent = false
@@ -259,7 +207,7 @@ local function fireSlot(slotName, uid, level)
         sent = pcall(function() raw:FireServer(slotName, 1, uid, level) end) or sent
     end
     if not sent then return false, "no remote" end
-    return true
+    return true, uid, level
 end
 
 local function listSlots()
@@ -290,45 +238,12 @@ local function listSlots()
             end
         end
     end
-    return out, data
-end
-
-local function pickBest()
-    local slots, data = listSlots()
-    local cash = data and tonumber(data.Cash)
-    local R = rebirthMulti(data)
-    local best = {}
-    for _, name in ipairs(slots) do
-        local uid, level, id, mutation = readEntry(name)
-        local def = getCatalog(id)
-        if isLucky(def) then
-            -- skip
-        elseif uid == nil then
-            -- skip
-        elseif level >= MAX_LEVEL then
-            -- skip
-        else
-            local sell = def and (def.SellPrice or def.sellPrice)
-            local mps = def and (def.MoneyPerSecond or def.production_mps)
-            local sc, cost, delta = scoreUpgrade(level, sell, mps, mutation, R, cash)
-            table.insert(best, {
-                name = name,
-                uid = uid,
-                level = level,
-                mutation = mutation or "None",
-                rarity = def and def.Rarity or "?",
-                score = sc or 0,
-                cost = cost or math.huge,
-                can = sc ~= nil,
-            })
-        end
-    end
-    table.sort(best, function(a, b)
-        if a.can ~= b.can then return a.can end
-        if a.score ~= b.score then return a.score > b.score end
-        return a.cost < b.cost
+    table.sort(out, function(a, b)
+        local na, nb = tonumber(a), tonumber(b)
+        if na and nb then return na < nb end
+        return a < b
     end)
-    return best
+    return out
 end
 
 btn.MouseButton1Click:Connect(function()
@@ -337,7 +252,7 @@ btn.MouseButton1Click:Connect(function()
         btn.Text = "Auto Upgrade: ON"
         btn.TextColor3 = Color3.fromRGB(90, 255, 140)
         btn.BackgroundColor3 = Color3.fromRGB(28, 55, 38)
-        setStatus("Running — best profit/cash")
+        setStatus("Running")
     else
         btn.Text = "Auto Upgrade: OFF"
         btn.TextColor3 = Color3.fromRGB(255, 110, 110)
@@ -364,31 +279,23 @@ end)
 task.spawn(function()
     while true do
         if on then
-            local ranked = pickBest()
-            local target
-            for _, row in ipairs(ranked) do
-                if row.can then
-                    target = row
-                    break
-                end
-            end
-            if not target then
-                setStatus("No affordable upgrade")
-                task.wait(0.6)
+            local slots = listSlots()
+            if #slots == 0 then
+                setStatus("No placed players found")
+                task.wait(0.5)
             else
-                local ok, err = fireSlot(target.name, target.uid, target.level)
-                if ok then
-                    setStatus(string.format(
-                        "Up %s lv%s %s %s",
-                        target.name,
-                        tostring(target.level),
-                        tostring(target.mutation),
-                        tostring(target.rarity)
-                    ))
-                else
-                    setStatus(string.format("slot %s: %s", target.name, tostring(err)))
+                local i = 1
+                while i <= #slots and on do
+                    local name = slots[i]
+                    local ok, a, b = fireSlot(name)
+                    if ok then
+                        setStatus(string.format("%d/%d slot %s lv %s", i, #slots, name, tostring(b)))
+                    else
+                        setStatus(string.format("%d/%d slot %s: %s", i, #slots, name, tostring(a)))
+                    end
+                    task.wait(DELAY)
+                    i = i + 1
                 end
-                task.wait(DELAY)
             end
         else
             task.wait(0.15)
