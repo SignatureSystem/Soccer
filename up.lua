@@ -1,257 +1,218 @@
--- Simple Auto Upgrade Spam
--- One button: toggles ON/OFF
--- Every 1 second: upgrade ALL placed stands in your base (no filters)
+-- Simple Auto Upgrade v3
+-- Server->client echo Cobalt saw:
+--   OnClientEvent(slot, uid, level)
+-- Live client request from CharacterBulkUpgradeController:
+--   FireServer(slot, mode, uid, level)
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
-
+local RS = game:GetService("ReplicatedStorage")
+local CoreGui = game:GetService("CoreGui")
 local LP = Players.LocalPlayer
-local PG = LP:WaitForChild("PlayerGui")
+local DELAY = 0.28
 
-local enabled = false
-local INTERVAL = 1.0
+local function hui()
+    local ok, h = pcall(function() return gethui and gethui() end)
+    if ok and h then return h end
+    return LP:FindFirstChild("PlayerGui") or CoreGui
+end
 
--- GUI
 pcall(function()
-    local old = PG:FindFirstChild("UpgradeSpamGui")
+    local p = hui()
+    local old = p and p:FindFirstChild("SimpleAutoUpgrade")
     if old then old:Destroy() end
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "UpgradeSpamGui"
+gui.Name = "SimpleAutoUpgrade"
 gui.ResetOnSpawn = false
-gui.Parent = PG
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+pcall(function()
+    if syn and syn.protect_gui then syn.protect_gui(gui) end
+end)
+gui.Parent = hui()
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 200, 0, 90)
-frame.Position = UDim2.new(0, 16, 0.4, 0)
+frame.Size = UDim2.fromOffset(240, 90)
+frame.Position = UDim2.new(0, 16, 0.45, 0)
 frame.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-frame.BorderSizePixel = 0
 frame.Active = true
 frame.Draggable = true
 frame.Parent = gui
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
 local btn = Instance.new("TextButton")
-btn.Size = UDim2.new(1, -20, 0, 40)
-btn.Position = UDim2.new(0, 10, 0, 10)
-btn.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
-btn.BorderSizePixel = 0
-btn.Text = "Upgrade Spam: OFF"
-btn.TextColor3 = Color3.fromRGB(255, 90, 90)
-btn.TextSize = 14
+btn.Size = UDim2.new(1, -16, 0, 40)
+btn.Position = UDim2.new(0, 8, 0, 8)
+btn.BackgroundColor3 = Color3.fromRGB(45, 32, 36)
+btn.Text = "Auto Upgrade: OFF"
+btn.TextColor3 = Color3.fromRGB(255, 110, 110)
+btn.TextSize = 15
 btn.Font = Enum.Font.GothamBold
 btn.Parent = frame
-Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
 
 local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -16, 0, 28)
-status.Position = UDim2.new(0, 8, 0, 54)
+status.Size = UDim2.new(1, -16, 0, 32)
+status.Position = UDim2.new(0, 8, 0, 50)
 status.BackgroundTransparency = 1
-status.Text = "Idle"
-status.TextColor3 = Color3.fromRGB(180, 190, 210)
+status.Text = "Booting..."
+status.TextColor3 = Color3.fromRGB(190, 190, 205)
 status.TextSize = 11
 status.Font = Enum.Font.Gotham
-status.TextXAlignment = Enum.TextXAlignment.Left
 status.TextWrapped = true
+status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = frame
 
-local function setOn(on)
-    enabled = on
-    if on then
-        btn.Text = "Upgrade Spam: ON"
-        btn.TextColor3 = Color3.fromRGB(80, 255, 120)
-        btn.BackgroundColor3 = Color3.fromRGB(28, 52, 36)
-        status.Text = "Spamming all slots every 1s..."
-    else
-        btn.Text = "Upgrade Spam: OFF"
-        btn.TextColor3 = Color3.fromRGB(255, 90, 90)
-        btn.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
-        status.Text = "Idle"
+local on = false
+local remote
+
+local function say(t) status.Text = tostring(t) end
+
+local function getRemote()
+    if remote and remote.Parent then return remote end
+    local ok, ev = pcall(function()
+        return RS.SharedModules.Network.Remotes["Upgrade Slime"]
+    end)
+    if ok and ev then
+        remote = ev
+        return ev
     end
+    for _, v in ipairs(RS:GetDescendants()) do
+        if v:IsA("RemoteEvent") and v.Name == "Upgrade Slime" then
+            remote = v
+            return v
+        end
+    end
+    return nil
+end
+
+local function getData()
+    local L = rawget(_G, "_Lib")
+    if L and L.Data then
+        local ok, data = pcall(function() return L.Data:Get() end)
+        if ok and type(data) == "table" then return data end
+    end
+    return nil
+end
+
+local function liveFolder()
+    local a = workspace:FindFirstChild("Live")
+    a = a and a:FindFirstChild("PlayerSlimes")
+    return a and a:FindFirstChild(LP.Name)
+end
+
+local function catalog(id)
+    local L = rawget(_G, "_Lib")
+    local cat = L and L.SoccerGameCatalog and L.SoccerGameCatalog.SoccerPlayerCatalog
+    if type(cat) == "table" then
+        return cat[id] or cat[tostring(id)] or cat[tonumber(id)]
+    end
+end
+
+local function slots()
+    local list, seen = {}, {}
+    local function add(name, uid, level, id)
+        name = tostring(name)
+        if name == "" or seen[name] then return end
+        seen[name] = true
+        table.insert(list, {name = name, uid = uid, level = tonumber(level) or 1, id = id})
+    end
+    local data = getData()
+    if data and type(data.PlotSlimes) == "table" then
+        for k, e in pairs(data.PlotSlimes) do
+            if type(e) == "table" then
+                add(k, e.uid or e.UID, e.level or e.Level, e.id or e.Id)
+            end
+        end
+    end
+    local folder = liveFolder()
+    if folder then
+        for _, m in ipairs(folder:GetChildren()) do
+            add(
+                m.Name,
+                m:GetAttribute("slimeUid") or m:GetAttribute("slimeUID"),
+                m:GetAttribute("level"),
+                m:GetAttribute("slimeId")
+            )
+        end
+    end
+    table.sort(list, function(a, b)
+        local na, nb = tonumber(a.name), tonumber(b.name)
+        if na and nb then return na < nb end
+        return a.name < b.name
+    end)
+    return list
+end
+
+local function fireOne(info)
+    local ev = getRemote()
+    if not ev then return false, "no remote" end
+    if info.uid == nil then return false, "no uid" end
+    local def = catalog(info.id)
+    if def and def.Type == "Lucky Block" then return false, "lucky" end
+
+    local slot = tonumber(info.name) or info.name
+    local uid = info.uid
+    local lv = info.level
+
+    -- 4-arg live Request()
+    pcall(function() ev:FireServer(slot, 1, uid, lv) end)
+    -- 3-arg shape Cobalt captured on the echo
+    pcall(function() ev:FireServer(slot, uid, lv) end)
+    -- string slot variants
+    pcall(function() ev:FireServer(tostring(slot), 1, uid, lv) end)
+    pcall(function() ev:FireServer(tostring(slot), uid, lv) end)
+
+    local L = rawget(_G, "_Lib")
+    if L and L.GameRemoteRegistry then
+        pcall(function()
+            L.GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent"):Fire(slot, 1, uid, lv)
+        end)
+    end
+    return true
 end
 
 btn.MouseButton1Click:Connect(function()
-    setOn(not enabled)
+    on = not on
+    btn.Text = on and "Auto Upgrade: ON" or "Auto Upgrade: OFF"
+    btn.TextColor3 = on and Color3.fromRGB(90, 255, 140) or Color3.fromRGB(255, 110, 110)
+    btn.BackgroundColor3 = on and Color3.fromRGB(28, 55, 38) or Color3.fromRGB(45, 32, 36)
+    say(on and "Running" or "Stopped")
 end)
 
---------------------------------------------------
--- Resolve "Upgrade Slime"
---------------------------------------------------
-local upgradeRemote
-local upgradeChannel
+task.spawn(function()
+    local t = os.clock()
+    while not getRemote() and os.clock() - t < 20 do
+        say("Finding Upgrade Slime...")
+        task.wait(0.3)
+    end
+    say(getRemote() and "Ready" or "Upgrade Slime missing")
+end)
 
-local function resolveUpgrade()
-    -- Preferred: game registry
-    local _Lib = rawget(_G, "_Lib")
-    if _Lib and _Lib.GameRemoteRegistry and typeof(_Lib.GameRemoteRegistry.new) == "function" then
-        local ok, ch = pcall(function()
-            return _Lib.GameRemoteRegistry.new("Upgrade Slime", "RemoteEvent")
-        end)
-        if ok and ch and typeof(ch.Fire) == "function" then
-            upgradeChannel = ch
-            return true
-        end
-    end
-    if _Lib and _Lib.Network and typeof(_Lib.Network.new) == "function" then
-        local ok, ch = pcall(function()
-            return _Lib.Network.new("Upgrade Slime", "RemoteEvent")
-        end)
-        if ok and ch and typeof(ch.Fire) == "function" then
-            upgradeChannel = ch
-            return true
-        end
-    end
-
-    if upgradeRemote and upgradeRemote.Parent and upgradeRemote:IsA("RemoteEvent") then
-        return true
-    end
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") and v.Name == "Upgrade Slime" then
-            upgradeRemote = v
-            return true
-        end
-    end
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") and string.find(string.lower(v.Name), "upgrade slime", 1, true) then
-            upgradeRemote = v
-            return true
-        end
-    end
-    return false
-end
-
-local function fireUpgrade(slotName)
-    slotName = tostring(slotName)
-    if upgradeChannel and typeof(upgradeChannel.Fire) == "function" then
-        local ok = pcall(function()
-            upgradeChannel:Fire(slotName)
-        end)
-        if ok then return true end
-        upgradeChannel = nil
-    end
-    if not resolveUpgrade() then
-        return false
-    end
-    if upgradeChannel and typeof(upgradeChannel.Fire) == "function" then
-        return pcall(function()
-            upgradeChannel:Fire(slotName)
-        end)
-    end
-    if upgradeRemote then
-        return pcall(function()
-            upgradeRemote:FireServer(slotName)
-        end)
-    end
-    return false
-end
-
---------------------------------------------------
--- Player data (PlotSlimes)
---------------------------------------------------
-local function getData()
-    local _Lib = rawget(_G, "_Lib")
-    if _Lib and _Lib.Data then
-        local d = _Lib.Data
-        if type(d) == "table" and (d.PlotSlimes or d.Inventory) then
-            return d
-        end
-    end
-    -- RemoteFunction fallback
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteFunction") and (v.Name == "Data: Get" or v.Name == "GetData") then
-            local ok, data = pcall(function()
-                return v:InvokeServer()
-            end)
-            if ok and type(data) == "table" then
-                return data
-            end
-        end
-    end
-    return nil
-end
-
-local function getMyPlot()
-    if rawget(_G, "MyPlot") and _G.MyPlot then
-        return _G.MyPlot
-    end
-    local plots = Workspace:FindFirstChild("Plots")
-    if not plots then return nil end
-    for _, plot in ipairs(plots:GetChildren()) do
-        local o = plot:FindFirstChild("owner") or plot:FindFirstChild("Owner")
-        if o and tostring(o.Value) == LP.Name then
-            return plot
-        end
-    end
-    return nil
-end
-
-local function getAllSlots()
-    local slots, seen = {}, {}
-    local function add(name)
-        name = tostring(name)
-        if name ~= "" and not seen[name] then
-            seen[name] = true
-            table.insert(slots, name)
-        end
-    end
-
-    local data = getData()
-    if data and type(data.PlotSlimes) == "table" then
-        for slotName, entry in pairs(data.PlotSlimes) do
-            if entry ~= nil then
-                add(slotName)
-            end
-        end
-    end
-
-    -- Fallback: every stand under your plot
-    if #slots == 0 then
-        local plot = getMyPlot()
-        local stands = plot and plot:FindFirstChild("Stands")
-        if stands then
-            for _, stand in ipairs(stands:GetChildren()) do
-                if stand:IsA("Model") or stand:IsA("Folder") then
-                    add(stand.Name)
-                end
-            end
-        end
-    end
-
-    table.sort(slots, function(a, b)
-        local an, bn = tonumber(a), tonumber(b)
-        if an and bn then return an < bn end
-        if an then return true end
-        if bn then return false end
-        return a < b
-    end)
-    return slots
-end
-
---------------------------------------------------
--- Loop: every 1s spam upgrade on all slots
---------------------------------------------------
 task.spawn(function()
     while true do
-        if enabled then
-            resolveUpgrade()
-            local slots = getAllSlots()
-            if #slots == 0 then
-                status.Text = "No placed slots found"
+        if on then
+            local list = slots()
+            if #list == 0 then
+                say("No placed players")
+                task.wait(0.5)
             else
-                local fired = 0
-                for _, slot in ipairs(slots) do
-                    if not enabled then break end
-                    if fireUpgrade(slot) then
-                        fired += 1
+                local i = 1
+                while i <= #list and on do
+                    local info = list[i]
+                    local ok, err = fireOne(info)
+                    if ok then
+                        say(string.format("%d/%d slot %s lv %d", i, #list, info.name, info.level))
+                    else
+                        say(string.format("%d/%d %s: %s", i, #list, info.name, tostring(err)))
                     end
+                    task.wait(DELAY)
+                    i = i + 1
                 end
-                status.Text = string.format("Upgraded %d / %d slots", fired, #slots)
             end
+        else
+            task.wait(0.15)
         end
-        task.wait(INTERVAL)
     end
 end)
-
-print("[UpgradeSpam] Loaded — toggle the button to spam Upgrade Slime on all base slots every 1s")
