@@ -134,33 +134,37 @@ local selectedUpgradeMutation = "All"
 -- Newest live entry: Coach Lucky Block.
 -- Also includes Backline Legends / Next Generation / Japan / Alternative / Icons tiers.
 -- The dropdown uses display labels; matching uses exact live model names.
+-- Coach / newest tiers first so they appear at the top of the dropdown
+-- without needing to scroll. Also includes Moon + US from latest dump.
 local LUCKY_BLOCK_OPTIONS = {
     "All",
-    "Common",
-    "Water",
-    "Rare",
-    "Volcanic",
-    "Epic",
-    "Ghost",
-    "Legendary",
-    "67",
-    "Mythic",
-    "Poison",
-    "Secret",
-    "Cosmic",
-    "Soccer God",
-    "Rainbow",
-    "Exclusive",
-    "Limited",
-    "OG",
-    "Champions",
-    "Spain",
-    "Icons",
-    "Japan",
-    "Alternative",
-    "Next Generation",
-    "Backline Legends",
     "Coach",
+    "Backline Legends",
+    "Next Generation",
+    "Alternative",
+    "Japan",
+    "Icons",
+    "Spain",
+    "Champions",
+    "OG",
+    "Limited",
+    "Exclusive",
+    "Rainbow",
+    "Soccer God",
+    "Cosmic",
+    "Secret",
+    "Poison",
+    "Mythic",
+    "67",
+    "Legendary",
+    "Ghost",
+    "Epic",
+    "Volcanic",
+    "Rare",
+    "Water",
+    "Common",
+    "Moon",
+    "US",
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
@@ -203,11 +207,21 @@ local LUCKY_BLOCK_MODEL_NAMES = {
         ["Backline Lucky Block"] = true,
         ["Backline Legends Block"] = true,
     },
+    -- Exact live model name from dump: "Coach Lucky Block"
     ["Coach"] = {
         ["Coach Lucky Block"] = true,
         ["Coach"] = true,
         ["Coaches"] = true,
         ["CoachesTactical"] = true,
+        ["Coaches Tactical"] = true,
+        ["Coach Block"] = true,
+        ["Coaches Lucky Block"] = true,
+    },
+    ["Moon"] = { ["Moon Lucky Block"] = true },
+    ["US"] = {
+        ["US Lucky Block"] = true,
+        ["USA Lucky Block"] = true,
+        ["United States Lucky Block"] = true,
     },
 }
 
@@ -838,7 +852,7 @@ Instance.new("UICorner", LuckyTypeDropBtn).CornerRadius = UDim.new(0, 8)
 
 LuckyTypeDropList = Instance.new("ScrollingFrame")
 LuckyTypeDropList.Name = "LuckyTypeDropList"
-LuckyTypeDropList.Size = UDim2.new(0, 220, 0, 190)
+LuckyTypeDropList.Size = UDim2.new(0, 220, 0, 260)
 LuckyTypeDropList.Position = UDim2.new(0, 15, 0, 130)
 LuckyTypeDropList.BackgroundColor3 = Color3.fromRGB(35, 28, 18)
 LuckyTypeDropList.BorderSizePixel = 0
@@ -2581,7 +2595,21 @@ local function getUnopenedLuckyBlockSlots(filterType)
 
             if filterType == "Coach" then
                 local rl = string.lower(r)
-                if rl == "coach" or rl == "coaches" then
+                if rl == "coach" or rl == "coaches" or rl == "coachestactical" then
+                    return true
+                end
+            end
+
+            if filterType == "Moon" then
+                local rl = string.lower(r)
+                if rl == "moon" then
+                    return true
+                end
+            end
+
+            if filterType == "US" then
+                local rl = string.lower(r)
+                if rl == "us" or rl == "usa" then
                     return true
                 end
             end
@@ -3588,7 +3616,7 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
 
         if filterType == "Coach" then
             local rl = string.lower(r)
-            if rl == "coach" or rl == "coaches" then
+            if rl == "coach" or rl == "coaches" or rl == "coachestactical" then
                 return true
             end
         end
@@ -3596,6 +3624,20 @@ local function luckyBlockToolMatchesType(tool, filterType, playerData, inventory
         if filterType == "Alternative" then
             local rl = string.lower(r)
             if rl == "alternative" or rl == "alternate" then
+                return true
+            end
+        end
+
+        if filterType == "Moon" then
+            local rl = string.lower(r)
+            if rl == "moon" then
+                return true
+            end
+        end
+
+        if filterType == "US" then
+            local rl = string.lower(r)
+            if rl == "us" or rl == "usa" then
                 return true
             end
         end
@@ -4748,13 +4790,39 @@ local function getTargetLuckyBlock()
                     local bn = blockNameAttr and string.lower(tostring(blockNameAttr)) or ""
                     return
                         lowerName:find("coach", 1, true)
+                        or lowerName:find("coaches", 1, true)
                         or r == "coach"
                         or r == "coaches"
+                        or r == "coachestactical"
                         or bn:find("coach", 1, true)
+                        or bn:find("coaches", 1, true)
+                end
+
+                local function matchesMoon()
+                    local r = rarityAttr and string.lower(tostring(rarityAttr)) or ""
+                    local bn = blockNameAttr and string.lower(tostring(blockNameAttr)) or ""
+                    return
+                        lowerName:find("moon", 1, true)
+                        or r == "moon"
+                        or bn:find("moon", 1, true)
+                end
+
+                local function matchesUS()
+                    local r = rarityAttr and string.lower(tostring(rarityAttr)) or ""
+                    local bn = blockNameAttr and string.lower(tostring(blockNameAttr)) or ""
+                    return
+                        lowerName:find("us lucky", 1, true)
+                        or lowerName == "us"
+                        or lowerName:find("usa", 1, true)
+                        or r == "us"
+                        or r == "usa"
+                        or bn:find("us", 1, true)
                 end
 
                 if selectedLuckyBlockType == "All" then
-                    if matchesCoach() or matchesBackline() or matchesNextGen() or matchesAlternative() then
+                    if matchesCoach() or matchesBackline() or matchesNextGen()
+                        or matchesAlternative() or matchesMoon() or matchesUS()
+                    then
                         matches = true
                     end
                 elseif selectedLuckyBlockType == "Coach" then
@@ -4765,6 +4833,10 @@ local function getTargetLuckyBlock()
                     matches = matchesNextGen()
                 elseif selectedLuckyBlockType == "Alternative" then
                     matches = matchesAlternative()
+                elseif selectedLuckyBlockType == "Moon" then
+                    matches = matchesMoon()
+                elseif selectedLuckyBlockType == "US" then
+                    matches = matchesUS()
                 elseif rarityAttr
                     and string.lower(tostring(rarityAttr))
                         == string.lower(selectedLuckyBlockType)
