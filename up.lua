@@ -1,5 +1,5 @@
--- Simple Auto Upgrade v2
--- Live packet: Upgrade Slime (slotName, 1, uid, level)
+-- Simple Auto Upgrade v2 - MAX version
+-- Live packet: Upgrade Slime (slotName, "Max", uid, level)
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -50,7 +50,7 @@ local btn = Instance.new("TextButton")
 btn.Size = UDim2.new(1, -16, 0, 40)
 btn.Position = UDim2.new(0, 8, 0, 8)
 btn.BackgroundColor3 = Color3.fromRGB(45, 32, 36)
-btn.Text = "Auto Upgrade: OFF"
+btn.Text = "MAX Upgrade: OFF"
 btn.TextColor3 = Color3.fromRGB(255, 110, 110)
 btn.TextSize = 15
 btn.Font = Enum.Font.GothamBold
@@ -196,16 +196,22 @@ local function fireSlot(slotName)
     local uid, level, id = readEntry(slotName)
     if isLucky(id) then return false, "lucky" end
     if uid == nil then return false, "no uid" end
+
     slotName = tostring(slotName)
     local sent = false
+
     local ch = getChannel()
     if ch then
-        sent = pcall(function() ch:Fire(slotName, 1, uid, level) end) or sent
+        -- MAX packet
+        sent = pcall(function() ch:Fire(slotName, "Max", uid, level) end) or sent
     end
+
     local raw = findRawRemote()
     if raw then
-        sent = pcall(function() raw:FireServer(slotName, 1, uid, level) end) or sent
+        -- MAX packet
+        sent = pcall(function() raw:FireServer(slotName, "Max", uid, level) end) or sent
     end
+
     if not sent then return false, "no remote" end
     return true, uid, level
 end
@@ -249,12 +255,12 @@ end
 btn.MouseButton1Click:Connect(function()
     on = not on
     if on then
-        btn.Text = "Auto Upgrade: ON"
+        btn.Text = "MAX Upgrade: ON"
         btn.TextColor3 = Color3.fromRGB(90, 255, 140)
         btn.BackgroundColor3 = Color3.fromRGB(28, 55, 38)
-        setStatus("Running")
+        setStatus("Running MAX")
     else
-        btn.Text = "Auto Upgrade: OFF"
+        btn.Text = "MAX Upgrade: OFF"
         btn.TextColor3 = Color3.fromRGB(255, 110, 110)
         btn.BackgroundColor3 = Color3.fromRGB(45, 32, 36)
         setStatus("Stopped")
@@ -276,6 +282,7 @@ task.spawn(function()
     setStatus(string.format("Ready | lib=%s remote=%s", lib() and "yes" or "no", raw and raw.Name or "missing"))
 end)
 
+-- Fire ALL slots at once every DELAY seconds
 task.spawn(function()
     while true do
         if on then
@@ -284,18 +291,13 @@ task.spawn(function()
                 setStatus("No placed players found")
                 task.wait(0.5)
             else
-                local i = 1
-                while i <= #slots and on do
-                    local name = slots[i]
-                    local ok, a, b = fireSlot(name)
-                    if ok then
-                        setStatus(string.format("%d/%d slot %s lv %s", i, #slots, name, tostring(b)))
-                    else
-                        setStatus(string.format("%d/%d slot %s: %s", i, #slots, name, tostring(a)))
-                    end
-                    task.wait(DELAY)
-                    i = i + 1
+                for _, name in ipairs(slots) do
+                    task.spawn(function()
+                        fireSlot(name)
+                    end)
                 end
+                setStatus("MAX fired on " .. #slots .. " slots")
+                task.wait(DELAY)
             end
         else
             task.wait(0.15)
