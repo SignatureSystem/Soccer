@@ -1,11 +1,11 @@
--- Minimal Backline Legends Lucky Block Stealer + timer + count
+-- Minimal Coach Lucky Block Stealer + timer + count
 -- Target ONLY:
---   Backline Legends Lucky Block | Rarity: Backline Legends | ID: 2625
+--   Coach Lucky Block | Rarity/Name: Coach / Coaches
 -- Auto-starts on execute.
 -- Steal flow:
 --   find target → solidify box → cloak → teleport EXACTLY on top (no hover lock)
 --   → zero HoldDuration → fire prompt → base on success
--- Fast scan; hops after 20s countdown or if no Backline after empty scans.
+-- Fast scan; hops after 20s countdown or if no Coach after empty scans.
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -17,32 +17,30 @@ local PG = LP:WaitForChild("PlayerGui")
 
 local TARGETS = {
     {
-        Key = "Backline Legends",
-        Name = "Backline Legends Lucky Block",
-        Rarity = "Backline Legends",
-        ID = "2625",
+        Key = "Coach",
+        Name = "Coach Lucky Block",
+        Rarity = "Coach",
+        ID = nil, -- no fixed ID; match by name
         Priority = 1,
     },
 }
 
 local LUCKY_BLOCK_MODEL_NAMES = {
-    ["Backline Legends"] = {
-        ["Backline Legends Lucky Block"] = true,
-        ["Backline Lucky Block"] = true,
-        ["Backline Legends Block"] = true,
+    ["Coach"] = {
+        ["Coach Lucky Block"] = true,
+        ["Coach"] = true,
+        ["Coaches"] = true,
+        ["CoachesTactical"] = true,
     },
 }
 
 local STAND_OFFSET = 3
--- If Backline is present, only try Backline for this many seconds before falling back to NextGen
-local BACKLINE_STEAL_TIMEOUT = 8
 
 local enabled, busy, total = true, false, 0
 local sessionStart = os.clock()
 
 local hopping = false
 local emptyScans = 0
-local backlineFocusStart = nil -- clock when we started exclusive Backline attempts
 
 local EMPTY_SCANS_BEFORE_HOP = 3
 local SCAN_EMPTY_WAIT = 0.15
@@ -89,7 +87,7 @@ local function fmtTime(sec)
 end
 
 
--- Returns target Key ("Backline Legends" / "Next Generation") or nil
+-- Returns target Key ("Coach") or nil
 local function classifyTargetBlock(m)
     if not m or not m:IsA("Model") then
         return nil
@@ -144,34 +142,31 @@ local function classifyTargetBlock(m)
         end
     end
 
-    -- CollectionService tags (game tags models "Backline Legends" / similar)
+    -- CollectionService tags
     pcall(function()
         local CS = game:GetService("CollectionService")
         for _, tag in ipairs(CS:GetTags(m)) do
             local tl = tostring(tag):lower()
-            if tl:find("backline", 1, true) then
-                r = r ~= "" and r or "backline legends"
-            elseif tl:find("next", 1, true) and tl:find("gen", 1, true) then
-                r = r ~= "" and r or "next generation"
+            if tl:find("coach", 1, true) then
+                r = r ~= "" and r or "coach"
             end
         end
     end)
 
     -- Exact model-name table match first
-    local blNames = LUCKY_BLOCK_MODEL_NAMES["Backline Legends"]
-    if blNames and blNames[modelName] then
-        return "Backline Legends"
+    local coachNames = LUCKY_BLOCK_MODEL_NAMES["Coach"]
+    if coachNames and coachNames[modelName] then
+        return "Coach"
     end
-    -- Backline (ID 2625)
-    if idStr == "2625"
-        or lowerName:find("backline", 1, true)
-        or r:find("backline", 1, true)
-        or bn:find("backline", 1, true)
+    -- Coach by name / rarity / attributes
+    if lowerName:find("coach", 1, true)
+        or r:find("coach", 1, true)
+        or bn:find("coach", 1, true)
     then
-        return "Backline Legends"
+        return "Coach"
     end
 
-    -- Next Generation intentionally ignored (Backline only)
+    -- Everything else ignored (Coach only)
     return nil
 end
 
@@ -292,9 +287,9 @@ end
 
 
 --------------------------------------------------
--- Find nearest Backline Legends target (cycle-style)
+-- Find nearest Coach target (cycle-style)
 --------------------------------------------------
--- preferredKind: "Backline Legends" | "Next Generation" | nil (either)
+-- preferredKind: "Coach" | nil
 local function getTargetLuckyBlock(preferredKind)
     local live = Workspace:FindFirstChild("Live")
     local slimes = live and live:FindFirstChild("Slimes")
@@ -319,7 +314,7 @@ local function getTargetLuckyBlock(preferredKind)
                         or 0
                     local pri = targetPriority(kind)
 
-                    -- Prefer closer; if roughly same distance, prefer Backline
+                    -- Prefer closer; if roughly same distance, prefer higher priority
                     local better =
                         dist + (pri * 0.01) < bestDist + (bestPri * 0.01)
 
@@ -367,20 +362,17 @@ local function countTargetBlocks()
         return 0, 0, 0
     end
 
-    local total, bl, ng = 0, 0, 0
+    local total, coachCount = 0, 0
     for _, m in ipairs(folder:GetChildren()) do
         if m:IsA("Model") and not m:GetAttribute("Carrying") then
             local kind = classifyTargetBlock(m)
-            if kind == "Backline Legends" then
-                bl += 1
-                total += 1
-            elseif kind == "Next Generation" then
-                ng += 1
+            if kind == "Coach" then
+                coachCount += 1
                 total += 1
             end
         end
     end
-    return total, bl, ng
+    return total, coachCount, 0
 end
 
 
@@ -472,7 +464,7 @@ local function stealOne(preferredKind)
         return "deposited"
     end
 
-    local block = getTargetLuckyBlock("Backline Legends")
+    local block = getTargetLuckyBlock("Coach")
         or getTargetLuckyBlock(nil)
     if not block then
         return false
@@ -834,7 +826,7 @@ pcall(function()
     for _, name in ipairs({
         "JapanStealer", "JIStealer", "AlternativeStealer",
         "AlternateStealer", "NextGenStealer", "NextGenerationStealer",
-        "BacklineStealer", "BacklineLegendsStealer"
+        "BacklineStealer", "BacklineLegendsStealer", "CoachStealer"
     }) do
         local old = PG:FindFirstChild(name)
         if old then
@@ -844,7 +836,7 @@ pcall(function()
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "BacklineStealer"
+gui.Name = "CoachStealer"
 gui.ResetOnSpawn = false
 gui.Parent = PG
 
@@ -863,7 +855,7 @@ btn.Size = UDim2.new(1, -20, 0, 34)
 btn.Position = UDim2.new(0, 10, 0, 8)
 btn.BackgroundColor3 = Color3.fromRGB(28, 52, 36)
 btn.BorderSizePixel = 0
-btn.Text = "Steal Backline: ON"
+btn.Text = "Steal Coach: ON"
 btn.TextColor3 = Color3.fromRGB(80, 255, 120)
 btn.TextSize = 14
 btn.Font = Enum.Font.GothamBold
@@ -896,7 +888,7 @@ statusLbl = Instance.new("TextLabel")
 statusLbl.Size = UDim2.new(1, -16, 0, 28)
 statusLbl.Position = UDim2.new(0, 8, 0, 92)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Text = "Auto-run | scanning Backline / NextGen..."
+statusLbl.Text = "Auto-run | scanning Coach only..."
 statusLbl.TextColor3 = Color3.fromRGB(180, 190, 210)
 statusLbl.TextSize = 11
 statusLbl.Font = Enum.Font.Gotham
@@ -907,7 +899,7 @@ statusLbl.Parent = f
 
 local function setOn(on)
     enabled = on
-    btn.Text = on and "Steal Backline: ON" or "Steal Backline: OFF"
+    btn.Text = on and "Steal Coach: ON" or "Steal Coach: OFF"
     btn.TextColor3 = on
         and Color3.fromRGB(80, 255, 120)
         or Color3.fromRGB(255, 90, 90)
@@ -918,11 +910,10 @@ local function setOn(on)
     if on then
         total = 0
         emptyScans = 0
-        backlineFocusStart = nil
         sessionStart = os.clock() -- restart 20s countdown
         countLbl.Text = "Collected: 0"
         timeLbl.Text = string.format("Hop in: %ds", MAX_SERVER_TIME)
-        statusLbl.Text = "Scanning Backline only..."
+        statusLbl.Text = "Scanning Coach only..."
     else
         busy = false
         statusLbl.Text = "Paused"
@@ -1011,12 +1002,12 @@ task.spawn(function()
             ------------------------------------------
             -- Presence scan
             ------------------------------------------
-            local targetCount, blCount, ngCount = countTargetBlocks()
+            local targetCount, coachCount = countTargetBlocks()
 
             if targetCount <= 0 then
                 emptyScans += 1
                 statusLbl.Text = string.format(
-                    "No Backline (%d/%d) — will hop",
+                    "No Coach (%d/%d) — will hop",
                     emptyScans,
                     EMPTY_SCANS_BEFORE_HOP
                 )
@@ -1032,14 +1023,14 @@ task.spawn(function()
 
             emptyScans = 0
             statusLbl.Text = string.format(
-                "Backline found (%d) — teleport on top",
-                blCount
+                "Coach found (%d) — teleport on top",
+                coachCount
             )
 
-            local okSteal, result = pcall(stealOne, "Backline Legends")
+            local okSteal, result = pcall(stealOne, "Coach")
             if not okSteal then
                 statusLbl.Text = "Steal error: " .. tostring(result):sub(1, 40)
-                warn("[HopBL/NG] stealOne", result)
+                warn("[CoachStealer] stealOne", result)
                 busy = false
                 task.wait(0.25)
                 continue
@@ -1056,7 +1047,6 @@ task.spawn(function()
                 total += 1
                 countLbl.Text = "Collected: " .. total
                 statusLbl.Text = "Stolen — depositing..."
-                backlineFocusStart = nil -- reset priority timer on success
 
                 task.wait(0.25)
                 toBase()
@@ -1070,10 +1060,9 @@ task.spawn(function()
                     task.wait(0.1)
                 end
 
-                statusLbl.Text = "Scanning Backline only..."
+                statusLbl.Text = "Scanning Coach only..."
             else
-                -- Failed attempt; keep backlineFocusStart running
-                statusLbl.Text = "Backline steal failed — retry"
+                statusLbl.Text = "Coach steal failed — retry"
                 task.wait(0.2)
             end
 
@@ -1086,7 +1075,7 @@ end)
 
 
 print(
-    "[BacklineStealer] ONLY Backline Legends (ID 2625)",
+    "[CoachStealer] ONLY Coach Lucky Block",
     "| teleport exactly ON TOP of box (no hover lock)",
     "| solidify + zero hold prompt",
     "| hop after empty scans or",
