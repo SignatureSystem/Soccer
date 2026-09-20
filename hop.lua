@@ -1,11 +1,11 @@
--- Minimal Coach Lucky Block Stealer + timer + count
+-- Minimal Spain Lucky Block Stealer + timer + count
 -- Target ONLY:
---   Coach Lucky Block | Rarity/Name: Coach / Coaches
+--   Spain Lucky Block | Rarity/Name: Spain
 -- Auto-starts on execute.
 -- Steal flow:
 --   find target → solidify box → cloak → teleport EXACTLY on top (no hover lock)
 --   → zero HoldDuration → fire prompt → base on success
--- Fast scan; hops after 20s countdown or if no Coach after empty scans.
+-- Fast scan; hops after 20s countdown or if no Spain after empty scans.
 
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
@@ -17,24 +17,20 @@ local PG = LP:WaitForChild("PlayerGui")
 
 local TARGETS = {
     {
-        Key = "Coach",
-        Name = "Coach Lucky Block",
-        Rarity = "Coach",
+        Key = "Spain",
+        Name = "Spain Lucky Block",
+        Rarity = "Spain",
         ID = nil, -- no fixed ID; match by name
         Priority = 1,
     },
 }
 
--- Exact live model names (aligned with working soccer Coach steal)
+-- Exact live model names for Spain
 local LUCKY_BLOCK_MODEL_NAMES = {
-    ["Coach"] = {
-        ["Coach Lucky Block"] = true,
-        ["Coach"] = true,
-        ["Coaches"] = true,
-        ["CoachesTactical"] = true,
-        ["Coaches Tactical"] = true,
-        ["Coach Block"] = true,
-        ["Coaches Lucky Block"] = true,
+    ["Spain"] = {
+        ["Spain Lucky Block"] = true,
+        ["Spain"] = true,
+        ["Spain Block"] = true,
     },
 }
 
@@ -91,7 +87,7 @@ local function fmtTime(sec)
 end
 
 
--- Returns target Key ("Coach") or nil
+-- Returns target Key ("Spain") or nil
 local function classifyTargetBlock(m)
     if not m or not m:IsA("Model") then
         return nil
@@ -151,32 +147,28 @@ local function classifyTargetBlock(m)
         local CS = game:GetService("CollectionService")
         for _, tag in ipairs(CS:GetTags(m)) do
             local tl = tostring(tag):lower()
-            if tl:find("coach", 1, true) then
-                r = r ~= "" and r or "coach"
+            if tl:find("spain", 1, true) then
+                r = r ~= "" and r or "spain"
             end
         end
     end)
 
-    -- Exact model-name table match first (same names as working soccer script)
-    local coachNames = LUCKY_BLOCK_MODEL_NAMES["Coach"]
-    if coachNames and coachNames[modelName] then
-        return "Coach"
+    -- Exact model-name table match first
+    local spainNames = LUCKY_BLOCK_MODEL_NAMES["Spain"]
+    if spainNames and spainNames[modelName] then
+        return "Spain"
     end
 
-    -- Same fallback style as working soccer matchesCoach()
-    if lowerName:find("coach", 1, true)
-        or lowerName:find("coaches", 1, true)
-        or r == "coach"
-        or r == "coaches"
-        or r == "coachestactical"
-        or r:find("coach", 1, true)
-        or bn:find("coach", 1, true)
-        or bn:find("coaches", 1, true)
+    -- Spain by name / rarity / attributes
+    if lowerName:find("spain", 1, true)
+        or r == "spain"
+        or r:find("spain", 1, true)
+        or bn:find("spain", 1, true)
     then
-        return "Coach"
+        return "Spain"
     end
 
-    -- Everything else ignored (Coach only)
+    -- Everything else ignored (Spain only)
     return nil
 end
 
@@ -297,9 +289,9 @@ end
 
 
 --------------------------------------------------
--- Find nearest Coach target (cycle-style)
+-- Find nearest Spain target (cycle-style)
 --------------------------------------------------
--- preferredKind: "Coach" | nil
+-- preferredKind: "Spain" | nil
 local function getTargetLuckyBlock(preferredKind)
     local live = Workspace:FindFirstChild("Live")
     local slimes = live and live:FindFirstChild("Slimes")
@@ -372,17 +364,17 @@ local function countTargetBlocks()
         return 0, 0, 0
     end
 
-    local total, coachCount = 0, 0
+    local total, spainCount = 0, 0
     for _, m in ipairs(folder:GetChildren()) do
         if m:IsA("Model") and not m:GetAttribute("Carrying") then
             local kind = classifyTargetBlock(m)
-            if kind == "Coach" then
-                coachCount += 1
+            if kind == "Spain" then
+                spainCount += 1
                 total += 1
             end
         end
     end
-    return total, coachCount, 0
+    return total, spainCount, 0
 end
 
 
@@ -474,7 +466,7 @@ local function stealOne(preferredKind)
         return "deposited"
     end
 
-    local block = getTargetLuckyBlock("Coach")
+    local block = getTargetLuckyBlock("Spain")
         or getTargetLuckyBlock(nil)
     if not block then
         return false
@@ -836,7 +828,7 @@ pcall(function()
     for _, name in ipairs({
         "JapanStealer", "JIStealer", "AlternativeStealer",
         "AlternateStealer", "NextGenStealer", "NextGenerationStealer",
-        "BacklineStealer", "BacklineLegendsStealer", "CoachStealer"
+        "BacklineStealer", "BacklineLegendsStealer", "CoachStealer", "SpainStealer"
     }) do
         local old = PG:FindFirstChild(name)
         if old then
@@ -846,7 +838,7 @@ pcall(function()
 end)
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "CoachStealer"
+gui.Name = "SpainStealer"
 gui.ResetOnSpawn = false
 gui.Parent = PG
 
@@ -865,7 +857,7 @@ btn.Size = UDim2.new(1, -20, 0, 34)
 btn.Position = UDim2.new(0, 10, 0, 8)
 btn.BackgroundColor3 = Color3.fromRGB(28, 52, 36)
 btn.BorderSizePixel = 0
-btn.Text = "Steal Coach: ON"
+btn.Text = "Steal Spain: ON"
 btn.TextColor3 = Color3.fromRGB(80, 255, 120)
 btn.TextSize = 14
 btn.Font = Enum.Font.GothamBold
@@ -898,7 +890,7 @@ statusLbl = Instance.new("TextLabel")
 statusLbl.Size = UDim2.new(1, -16, 0, 28)
 statusLbl.Position = UDim2.new(0, 8, 0, 92)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Text = "Auto-run | scanning Coach only..."
+statusLbl.Text = "Auto-run | scanning Spain only..."
 statusLbl.TextColor3 = Color3.fromRGB(180, 190, 210)
 statusLbl.TextSize = 11
 statusLbl.Font = Enum.Font.Gotham
@@ -909,7 +901,7 @@ statusLbl.Parent = f
 
 local function setOn(on)
     enabled = on
-    btn.Text = on and "Steal Coach: ON" or "Steal Coach: OFF"
+    btn.Text = on and "Steal Spain: ON" or "Steal Spain: OFF"
     btn.TextColor3 = on
         and Color3.fromRGB(80, 255, 120)
         or Color3.fromRGB(255, 90, 90)
@@ -923,7 +915,7 @@ local function setOn(on)
         sessionStart = os.clock() -- restart 20s countdown
         countLbl.Text = "Collected: 0"
         timeLbl.Text = string.format("Hop in: %ds", MAX_SERVER_TIME)
-        statusLbl.Text = "Scanning Coach only..."
+        statusLbl.Text = "Scanning Spain only..."
     else
         busy = false
         statusLbl.Text = "Paused"
@@ -1012,12 +1004,12 @@ task.spawn(function()
             ------------------------------------------
             -- Presence scan
             ------------------------------------------
-            local targetCount, coachCount = countTargetBlocks()
+            local targetCount, spainCount = countTargetBlocks()
 
             if targetCount <= 0 then
                 emptyScans += 1
                 statusLbl.Text = string.format(
-                    "No Coach (%d/%d) — will hop",
+                    "No Spain (%d/%d) — will hop",
                     emptyScans,
                     EMPTY_SCANS_BEFORE_HOP
                 )
@@ -1033,14 +1025,14 @@ task.spawn(function()
 
             emptyScans = 0
             statusLbl.Text = string.format(
-                "Coach found (%d) — teleport on top",
-                coachCount
+                "Spain found (%d) — teleport on top",
+                spainCount
             )
 
-            local okSteal, result = pcall(stealOne, "Coach")
+            local okSteal, result = pcall(stealOne, "Spain")
             if not okSteal then
                 statusLbl.Text = "Steal error: " .. tostring(result):sub(1, 40)
-                warn("[CoachStealer] stealOne", result)
+                warn("[SpainStealer] stealOne", result)
                 busy = false
                 task.wait(0.25)
                 continue
@@ -1070,9 +1062,9 @@ task.spawn(function()
                     task.wait(0.1)
                 end
 
-                statusLbl.Text = "Scanning Coach only..."
+                statusLbl.Text = "Scanning Spain only..."
             else
-                statusLbl.Text = "Coach steal failed — retry"
+                statusLbl.Text = "Spain steal failed — retry"
                 task.wait(0.2)
             end
 
@@ -1085,7 +1077,7 @@ end)
 
 
 print(
-    "[CoachStealer] ONLY Coach Lucky Block",
+    "[SpainStealer] ONLY Spain Lucky Block",
     "| teleport exactly ON TOP of box (no hover lock)",
     "| solidify + zero hold prompt",
     "| hop after empty scans or",
