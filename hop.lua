@@ -25,12 +25,16 @@ local TARGETS = {
     },
 }
 
+-- Exact live model names (aligned with working soccer Coach steal)
 local LUCKY_BLOCK_MODEL_NAMES = {
     ["Coach"] = {
         ["Coach Lucky Block"] = true,
         ["Coach"] = true,
         ["Coaches"] = true,
         ["CoachesTactical"] = true,
+        ["Coaches Tactical"] = true,
+        ["Coach Block"] = true,
+        ["Coaches Lucky Block"] = true,
     },
 }
 
@@ -153,15 +157,21 @@ local function classifyTargetBlock(m)
         end
     end)
 
-    -- Exact model-name table match first
+    -- Exact model-name table match first (same names as working soccer script)
     local coachNames = LUCKY_BLOCK_MODEL_NAMES["Coach"]
     if coachNames and coachNames[modelName] then
         return "Coach"
     end
-    -- Coach by name / rarity / attributes
+
+    -- Same fallback style as working soccer matchesCoach()
     if lowerName:find("coach", 1, true)
+        or lowerName:find("coaches", 1, true)
+        or r == "coach"
+        or r == "coaches"
+        or r == "coachestactical"
         or r:find("coach", 1, true)
         or bn:find("coach", 1, true)
+        or bn:find("coaches", 1, true)
     then
         return "Coach"
     end
